@@ -330,7 +330,7 @@ async fn a_one_byte_limit_fails_value_injection_with_teardown_observations() {
 #[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let gateway = ScriptedChat::new(vec![text("aliased final")]);
-    let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
+    let (tool, called) = scoped_tool("echo", "Echo a test value.");
     let source = "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
          # Lifecycle\n\n```lua\n\
          models.default('writer')\n```\n\n\
@@ -346,7 +346,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let (prompt, parse_events) = Prompt::parse(source, EXECUTION);
     crate::test_support::forward(parse_events, recorder.as_ref());
     let prompt = prompt.expect("the lifecycle fixture must parse");
-    let tools: [Arc<dyn TestTool>; 1] = [Arc::clone(&tool) as Arc<dyn TestTool>];
+    let tools: [Arc<dyn TestTool>; 1] = [Arc::new(tool)];
     let prompt = TestPrompt {
         prompt,
         models: test_model_catalog(),
@@ -370,7 +370,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
 
     assert_eq!(result, "aliased final");
     assert_eq!(store.read("state.txt").unwrap(), "before\nafter");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(called.load(Ordering::SeqCst), 1);
     let records = recorder.records();
     assert!(!records.is_empty());
     assert!(

@@ -39,12 +39,6 @@ impl Scheduler {
             .insert(name.to_owned(), DispatchTarget::Bound(tool));
     }
 
-    /// The number of leaf effects the run has issued so far, so a test
-    /// can prove a dispatch was answered inline with no effect issued.
-    pub(crate) fn leaf_requests_issued(&self) -> u64 {
-        self.next_effect
-    }
-
     /// The state of one task's slot, or `None` when no task with that id
     /// was ever started, so a test can prove a chain's end moved its slot.
     pub(crate) fn task_state_for_test(&self, task: &TaskId) -> Option<TaskState> {

@@ -683,7 +683,7 @@ The rulebook-fix plan starts only after this plan's close commit. Every step run
 
 <step-10>
 
-### Step 10: Engine tool loops on FnTool
+### Step 10: Engine tool loops on FnTool [completed]
 
 - Component: engine Run level
 - Tests:

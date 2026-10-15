@@ -170,7 +170,7 @@ async fn debug_capture_none_changes_nothing() {
 
 #[tokio::test]
 async fn tool_calls_count_increments_on_successful_dispatch() {
-    let tool = Arc::new(ScopedFixtureTool::new("echo", "Echo a test value."));
+    let (tool, called) = scoped_tool("echo", "Echo a test value.");
     let md = "---\nname: t\ndescription: d\npromptforge: 0\nplugins:\n  - tools\nmodels:\n  writer: {}\n---\n\n\
         # Test prompt\n\n```lua\nrequire '## setup'\n```\n\n\
         ## Only\n\n\
@@ -185,19 +185,19 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     let out = run(
         &prompt,
         "",
-        &[Arc::clone(&tool) as Arc<dyn TestTool>],
+        &[Arc::new(tool) as Arc<dyn TestTool>],
         &TestStore::new(),
         silent(),
     )
     .await
     .unwrap();
     assert_eq!(out, "ok");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(called.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_calls_count_increments_even_when_tool_errors() {
-    // Drive a real `FailingTool` through a `models.loop` round and prove
+    // Drive the failing fixture tool through a `models.loop` round and prove
     // `tools.calls` records exactly one call even though the tool errors
     // (the count is incremented before dispatch). The tool's own failure is
     // the call's error result, so the loop continues to the terminal reply.
@@ -216,7 +216,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
          return msgs[#msgs].content .. '|' .. tostring(tools.calls['tools/failing'])",
     );
     let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(FailingTool)));
+    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(failing_tool())));
     let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
         .drive()
         .await
@@ -278,8 +278,8 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         ```lua\nassert(tools.calls['tools/search'] > 0, 'search was never called')\n\
         return 'unreached'\n```\n\n\
         ## setup\n\n```lua\nmodels.default('writer')\n```\n";
-    let search = ScopedFixtureTool::new("search", "Search for things.");
-    let other = ScopedFixtureTool::new("other", "Other things.");
+    let (search, _) = scoped_tool("search", "Search for things.");
+    let (other, _) = scoped_tool("other", "Other things.");
     let prompt = bound_with_tools(md);
     let error = run(
         &prompt,
@@ -310,7 +310,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_seeded_set() {
         ```lua\nlocal _ = tools.calls['tools/serach']\n\
         return 'unreached'\n```\n\n\
         ## setup\n\n```lua\nmodels.default('writer')\n```\n";
-    let tool = ScopedFixtureTool::new("search", "Search for things.");
+    let (tool, _) = scoped_tool("search", "Search for things.");
     let prompt = bound_with_tools(md);
     let error = run(
         &prompt,

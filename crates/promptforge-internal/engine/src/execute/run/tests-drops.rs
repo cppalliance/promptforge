@@ -7,23 +7,22 @@
 //! `tasks.join` waits and the model's `await_tasks`, and under a run cancel,
 //! where the drop wakes no one.
 
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::ids::RoundId;
-use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_types::models::ThinkingMode;
 use promptforge_types::tools::{ToolCatalog, ToolDescriptor, ToolId};
 use serde_json::json;
 
-use super::{only_effect, run_context};
+use super::run_context;
 use crate::execute::RunResult;
 use crate::execute::run::{
     AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,
 };
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::parser::Prompt;
-use crate::test_support::scenario::chat_answer;
+use crate::test_support::scenario::{chat_answer, only_effect, test_model_with};
 use crate::test_support::scripted_chat::text;
 
 /// A run over one section whose Lua is `body`, with the `writer` role
@@ -44,12 +43,7 @@ fn bound_sections(sections: &str) -> Run {
     let prompt = Prompt::parse(&source, "run-test")
         .0
         .expect("the drop test prompt parses");
-    let model = ModelDescriptor::new(
-        ModelId::gateway("test-model").expect("a valid model id"),
-        "Plays the model",
-        NonZeroU32::new(4096).expect("4096 is non-zero"),
-        ThinkingMode::Never,
-    );
+    let model = test_model_with("test-model", 4096, ThinkingMode::Never);
     let echo = ToolDescriptor::new(
         ToolId::parse("tools/echo").expect("a valid tool id"),
         "Echoes its value.",

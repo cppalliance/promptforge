@@ -9,50 +9,34 @@ use crate::execute::scope::{DispatchTarget, prepare_scoped_tools};
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_types::plugins::PluginId;
 
-/// A catalog tool under any id, echoing its `value` argument.
-struct Offered {
-    id: &'static str,
-    schema: Value,
-}
-
-impl Offered {
-    fn at(id: &'static str) -> Arc<dyn TestTool> {
-        Arc::new(Self {
-            id,
-            schema: json!({ "type": "object", "properties": { "value": { "type": "string" } } }),
-        })
-    }
-
-    /// A tool whose parameters are not a JSON object, which no model
-    /// round can advertise.
-    fn shapeless(id: &'static str) -> Arc<dyn TestTool> {
-        Arc::new(Self {
-            id,
-            schema: json!("scalar"),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl TestTool for Offered {
-    fn id(&self) -> ToolId {
-        ToolId::parse(self.id).expect("valid id")
-    }
-
-    fn description(&self) -> &str {
-        self.id
-    }
-
-    fn parameters_schema(&self) -> Value {
-        self.schema.clone()
-    }
-
-    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
+/// A catalog tool under any id, described by its id, echoing its `value`
+/// argument as `<id>: <value>`, with parameters `schema`.
+#[track_caller]
+fn tool_at(id: &str, schema: Value) -> Arc<dyn TestTool> {
+    let label = id.to_owned();
+    let tool = FnTool::new(id, schema, move |args| {
         let value = args["value"]
             .as_str()
             .ok_or_else(|| ToolError::message("the value argument is required"))?;
-        Ok(ToolOutput::trusted(format!("{}: {value}", self.id)))
-    }
+        Ok(ToolOutput::trusted(format!("{label}: {value}")))
+    });
+    Arc::new(tool.description(id))
+}
+
+/// A catalog tool under `id` taking a string `value`.
+#[track_caller]
+fn offered_tool(id: &str) -> Arc<dyn TestTool> {
+    tool_at(
+        id,
+        json!({ "type": "object", "properties": { "value": { "type": "string" } } }),
+    )
+}
+
+/// A tool whose parameters are not a JSON object, which no model round can
+/// advertise.
+#[track_caller]
+fn shapeless_tool(id: &str) -> Arc<dyn TestTool> {
+    tool_at(id, json!("scalar"))
 }
 
 /// Prepares `prompt` against a catalog of `tools` and builds the run state
@@ -104,12 +88,12 @@ fn the_offering_binds_every_catalog_tool_under_its_wire_name_in_id_order() {
     let (ctx, _) = offering_context(
         &prompt,
         &[
-            Arc::new(EchoTool),
-            Offered::at("tools/concrete"),
-            Offered::at("gh/search"),
-            Offered::at("alpha/zed"),
-            Offered::at("gh/issues.list"),
-            Offered::at("alpha/fetch"),
+            Arc::new(echo_tool()),
+            offered_tool("tools/concrete"),
+            offered_tool("gh/search"),
+            offered_tool("alpha/zed"),
+            offered_tool("gh/issues.list"),
+            offered_tool("alpha/fetch"),
         ],
     );
     assert_eq!(
@@ -151,13 +135,13 @@ fn the_offering_leaves_out_a_name_that_is_reserved_unadvertisable_or_repeated() 
     let (ctx, _) = offering_context(
         &prompt,
         &[
-            Arc::new(EchoTool),
-            Offered::at("gh/list"),
-            Offered::at("task/cancel"),
-            Offered::shapeless("bad/shape"),
-            Offered::at("dup/a.b"),
-            Offered::at("dup/a/b"),
-            Offered::at("ok/fine"),
+            Arc::new(echo_tool()),
+            offered_tool("gh/list"),
+            offered_tool("task/cancel"),
+            shapeless_tool("bad/shape"),
+            offered_tool("dup/a.b"),
+            offered_tool("dup/a/b"),
+            offered_tool("ok/fine"),
         ],
     );
     assert_eq!(
@@ -187,7 +171,7 @@ async fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_w
          models.loop(history)\n\
          return 'ok'",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool)]);
+    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(echo_tool())]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
@@ -228,7 +212,7 @@ async fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offe
          return tools.call(tool, { value = 'a' }) .. '|' .. \
            tools.call('tools/echo', { value = 'b' }) .. '|' .. tool.id",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool)]);
+    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(echo_tool())]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls reach the tool");
@@ -295,7 +279,8 @@ async fn a_script_offers_a_declared_plugins_tools_and_the_model_calls_one_by_its
          models.loop(history)\n\
          return 'ok'",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let (ctx, fixture) =
+        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
@@ -326,7 +311,8 @@ async fn a_script_offers_an_extra_plugins_tools_after_checking_plugins_get() {
          models.loop(history)\n\
          return 'ok'",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let (ctx, fixture) =
+        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("the loop completes");
@@ -351,7 +337,8 @@ async fn the_plugins_table_is_installed_in_the_h1_vm() {
            tostring(tools.get('gh/search').plugin == plugins.get('gh'))\n\
          ```\n",
     );
-    let (ctx, fixture) = offering_context(&prompt, &[Arc::new(EchoTool), Offered::at("gh/search")]);
+    let (ctx, fixture) =
+        offering_context(&prompt, &[Arc::new(echo_tool()), offered_tool("gh/search")]);
     let out = TokioDriver::new(&ctx, fixture, None)
         .drive()
         .await
@@ -361,7 +348,7 @@ async fn the_plugins_table_is_installed_in_the_h1_vm() {
 
 #[test]
 fn a_round_leaves_out_an_offered_binding_a_local_tool_shares_a_name_with() {
-    let offered = crate::lua::ToolBinding::from_descriptor("tools_echo", &EchoTool.descriptor());
+    let offered = crate::lua::ToolBinding::from_descriptor("tools_echo", &echo_tool().descriptor());
     let local = tool_schema_new("tools_echo", "the local echo", json!({ "type": "object" }))
         .expect("the local schema is valid");
     let (schemas, dispatch) =

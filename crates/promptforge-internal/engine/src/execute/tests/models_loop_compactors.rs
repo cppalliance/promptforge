@@ -5,26 +5,23 @@
 //! raises its own failure. The loop's round mechanics sit in
 //! `models_loop`; its exit rules in `exit_rules`.
 
-use super::models_loop::{loop_context, loop_prompt};
-use super::*;
-use crate::lua::{OverflowReason, ToolSet};
-use crate::test_support::tokio_driver::TokioDriver;
+use promptforge_parser::test_support::one_section;
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {
+use super::models_loop::loop_scenario;
+use super::*;
+use crate::lua::OverflowReason;
+
+#[test]
+fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() {
     let gateway = ScriptedChat::new(vec![text("unreachable")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user(string.rep('x', 100000))
+         models.loop(msgs)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("an over-window request must exhaust the context");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    let error = trace.error().inner();
     assert!(
         matches!(
             error,
@@ -41,48 +38,40 @@ async fn an_omitted_compactor_defaults_to_fail_with_typed_precheck_exhaustion() 
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_raises_context_exhaustion_at_the_call_site() {
+#[test]
+fn models_loop_raises_context_exhaustion_at_the_call_site() {
     let gateway = ScriptedChat::new(vec![text("unreachable")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'the overflow raises')\n\
-         assert(#msgs == 1, 'a refused dispatch appends nothing')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user(string.rep('x', 100000))
+         local ok, err = pcall(models.loop, msgs)
+         assert(not ok, 'the overflow raises')
+         assert(#msgs == 1, 'a refused dispatch appends nothing')
          return tostring(err)",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    let out = trace.text();
     assert!(
         out.starts_with("context exhausted: "),
         "the raised error is the typed exhaustion's message, got: {out}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
+#[test]
+fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
     let gateway = ScriptedChat::new(vec![fail(
         crate::model::CompletionErrorKind::ContextOverflow,
         400,
         "This model's maximum context length is 4096 tokens.",
     )]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('a small prompt')\n\
-         models.loop(msgs, compactors.fail)\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('a small prompt')
+         models.loop(msgs, compactors.fail)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a provider context rejection must exhaust the context");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    let error = trace.error().inner();
     assert!(
         matches!(
             error,
@@ -95,40 +84,35 @@ async fn an_explicit_compactors_fail_invocation_reports_the_provider_reason() {
     assert_eq!(gateway.call_count(), 1, "the request left and was rejected");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names() {
+#[test]
+fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names() {
     // The argument error is pcall-able at the call site and names the
     // value's type as the protocol parse does: an integer is "integer",
     // a float "number", anything else its Lua type name. No round runs.
     // Each value is passed to `models.loop` and to a handle's `loop`;
     // both entries reach the compactor check.
     let gateway = ScriptedChat::new(vec![text("unreachable")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('hello')\n\
-         local writer = models.get('writer')\n\
-         local function refusal(entry, ...)\n\
-           local ok, err = pcall(entry, ...)\n\
-           assert(not ok, 'a non-function compactor raises')\n\
-           assert(err.kind == 'lua', 'the argument error is the lua kind')\n\
-           return tostring(err)\n\
-         end\n\
-         local out = {}\n\
-         for _, bad in ipairs({ 42, 4.5, 'summarize', {} }) do\n\
-           out[#out + 1] = refusal(models.loop, msgs, bad)\n\
-           out[#out + 1] = refusal(writer.loop, writer, msgs, bad)\n\
-         end\n\
-         assert(#msgs == 1, 'a refused call appends nothing')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('hello')
+         local writer = models.get('writer')
+         local function refusal(entry, ...)
+           local ok, err = pcall(entry, ...)
+           assert(not ok, 'a non-function compactor raises')
+           assert(err.kind == 'lua', 'the argument error is the lua kind')
+           return tostring(err)
+         end
+         local out = {}
+         for _, bad in ipairs({ 42, 4.5, 'summarize', {} }) do
+           out[#out + 1] = refusal(models.loop, msgs, bad)
+           out[#out + 1] = refusal(writer.loop, writer, msgs, bad)
+         end
+         assert(#msgs == 1, 'a refused call appends nothing')
          return table.concat(out, '|')",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = loop_scenario(source).chat(&gateway).run();
     assert_eq!(
-        out,
+        trace.text(),
         "compactor must be a function, got integer\
          |compactor must be a function, got integer\
          |compactor must be a function, got number\
@@ -145,32 +129,28 @@ async fn a_non_function_compactor_is_the_calls_error_in_the_engines_type_names()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
+#[test]
+fn a_compactor_that_returns_is_the_deferred_replacement_error() {
     // A compactor that returns a replacement instead of raising is refused:
     // the loop raises a `lua`-kind error naming the one shipped policy, and
     // appends nothing.
-    let client = OverflowClient::default();
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('a small prompt')\n\
-         local seen\n\
-         local ok, err = pcall(models.loop, msgs, function(reason)\n\
-           seen = reason\n\
-           return { role = 'user', content = 'summary' }\n\
-         end)\n\
-         assert(not ok, 'a returning compactor raises')\n\
-         assert(seen == 'provider', 'the compactor ran with the reason tag')\n\
-         assert(#msgs == 1, 'the refused round appends nothing')\n\
+    let rounds = Arc::new(AtomicUsize::new(0));
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('a small prompt')
+         local seen
+         local ok, err = pcall(models.loop, msgs, function(reason)
+           seen = reason
+           return { role = 'user', content = 'summary' }
+         end)
+         assert(not ok, 'a returning compactor raises')
+         assert(seen == 'provider', 'the compactor ran with the reason tag')
+         assert(#msgs == 1, 'the refused round appends nothing')
          return err.kind .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
-    let (kind, message) = out
+    let trace = loop_scenario(source).chat_with(overflowing(&rounds)).run();
+    let (kind, message) = trace
+        .text()
         .split_once('|')
         .expect("the section returns kind|message");
     assert_eq!(kind, "lua");
@@ -179,67 +159,58 @@ async fn a_compactor_that_returns_is_the_deferred_replacement_error() {
         "a returned replacement names the deferred framework, got: {message}"
     );
     assert_eq!(
-        client.calls.load(Ordering::SeqCst),
+        rounds.load(Ordering::SeqCst),
         1,
         "the request left and was rejected"
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancel_during_a_looping_compactor_returns_promptly() {
-    use std::time::{Duration, Instant};
-
-    let gateway = ScriptedChat::new(vec![text("unreachable")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user(string.rep('x', 100000))\n\
-         models.loop(msgs, function() while true do end end)\n\
+#[test]
+fn cancel_during_a_looping_compactor_returns_promptly() {
+    // The first round's answer hands control to the block, whose next call
+    // overflows the precheck and enters the looping compactor in the same
+    // step. A cancel landing before that step starts ends the run the same
+    // way, and a hang fails through nextest's timeout.
+    let gateway = ScriptedChat::new(vec![text("first"), text("unreachable")]);
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('hello')
+         models.loop(msgs)
+         msgs:user(string.rep('x', 100000))
+         models.loop(msgs, function() while true do end end)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let canceller = driver.cancel_handle();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        canceller.cancel();
-    });
-
-    let start = Instant::now();
-    let result = driver.drive().await;
-
+    let trace = loop_scenario(source)
+        .chat(&gateway)
+        .cancel_when(|effect| matches!(effect, Effect::Chat { .. }))
+        .run();
     assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "cancel during a looping compactor must return promptly, took {:?}",
-        start.elapsed()
+        matches!(trace.result(), RunResult::Cancelled),
+        "expected the cancelled run, got {:?}",
+        trace.result()
     );
-    assert!(
-        matches!(result, Err(crate::Error::Interrupted)),
-        "expected Interrupted, got {result:?}"
+    assert_eq!(
+        gateway.call_count(),
+        1,
+        "the precheck refuses the overflowing round before it leaves"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_compactors_own_string_raise_reaches_the_caller_with_the_reason_tag() {
+#[test]
+fn a_compactors_own_string_raise_reaches_the_caller_with_the_reason_tag() {
     // An author compactor's own untyped raise is re-raised as the value it
     // raised: a bare string passes through the normalizer untouched and
     // fails the section as the ordinary Lua runtime error holding the
     // reason tag the compactor was invoked with.
-    let client = OverflowClient::default();
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('a small prompt')\n\
-         models.loop(msgs, function(reason) error('custom failure: ' .. reason, 0) end)\n\
+    let rounds = Arc::new(AtomicUsize::new(0));
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('a small prompt')
+         models.loop(msgs, function(reason) error('custom failure: ' .. reason, 0) end)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture.client(client.clone()), None)
-        .drive()
-        .await
-        .expect_err("the compactor's own raise fails the section");
-    match &error {
+    let trace = loop_scenario(source).chat_with(overflowing(&rounds)).run();
+    match trace.error().inner() {
         Error::LuaRuntime { message, .. } => assert!(
             message.contains("custom failure: provider"),
             "the compactor's own error survives with the reason tag, got: {message}"
@@ -247,7 +218,7 @@ async fn a_compactors_own_string_raise_reaches_the_caller_with_the_reason_tag() 
         other => panic!("expected the compactor's own runtime error, got {other:?}"),
     }
     assert_eq!(
-        client.calls.load(Ordering::SeqCst),
+        rounds.load(Ordering::SeqCst),
         1,
         "the request left and was rejected"
     );

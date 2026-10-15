@@ -2,28 +2,27 @@
 //! against a canned model: the `prompts/research-person.md` section and
 //! the shipped chat agent's turn loop.
 
+use promptforge_parser::test_support::{PromptSource, one_section};
+
 use super::*;
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_research_person_shape_returns_the_last_reply() {
+#[test]
+fn the_research_person_shape_returns_the_last_reply() {
     let gateway = ScriptedChat::new(vec![text("a factual summary")]);
-    let md = "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n\
-        # Loop\n\n\
-        ## Research\n\n\
-        Summarize the person.\n\n\
-        ```lua\n\
-        local msgs = messages.new()\n\
-        msgs:user(prose)\n\
-        models.loop(msgs)\n\
-        return msgs[#msgs].content\n\
-        ```\n";
-    let prompt = parse(md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the research shape runs to its reply");
-    assert_eq!(out, "a factual summary");
+    let source = PromptSource::new().prose(
+        "Research",
+        "
+        Summarize the person.
+
+        ```lua
+        local msgs = messages.new()
+        msgs:user(prose)
+        models.loop(msgs)
+        return msgs[#msgs].content
+        ```",
+    );
+    let trace = loop_scenario(source.build()).chat(&gateway).run();
+    assert_eq!(trace.text(), "a factual summary");
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 1);
     assert!(
@@ -34,24 +33,19 @@ async fn the_research_person_shape_returns_the_last_reply() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_chat_agent_shape_completes_both_turns() {
+#[test]
+fn the_chat_agent_shape_completes_both_turns() {
     let gateway = ScriptedChat::new(vec![text("first reply"), text("second reply")]);
-    let md = loop_prompt(
-        "local history = messages.new()\n\
-         for _, text in ipairs({ 'first question', 'second question' }) do\n\
-           history:user(text)\n\
-           pcall(function() return models.loop(history) end)\n\
-         end\n\
+    let source = one_section(
+        "local history = messages.new()
+         for _, text in ipairs({ 'first question', 'second question' }) do
+           history:user(text)
+           pcall(function() return models.loop(history) end)
+         end
          return #history .. '|' .. history[2].content .. '|' .. history[4].content",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("both chat turns run");
-    assert_eq!(out, "4|first reply|second reply");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "4|first reply|second reply");
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 2, "one request per turn");
     let second: Vec<&str> = bodies[1]

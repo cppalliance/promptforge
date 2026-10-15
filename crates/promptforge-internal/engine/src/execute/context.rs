@@ -177,8 +177,21 @@ impl RunState {
     /// run starts, so a test fixture can drive the scheduler's `tool_call`
     /// arm with one model-issued call.
     #[cfg(test)]
-    pub(super) fn expose_raw_shims_for_test(&mut self) {
+    pub(crate) fn expose_raw_shims_for_test(&mut self) {
         self.raw_shims = true;
+    }
+
+    /// Replaces the run's model set with `set`, as the live H1 pass would
+    /// leave it, so a test can skip the pass. Call it before the run
+    /// starts: every section VM shares the set it finds here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_models_for_test(self, set: ModelSet) -> Self {
+        *self
+            .model_set
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = set;
+        self
     }
 
     /// Keeps a copy of every event the driver drains from this run's
@@ -197,7 +210,7 @@ impl RunState {
     /// run starts: every section VM shares the set it finds here.
     #[cfg(test)]
     #[must_use]
-    pub(super) fn with_tool_set(mut self, set: ToolSet) -> Self {
+    pub(crate) fn with_tool_set(mut self, set: ToolSet) -> Self {
         self.tool_set = Arc::new(set);
         self
     }

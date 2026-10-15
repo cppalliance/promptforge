@@ -151,13 +151,14 @@ pub(crate) struct FnTool {
     id: ToolId,
     description: String,
     schema: serde_json::Value,
+    structured: bool,
     handler: Arc<FnToolHandler>,
 }
 
 #[cfg(test)]
 impl FnTool {
     /// The tool `id`, whose arguments match `schema` and whose calls
-    /// `handler` answers, with an empty description.
+    /// `handler` answers, with an empty description and plain output.
     #[track_caller]
     pub(crate) fn new(
         id: &str,
@@ -169,6 +170,7 @@ impl FnTool {
             id,
             description: String::new(),
             schema,
+            structured: false,
             handler: Arc::new(handler),
         }
     }
@@ -176,6 +178,13 @@ impl FnTool {
     /// Replaces the description the model reads.
     pub(crate) fn description(mut self, description: &str) -> FnTool {
         description.clone_into(&mut self.description);
+        self
+    }
+
+    /// Marks the output text as one JSON value, so a binding built from
+    /// the descriptor resumes a script call as a Lua table.
+    pub(crate) fn structured(mut self) -> FnTool {
+        self.structured = true;
         self
     }
 
@@ -197,6 +206,10 @@ impl TestTool for FnTool {
 
     fn parameters_schema(&self) -> serde_json::Value {
         self.schema.clone()
+    }
+
+    fn structured_output(&self) -> bool {
+        self.structured
     }
 
     fn call<'life0, 'async_trait>(

@@ -1,41 +1,50 @@
 //! The run-level test driver. A [`Scenario`] holds a run's setup as data:
 //! its source, args, run name, seed, context edits, store, tools, model,
-//! and the effects it holds. It parses the source, prepares the run, and
+//! the sets it fills in before the run starts, the effects it holds, and
+//! the answer that cancels it. It parses the source, prepares the run, and
 //! steps it on the calling thread, answering every effect it does not hold
 //! the moment it is issued, and returns a [`Trace`] of what the run
-//! produced. Nothing awaits, spawns, or sleeps: a timer fires at once, a
-//! tool is a closure, and the model is a script.
+//! produced. Nothing awaits or sleeps: a timer fires at once, a tool is a
+//! closure, and the model is a script or a closure. Only a canceller runs
+//! on a second thread, and the scenario joins it.
 //!
 //! The serial helpers the scheduler-level suites drive a bare [`Run`] with
-//! sit beside it in `serial`.
+//! sit beside it in `serial`, and the started run and its trace in
+//! `driving`.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
-use promptforge_types::event::Event;
+use promptforge_model_client::model::ModelInvocation;
+use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::timestamp::Timestamp;
 use promptforge_types::tools::{ToolCatalog, ToolId};
 use promptforge_vfs::{Origin, VfsError, VfsRef};
 
-use super::recording::{Observation, Observer};
 use super::scripted_chat::ScriptedChat;
 use super::tokio_driver::{refuse_chat, refuse_tool_call};
-use super::{FnTool, TestTool, drive_step, forward};
-use crate::execute::{
-    AnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Run, RunContext, RunError,
-    RunResult,
+use super::{FnTool, TestTool};
+use crate::Error;
+use crate::execute::{Effect, EffectAnswer, Run, RunContext, RunError, RunResult};
+use crate::lua::{ToolBinding, ToolSet, run_store_op};
+use crate::model::{
+    CompletionErrorKind, ModelBinding, ModelDescriptor, ModelId, ModelSet, ThinkingMode,
 };
-use crate::lua::run_store_op;
-use crate::model::{ModelDescriptor, ModelId, ThinkingMode};
 use crate::parser::Prompt;
 
+#[path = "scenario-driving.rs"]
+mod driving;
 #[path = "scenario-serial.rs"]
 mod serial;
 
+pub(crate) use driving::{Driving, Record, Trace};
 pub(crate) use serial::{
-    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, perform_locally, text_of,
+    Batching, chat_answer, drive_batched, echo_chat, infer_prompt, only_effect, perform_locally,
+    text_of,
 };
 
 /// The run name a test that does not choose one runs under.
@@ -54,19 +63,65 @@ pub(crate) const TEST_MODEL: &str = "claude-sonnet-4-6";
 /// switchable thinking.
 #[track_caller]
 pub(crate) fn test_model(id: &str) -> ModelDescriptor {
+    test_model_with(id, 131_072, ThinkingMode::Switchable)
+}
+
+/// The gateway model `id` on a `window`-token context window, with
+/// `thinking`.
+#[track_caller]
+pub(crate) fn test_model_with(id: &str, window: u32, thinking: ThinkingMode) -> ModelDescriptor {
     ModelDescriptor::new(
         ModelId::gateway(id).expect("the test model id is valid"),
         "A general model for tests",
-        NonZeroU32::new(131_072).expect("131072 is non-zero"),
-        ThinkingMode::Switchable,
+        NonZeroU32::new(window).expect("the test model's window is non-zero"),
+        thinking,
     )
+}
+
+/// The binding `alias` to the gateway model `model` as a test fills a
+/// model set by hand: described as `description`, on a 4096-token window,
+/// and with no request settings.
+#[track_caller]
+pub(crate) fn test_binding(alias: &str, description: &str, model: &str) -> ModelBinding {
+    ModelBinding::new(
+        alias,
+        description,
+        model_id_from_validated("gateway", model),
+        ModelInvocation {
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        },
+        NonZeroU32::new(4096).expect("4096 is non-zero"),
+    )
+}
+
+/// Asserts `error` is a model failure of `kind` whose message is `message`.
+#[track_caller]
+pub(crate) fn assert_model_failure(error: &RunError, kind: CompletionErrorKind, message: &str) {
+    let Error::Completion(failure) = error.inner() else {
+        panic!("expected a model failure, got {error:?}");
+    };
+    assert_eq!(
+        (failure.kind(), failure.to_string().as_str()),
+        (kind, message)
+    );
 }
 
 /// The edit a scenario applies to its run's context before the prepare.
 type ContextEdit = Box<dyn FnOnce(RunContext) -> RunContext>;
 
-/// Which effects a scenario leaves unanswered.
-type Hold = Box<dyn Fn(&Effect) -> bool>;
+/// A test over an effect: which effects a scenario holds, or which answer
+/// signals its canceller.
+type Matcher = Box<dyn Fn(&Effect) -> bool>;
+
+/// How a scenario answers its run's model rounds.
+enum Chat {
+    /// From a script, under the run's timeout.
+    Script(ScriptedChat),
+    /// Through a closure handed each round's effect.
+    Closure(Box<dyn Fn(&Effect) -> EffectAnswer>),
+}
 
 /// A run's setup as data. [`run`](Scenario::run) drives it to its end;
 /// [`start`](Scenario::start) hands back the run to step by hand.
@@ -78,17 +133,23 @@ pub(crate) struct Scenario {
     seed: u64,
     context: ContextEdit,
     store: TestStore,
+    /// The catalog's tools.
     tools: Vec<FnTool>,
-    chat: Option<ScriptedChat>,
-    hold: Option<Hold>,
+    /// The tools behind offered bindings, outside the catalog.
+    offered: Vec<FnTool>,
+    prefill: Prefill,
+    chat: Option<Chat>,
+    hold: Option<Matcher>,
+    signal: Option<Matcher>,
     prepare: bool,
 }
 
 impl Scenario {
     /// A run of `source` named [`EXECUTION`], under [`TEST_SEED`] and
     /// [`TEST_STARTED_AT`], with empty args, a fresh memory store, no tools,
-    /// no model, and no held effect, prepared as `run_with_fixture`
-    /// prepares: an unsatisfiable prompt is refused before it starts.
+    /// no model, nothing filled in, and no held effect, prepared as
+    /// `run_with_fixture` prepares: an unsatisfiable prompt is refused
+    /// before it starts.
     pub(crate) fn new(source: impl Into<String>) -> Scenario {
         Scenario {
             source: source.into(),
@@ -98,8 +159,11 @@ impl Scenario {
             context: Box::new(|ctx| ctx),
             store: TestStore::new(),
             tools: Vec::new(),
+            offered: Vec::new(),
+            prefill: Prefill::default(),
             chat: None,
             hold: None,
+            signal: None,
             prepare: true,
         }
     }
@@ -158,10 +222,56 @@ impl Scenario {
         self
     }
 
+    /// Fills the run's model set with `set` before the run starts, as the
+    /// live H1 pass would leave it, in place of the set the prepare binds.
+    pub(crate) fn models(mut self, set: ModelSet) -> Scenario {
+        self.prefill.models = Some(set);
+        self
+    }
+
+    /// Replaces the run's offering with `bindings` before the run starts,
+    /// in place of the one the catalog builds. A call to a binding with no
+    /// scenario tool behind it is refused.
+    pub(crate) fn offering(mut self, bindings: Vec<ToolBinding>) -> Scenario {
+        self.prefill.offering = Some(bindings);
+        self
+    }
+
+    /// Adds `tool` to the run's offering under the wire name `alias` and
+    /// answers its calls with it. The tool stays out of the catalog, and,
+    /// as with [`offering`](Scenario::offering), the offered tools replace
+    /// the offering the catalog builds.
+    pub(crate) fn offer(mut self, alias: &str, tool: FnTool) -> Scenario {
+        let binding = ToolBinding::from_descriptor(alias, &tool.descriptor());
+        self.prefill
+            .offering
+            .get_or_insert_with(Vec::new)
+            .push(binding);
+        self.offered.push(tool);
+        self
+    }
+
+    /// Exposes the raw `tools.call_as_model` shim in every section VM, so
+    /// a section can issue a model-issued tool call itself.
+    pub(crate) fn raw_shims(mut self) -> Scenario {
+        self.prefill.raw_shims = true;
+        self
+    }
+
     /// Answers the run's model rounds from `chat`, which shares its script
     /// and its record of every round with the caller's copy.
     pub(crate) fn chat(mut self, chat: &ScriptedChat) -> Scenario {
-        self.chat = Some(chat.clone());
+        self.chat = Some(Chat::Script(chat.clone()));
+        self
+    }
+
+    /// Answers the run's model rounds through `answer`, handed each round's
+    /// effect, for a model a script cannot play.
+    pub(crate) fn chat_with(
+        mut self,
+        answer: impl Fn(&Effect) -> EffectAnswer + 'static,
+    ) -> Scenario {
+        self.chat = Some(Chat::Closure(Box::new(answer)));
         self
     }
 
@@ -170,6 +280,15 @@ impl Scenario {
     /// its outcome, each held effect is answered `Dropped`.
     pub(crate) fn hold(mut self, held: impl Fn(&Effect) -> bool + 'static) -> Scenario {
         self.hold = Some(Box::new(held));
+        self
+    }
+
+    /// Cancels the run from a second thread once the scenario answers an
+    /// effect `signal` matches. The thread waits for that answer untimed,
+    /// so the cancel lands before the next step or while it runs; the
+    /// scenario joins the thread before it hands back the trace.
+    pub(crate) fn cancel_when(mut self, signal: impl Fn(&Effect) -> bool + 'static) -> Scenario {
+        self.signal = Some(Box::new(signal));
         self
     }
 
@@ -197,19 +316,33 @@ impl Scenario {
             (ctx, requirements) = ctx.prepare(&prompt);
             refused = requirements.refusal().map(RunResult::Failure);
         }
+        let (signal, signalled) = match self.signal {
+            Some(signal) => {
+                let (sender, receiver) = mpsc::channel();
+                (Some((signal, sender)), Some(receiver))
+            }
+            None => (None, None),
+        };
         let answers = Answers {
-            tools: self
-                .tools
-                .into_iter()
+            tools: (self.tools.into_iter().chain(self.offered))
                 .map(|tool| (tool.id(), tool))
                 .collect(),
             chat: self.chat,
             hold: self.hold,
+            signal,
             timeout: ctx.limits.timeout(),
         };
         let run = refused
             .is_none()
-            .then(|| Run::new(Arc::new(prompt), &self.args, ctx));
+            .then(|| self.prefill.start(Arc::new(prompt), &self.args, ctx));
+        let canceller = run.as_ref().zip(signalled).map(|(run, signalled)| {
+            let cancel = run.cancel_handle();
+            thread::spawn(move || {
+                if signalled.recv().is_ok() {
+                    cancel.cancel();
+                }
+            })
+        });
         Driving {
             run,
             result: refused,
@@ -218,6 +351,7 @@ impl Scenario {
             effects: Vec::new(),
             held: Vec::new(),
             store: self.store,
+            canceller,
         }
     }
 
@@ -231,14 +365,51 @@ impl Scenario {
     }
 }
 
+/// What a scenario fills into its run's state before the run starts, in
+/// place of what the prepare, the live H1 pass, and the offering would
+/// leave there.
+#[derive(Default)]
+struct Prefill {
+    models: Option<ModelSet>,
+    offering: Option<Vec<ToolBinding>>,
+    raw_shims: bool,
+}
+
+impl Prefill {
+    /// Builds the run of `prompt` under `ctx` with the state filled in, or
+    /// as [`Run::new`] builds it when there is nothing to fill.
+    fn start(self, prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
+        if self.models.is_none() && self.offering.is_none() && !self.raw_shims {
+            return Run::new(prompt, args, ctx);
+        }
+        Run::new_for_test(prompt, args, &ctx, |mut state| {
+            if let Some(set) = self.models {
+                state = state.with_models_for_test(set);
+            }
+            if let Some(offered) = self.offering {
+                state = state.with_tool_set(ToolSet {
+                    offered,
+                    ..ToolSet::default()
+                });
+            }
+            if self.raw_shims {
+                state.expose_raw_shims_for_test();
+            }
+            state
+        })
+    }
+}
+
 /// How a scenario answers its run's effects: a store operation on the
 /// effect's own access, a timer at once, a tool call through the
-/// scenario's tool of that id, and a model round from its script, unless
-/// the scenario holds the effect.
+/// scenario's tool of that id, and a model round from its script or
+/// closure, unless the scenario holds the effect.
 struct Answers {
     tools: BTreeMap<ToolId, FnTool>,
-    chat: Option<ScriptedChat>,
-    hold: Option<Hold>,
+    chat: Option<Chat>,
+    hold: Option<Matcher>,
+    /// Which answer wakes the canceller, and the wake.
+    signal: Option<(Matcher, Sender<()>)>,
     timeout: Duration,
 }
 
@@ -257,10 +428,11 @@ impl Answers {
                 options,
                 ..
             } => match &self.chat {
-                Some(chat) => {
+                Some(Chat::Script(chat)) => {
                     let (_, answer) = chat.complete_now(messages, tools, options, self.timeout);
                     EffectAnswer::Chat(answer.map(Box::new))
                 }
+                Some(Chat::Closure(answer)) => answer(effect),
                 None => refuse_chat(),
             },
             Effect::ToolCall { tool, args, .. } => match self.tools.get(tool) {
@@ -270,179 +442,14 @@ impl Answers {
             Effect::Vfs { access, op } => EffectAnswer::Vfs(run_store_op(access, op.clone())),
             Effect::Timer { .. } => EffectAnswer::Timer,
         };
+        if let Some((signal, wake)) = &self.signal
+            && signal(effect)
+        {
+            // Only the first signal wakes the canceller; a later send
+            // finds it gone.
+            let _ = wake.send(());
+        }
         Some(answer)
-    }
-}
-
-/// A started scenario, stepped by hand or to its end.
-pub(crate) struct Driving {
-    /// The run, until it is done or when the prepare refused it.
-    run: Option<Run>,
-    result: Option<RunResult>,
-    answers: Answers,
-    /// The parse events, then every event the run reported, in order.
-    events: Vec<Event>,
-    effects: Vec<(EffectRecord, AnswerRecord)>,
-    /// The effects the scenario holds, unanswered until the run decides.
-    held: Vec<(EffectId, Effect)>,
-    store: TestStore,
-}
-
-impl Driving {
-    /// Steps the run once, answering every effect the step issued that the
-    /// scenario does not hold, and returns whether stepping again can move
-    /// the run: `false` once it is done, and while it waits only on held
-    /// effects.
-    pub(crate) fn step(&mut self) -> bool {
-        let Some(run) = self.run.as_mut() else {
-            return false;
-        };
-        let answers = &self.answers;
-        let effects = &mut self.effects;
-        let mut moved = false;
-        let mut perform = |_: EffectId, effect: &Effect| answers.answer(effect);
-        let mut answered = |effect: &Effect, answer: &EffectAnswer| {
-            moved = true;
-            effects.push((effect.record(), answer.record()));
-        };
-        let holding = self.held.len();
-        let stepped = drive_step(
-            run,
-            &mut perform,
-            &mut answered,
-            &mut self.held,
-            &mut self.events,
-        );
-        let Some(result) = stepped else {
-            return moved || self.held.len() > holding;
-        };
-        self.result = Some(result);
-        self.run = None;
-        false
-    }
-
-    /// Steps the run to its end and returns what it produced.
-    ///
-    /// # Panics
-    /// When the run waits only on held effects, which nothing releases
-    /// until the run decides.
-    #[track_caller]
-    pub(crate) fn finish(mut self) -> Trace {
-        while self.step() {}
-        let Some(result) = self.result else {
-            panic!(
-                "the run waits only on {} held effects, and no cancel has decided it",
-                self.held.len()
-            );
-        };
-        Trace {
-            result,
-            events: self.events,
-            effects: self.effects,
-            store: self.store,
-        }
-    }
-}
-
-/// What a scenario's run produced: its result, its events, every effect
-/// it issued paired with its answer, and its store.
-pub(crate) struct Trace {
-    result: RunResult,
-    /// The parse events, then every event the run reported, in order.
-    events: Vec<Event>,
-    effects: Vec<(EffectRecord, AnswerRecord)>,
-    store: TestStore,
-}
-
-impl Trace {
-    /// The run's result.
-    pub(crate) fn result(&self) -> &RunResult {
-        &self.result
-    }
-
-    /// The text of a run that succeeded.
-    ///
-    /// # Panics
-    /// When the run did not succeed, naming its result.
-    #[track_caller]
-    pub(crate) fn text(&self) -> &str {
-        match &self.result {
-            RunResult::Ok(text) => text,
-            other => panic!("expected the run to succeed, got {other:?}"),
-        }
-    }
-
-    /// The error of a run that failed.
-    ///
-    /// # Panics
-    /// When the run did not fail, naming its result.
-    #[track_caller]
-    pub(crate) fn error(&self) -> &RunError {
-        match &self.result {
-            RunResult::Failure(error) => error,
-            other => panic!("expected the run to fail, got {other:?}"),
-        }
-    }
-
-    /// Every effect the run issued, beside its answer, in the order the
-    /// answers went, which is issue order for every effect the scenario
-    /// does not hold. An effect issued after the run decided its outcome,
-    /// and a held one, is paired with [`AnswerRecord::Dropped`].
-    pub(crate) fn effects(&self) -> &[(EffectRecord, AnswerRecord)] {
-        &self.effects
-    }
-
-    /// Replays the events onto `observer`, parse events first.
-    pub(crate) fn replay(&self, observer: &dyn Observer) {
-        forward(self.events.clone(), observer);
-    }
-
-    /// The events as the suites' observer sees them, parse events first.
-    pub(crate) fn records(&self) -> Vec<Record> {
-        let recorder = Recorder::default();
-        self.replay(&recorder);
-        recorder
-            .0
-            .into_inner()
-            .expect("the record lock is not poisoned")
-    }
-
-    /// Reads a store path after the run, through a fresh access.
-    pub(crate) fn read(&self, path: &str) -> Result<String, VfsError> {
-        self.store.read(path)
-    }
-}
-
-/// One observation: which execution and section emitted it, plus the
-/// rendered event detail.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Record {
-    pub(crate) execution: String,
-    pub(crate) section: String,
-    pub(crate) detail: String,
-}
-
-impl Record {
-    /// Builds an expected record from borrowed parts, for assertions.
-    pub(crate) fn new(execution: &str, section: &str, detail: &str) -> Record {
-        Record {
-            execution: execution.to_owned(),
-            section: section.to_owned(),
-            detail: detail.to_owned(),
-        }
-    }
-}
-
-/// The observer [`Trace::records`] replays the events onto.
-#[derive(Default)]
-struct Recorder(Mutex<Vec<Record>>);
-
-impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        self.0
-            .lock()
-            .expect("the record lock is not poisoned")
-            .push(Record::new(execution, section, &event.to_string()));
     }
 }
 

@@ -21,7 +21,7 @@ use crate::test_support::scripted_chat::{
     MOCK_MODEL, ScriptedCall, ScriptedChat, ScriptedReply, calls, delayed, fail, text, text_finish,
 };
 use crate::test_support::tokio_driver::TokioDriver;
-use crate::test_support::{RunFixture, TestTool, TestToolTable};
+use crate::test_support::{FnTool, RunFixture, TestTool, TestToolTable};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
@@ -65,6 +65,21 @@ impl TestTool for SlowTool {
     async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
         std::future::pending().await
     }
+}
+
+/// [`SlowTool`] as a scenario's tool: the scenario holds its calls, so the
+/// closure never runs.
+#[track_caller]
+fn slow_tool() -> FnTool {
+    FnTool::new("test/tools/slow", json!({ "type": "object" }), |_| {
+        panic!("a held call never reaches the slow tool")
+    })
+    .description("a deliberately slow tool")
+}
+
+/// Whether `effect` is a call to the slow tool, which a scenario holds.
+fn calls_slow_tool(effect: &Effect) -> bool {
+    matches!(effect, Effect::ToolCall { tool, .. } if tool.to_string() == "test/tools/slow")
 }
 
 #[test]

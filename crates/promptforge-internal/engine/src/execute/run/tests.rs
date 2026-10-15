@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_model_client::model::{ModelInvocation, Temperature};
-use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::ToolId;
@@ -18,6 +17,7 @@ use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::model::Message;
 use crate::model::ModelBinding;
+use crate::test_support::scenario::{only_effect, test_binding};
 
 #[path = "tests-drops.rs"]
 mod drops;
@@ -40,16 +40,12 @@ fn round_trip(record: &EffectRecord) -> EffectRecord {
 }
 
 fn binding() -> ModelBinding {
-    ModelBinding::new(
-        "writer",
-        "A general model for tests",
-        model_id_from_validated("gateway", "test-model"),
+    test_binding("writer", "A general model for tests", "test-model").with_invocation(
         ModelInvocation {
             temperature: Some(Temperature::new(0.2).expect("0.2 is in range")),
             max_tokens: NonZeroU32::new(256),
             thinking: Some(false),
         },
-        NonZeroU32::new(4096).expect("4096 is non-zero"),
     )
 }
 
@@ -234,20 +230,6 @@ fn run_of(body: &str, ctx: RunContext) -> Run {
         .0
         .expect("the run test prompt parses");
     Run::new(Arc::new(prompt), "", ctx)
-}
-
-/// The one effect a pending step issued.
-fn only_effect(step: Step) -> (EffectId, Effect) {
-    let Step::Pending { mut effects, .. } = step else {
-        panic!("the step is pending, got {step:?}");
-    };
-    assert_eq!(
-        effects.len(),
-        1,
-        "exactly one effect is issued: {effects:?}"
-    );
-    let (id, _, effect) = effects.remove(0);
-    (id, effect)
 }
 
 /// Whether `events` include the run's end boundary.

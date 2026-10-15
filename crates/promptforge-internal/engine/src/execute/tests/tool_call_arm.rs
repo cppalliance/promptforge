@@ -7,14 +7,16 @@
 //! their own; and the reserved task names, refused before alias lookup.
 //! The fixtures reach the
 //! model-issued form through the test-only `tools.call_as_model` install
-//! (`expose_raw_shims_for_test`); in production only the loop shim yields
+//! (`Scenario::raw_shims`); in production only the loop shim yields
 //! a `call_id`.
 //! The local Lua tool cases sit in `local_handlers`.
 
-use super::models_loop::loop_models;
+use promptforge_parser::test_support::one_section;
+
+use super::models_loop::loop_scenario;
 use super::*;
-use crate::lua::ToolSet;
-use crate::test_support::tokio_driver::TokioDriver;
+use crate::lua::ToolBinding;
+use crate::test_support::scenario::Trace;
 
 /// Records every observation and every `on_tool_result` report as one
 /// rendered line, so a test reads the arm's whole reporting sequence.
@@ -60,67 +62,31 @@ impl Observer for ToolRecorder {
     }
 }
 
-/// The run context for a tool-call arm test: the parsed prompt, the shared
-/// model and tool sets pre-filled (the scheduler tests bypass the live H1
-/// pass that would fill them), the given observer, and the raw protocol
-/// shims exposed so a fixture can yield a model-issued call.
-fn tool_context(
-    prompt: &Prompt,
-    tools: impl Into<FixtureTools>,
-    observer: Arc<dyn Observer>,
-) -> (RunState, RunFixture) {
-    let ctx = RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &TestStore::new().vfs(),
-        &test_context(EXECUTION),
-    );
-    *ctx.model_set()
-        .lock()
-        .expect("the model set mutex is not poisoned") = loop_models();
-    let (mut ctx, fixture) = tools
-        .into()
-        .install(ctx, RunFixture::new().observer(observer));
-    ctx.expose_raw_shims_for_test();
-    (ctx, fixture)
+/// A tool-call arm test's run of `source`: the loop models filled in (the
+/// arm tests bypass the live H1 pass that would fill them), nothing
+/// offered unless the test offers it, and the raw protocol shims exposed
+/// so a section can yield a model-issued call.
+fn arm_scenario(source: impl Into<String>) -> Scenario {
+    loop_scenario(source).raw_shims()
 }
 
-/// The tool set with the always-failing fixture bound as `fail`; a section
-/// offers it as `tools/failing`.
-fn failing_tools() -> FixtureTools {
-    FixtureTools::new(vec![fixture_binding(
-        "fail",
-        "failing capability",
-        Arc::new(FailingTool),
-    )])
+/// The `ToolRecorder` replay of `trace`'s events.
+fn tool_lines(trace: &Trace) -> ToolRecorder {
+    let recorder = ToolRecorder::default();
+    trace.replay(&recorder);
+    recorder
 }
 
-/// The one-section prompt shell every arm test drives.
-fn arm_prompt(lua: &str) -> String {
-    format!(
-        "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# ToolCall\n\n## Only\n\n```lua\n{lua}\n```\n"
-    )
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text() {
-    let md = arm_prompt(
-        "tools.offer('tools/failing')\n\
-         local out = tools.call_as_model('call_1', 'fail', {})\n\
-         assert(type(out) == 'string', 'a model-issued call always resumes with content')\n\
+#[test]
+fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text() {
+    let source = one_section(
+        "tools.offer('tools/failing')
+         local out = tools.call_as_model('call_1', 'fail', {})
+         assert(type(out) == 'string', 'a model-issued call always resumes with content')
          return out",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        failing_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a model-issued call never raises for the tool's own failure");
+    let trace = arm_scenario(source).offer("fail", failing_tool()).run();
+    let out = trace.text();
     assert!(
         out.contains("<untrusted_input_") && out.contains("</untrusted_input_"),
         "the failure text is nonce-wrapped as untrusted, got: {out}"
@@ -129,7 +95,7 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
         out.contains("the tool's own backend failed"),
         "the wrapped text includes the tool's message, got: {out}"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         lines
             .iter()
@@ -144,25 +110,16 @@ async fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
-    let md = arm_prompt(
-        "tools.offer('tools/failing')\n\
-         local ok, err = pcall(tools.call, 'tools/failing', {})\n\
-         assert(not ok, 'a script call raises the tool failure at the call site')\n\
+#[test]
+fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
+    let source = one_section(
+        "tools.offer('tools/failing')
+         local ok, err = pcall(tools.call, 'tools/failing', {})
+         assert(not ok, 'a script call raises the tool failure at the call site')
          return err.kind .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        failing_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
+    let trace = arm_scenario(source).offer("fail", failing_tool()).run();
+    let out = trace.text();
     assert!(
         out.starts_with("tool|"),
         "a script call's tool failure reads as kind `tool`, got: {out}"
@@ -171,41 +128,28 @@ async fn the_same_failing_tool_without_a_call_id_raises_kind_tool() {
         out.contains("the tool's own backend failed"),
         "the raised message is the tool's own, got: {out}"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         !lines.iter().any(|line| line.contains("tool_result")),
         "a failed script call reports no ToolResult: {lines:?}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_as_a_tool_error() {
+#[test]
+fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_as_a_tool_error() {
     // The binding names an identity the Engine advertises and journals,
-    // but the test driver's tool table holds nothing under it: the performer
-    // answers the effect with the error instead of a call, and a script
-    // call raises it at the call site.
-    let md = arm_prompt(
-        "tools.offer('tools/echo')\n\
-         local ok, err = pcall(tools.call, 'tools/echo', { value = 'hi' })\n\
-         assert(not ok, 'an unresolvable identity raises at the call site')\n\
+    // but the scenario holds no tool under it: it answers the effect with
+    // the error instead of a call, and a script call raises it at the
+    // call site.
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local ok, err = pcall(tools.call, 'tools/echo', { value = 'hi' })
+         assert(not ok, 'an unresolvable identity raises at the call site')
          return err.kind .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let (binding, _unregistered) =
-        fixture_binding("tools_echo", "echo capability", Arc::new(EchoTool));
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet {
-            offered: vec![binding],
-            ..ToolSet::default()
-        },
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the missing implementation is pcall-able");
+    let binding = ToolBinding::for_test("tools_echo", "echo capability", &echo_tool().descriptor());
+    let trace = arm_scenario(source).offering(vec![binding]).run();
+    let out = trace.text();
     assert!(
         out.starts_with("tool|"),
         "the missing implementation reads as kind `tool`, got: {out}"
@@ -214,7 +158,7 @@ async fn a_bound_alias_with_no_implementation_in_the_test_driver_table_resumes_a
         out.contains("no implementation in the test driver's tool table"),
         "the raised message names the test driver's tool table, got: {out}"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         !lines.iter().any(|line| line.contains("tool_result")),
         "nothing was called, so no ToolResult is reported: {lines:?}"
@@ -230,37 +174,27 @@ pub(super) fn tool_result_lines(recorder: &ToolRecorder) -> Vec<String> {
         .collect()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
+#[test]
+fn a_reserved_task_name_answers_unbound_tool_before_alias_lookup() {
     // `task_status` is registered as a local tool so the test proves the
     // reservation wins over a lookup that would otherwise succeed.
-    let md = arm_prompt(
-        "tools.offer_local('task_status', 'shadow', {}, function() return 'shadowed' end)\n\
-         local kinds = {}\n\
-         for _, name in ipairs({ 'task', 'task_cancel', 'task_status', 'await_tasks' }) do\n\
-           local ok, err = pcall(tools.call, name, {})\n\
-           assert(not ok, name .. ' must be refused')\n\
-           kinds[#kinds + 1] = err.kind .. ':' .. err.name\n\
-         end\n\
+    let source = one_section(
+        "tools.offer_local('task_status', 'shadow', {}, function() return 'shadowed' end)
+         local kinds = {}
+         for _, name in ipairs({ 'task', 'task_cancel', 'task_status', 'await_tasks' }) do
+           local ok, err = pcall(tools.call, name, {})
+           assert(not ok, name .. ' must be refused')
+           kinds[#kinds + 1] = err.kind .. ':' .. err.name
+         end
          return table.concat(kinds, ',')",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("each refusal is pcall-able");
+    let trace = arm_scenario(source).run();
     assert_eq!(
-        out,
+        trace.text(),
         "unbound_tool:task,unbound_tool:task_cancel,unbound_tool:task_status,\
          unbound_tool:await_tasks"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         !lines.iter().any(|line| line.contains("tool_result")),
         "a reserved name dispatches nothing: {lines:?}"

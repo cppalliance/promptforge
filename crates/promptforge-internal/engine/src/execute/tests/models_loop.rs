@@ -4,18 +4,17 @@
 //! appends, the nil return, explicit terminal removal, local and bound
 //! tools, call-time tool scope, explicit-handle calls on a frozen binding,
 //! and the atomic append of a tool-call batch. The shared loop fixtures
-//! (`loop_models`, `loop_context`, `loop_prompt`, the tool sets, and the
-//! `loop_events` filter) sit here for every loop-driven sibling. The
-//! compactor argument's tests sit in `models_loop_compactors`; the loop's
-//! exit rules in `exit_rules`; its cap, scope gate, and result-record
-//! trust in `tool_loop`.
+//! (`loop_models`, `loop_scenario`, `LOOP_TO_TEXT`, and the `loop_events`
+//! filter, beside the tokio driver's `loop_context`, `loop_prompt`, and
+//! tool sets) sit here for every loop-driven sibling. The compactor
+//! argument's tests sit in `models_loop_compactors`; the loop's exit rules
+//! in `exit_rules`; its cap, scope gate, and result-record trust in
+//! `tool_loop`.
+
+use promptforge_parser::test_support::one_section;
 
 use super::*;
-use crate::lua::ToolSet;
-use crate::model::ModelBinding;
-use crate::test_support::tokio_driver::TokioDriver;
-use promptforge_model_client::model::ModelInvocation;
-use promptforge_types::detail::model_id_from_validated;
+use crate::test_support::scenario::test_binding;
 
 #[path = "models_loop-arguments.rs"]
 mod arguments;
@@ -27,27 +26,28 @@ mod author_shapes;
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
 pub(super) fn loop_models() -> ModelSet {
-    let binding = |alias: &str, description: &str, model: &str| {
-        ModelBinding::new(
-            alias,
-            description,
-            model_id_from_validated("gateway", model),
-            ModelInvocation {
-                temperature: None,
-                max_tokens: None,
-                thinking: None,
-            },
-            NonZeroU32::new(4096).expect("4096 is non-zero"),
-        )
-    };
     ModelSet {
         bindings: vec![
-            binding("writer", "A general model for tests", "test-model"),
-            binding("other", "A second model", "other-model"),
+            test_binding("writer", "A general model for tests", "test-model"),
+            test_binding("other", "A second model", "other-model"),
         ],
         default: Some("writer".to_owned()),
     }
 }
+
+/// A run of `source` over the loop models, unprepared, so the run starts
+/// with what the live H1 pass would leave and no catalog: the state
+/// [`loop_context`] builds for the tokio driver.
+pub(super) fn loop_scenario(source: impl Into<String>) -> Scenario {
+    Scenario::new(source).unprepared().models(loop_models())
+}
+
+/// The section body the cap, trust, and scoping tests run: one loop over
+/// a single user message, then the terminal record's text.
+pub(super) const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
+     msgs:user('ask the model')\n\
+     models.loop(msgs)\n\
+     return msgs[#msgs].content";
 
 /// Builds the run context and its observing fixture for a loop test: the
 /// parsed prompt and the shared model and tool sets pre-filled (the
@@ -88,7 +88,7 @@ pub(super) fn bound_tool(alias: &str, tool: Arc<dyn TestTool>) -> FixtureTools {
 /// The tool set with the `echo` fixture bound; a section puts it in scope
 /// with `tools.offer('tools/echo')`.
 pub(super) fn echo_tools() -> FixtureTools {
-    bound_tool("echo", Arc::new(EchoTool))
+    bound_tool("echo", Arc::new(echo_tool()))
 }
 
 /// The model-turn and tool-call observations `recorder` saw, in order,
@@ -111,35 +111,30 @@ pub(super) fn loop_events(recorder: &Recorder) -> Vec<String> {
         .collect()
 }
 
-/// The one-section prompt shell every loop test drives.
+/// The one-section prompt shell the tokio-driven loop tests drive.
 pub(super) fn loop_prompt(lua: &str) -> String {
     format!(
         "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
+#[test]
+fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
     let gateway = ScriptedChat::new(vec![text("final answer")]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('hello')\n\
-         local result = models.loop(msgs)\n\
-         assert(result == nil, 'models.loop returns nil')\n\
-         assert(#msgs == 2, 'the loop appended exactly the terminal record')\n\
-         assert(msgs[2].role == 'assistant', 'the terminal record is an assistant message')\n\
-         assert(msgs[2].content == 'final answer', 'the terminal record holds the reply text')\n\
-         msgs:replace(#msgs, #msgs)\n\
-         assert(#msgs == 1, 'explicit terminal removal shrinks the list')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('hello')
+         local result = models.loop(msgs)
+         assert(result == nil, 'models.loop returns nil')
+         assert(#msgs == 2, 'the loop appended exactly the terminal record')
+         assert(msgs[2].role == 'assistant', 'the terminal record is an assistant message')
+         assert(msgs[2].content == 'final answer', 'the terminal record holds the reply text')
+         msgs:replace(#msgs, #msgs)
+         assert(#msgs == 1, 'explicit terminal removal shrinks the list')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a tool-free loop runs to its terminal turn");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "ok");
     assert_eq!(gateway.call_count(), 1, "one terminal turn is one request");
     let bodies = gateway.requests();
     assert_eq!(bodies[0].messages[0].role(), "user");
@@ -150,38 +145,36 @@ async fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
+#[test]
+fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"one\"}")]),
         calls(&[("call_2", "echo", "{\"value\":\"two\"}")]),
         text("both done"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('echo twice')\n\
-         models.loop(msgs)\n\
-         assert(#msgs == 6, 'user plus two exchanges plus the terminal record')\n\
-         assert(msgs[2].role == 'assistant', 'round one appends the assistant call')\n\
-         assert(msgs[2].tool_calls[1].id == 'call_1', 'the assistant record holds the normalized call')\n\
-         assert(msgs[2].tool_calls[1].name == 'echo', 'the call keeps its wire name')\n\
-         assert(msgs[2].tool_calls[1].arguments.value == 'one', 'the call arguments stay parsed')\n\
-         assert(msgs[3].role == 'tool', 'the correlated result follows its call')\n\
-         assert(msgs[3].tool_call_id == 'call_1', 'the result answers call_1')\n\
-         assert(msgs[3].content == 'echoed: one', 'the trusted result appends verbatim')\n\
-         assert(msgs[4].tool_calls[1].id == 'call_2', 'round two appends its own call')\n\
-         assert(msgs[5].tool_call_id == 'call_2', 'round two appends its own result')\n\
-         assert(msgs[6].role == 'assistant' and msgs[6].content == 'both done', 'terminal text is the final record')\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('echo twice')
+         models.loop(msgs)
+         assert(#msgs == 6, 'user plus two exchanges plus the terminal record')
+         assert(msgs[2].role == 'assistant', 'round one appends the assistant call')
+         assert(msgs[2].tool_calls[1].id == 'call_1', 'the assistant record holds the normalized call')
+         assert(msgs[2].tool_calls[1].name == 'echo', 'the call keeps its wire name')
+         assert(msgs[2].tool_calls[1].arguments.value == 'one', 'the call arguments stay parsed')
+         assert(msgs[3].role == 'tool', 'the correlated result follows its call')
+         assert(msgs[3].tool_call_id == 'call_1', 'the result answers call_1')
+         assert(msgs[3].content == 'echoed: one', 'the trusted result appends verbatim')
+         assert(msgs[4].tool_calls[1].id == 'call_2', 'round two appends its own call')
+         assert(msgs[5].tool_call_id == 'call_2', 'round two appends its own result')
+         assert(msgs[6].role == 'assistant' and msgs[6].content == 'both done', 'terminal text is the final record')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop repeats until terminal text");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 3, "two tool rounds plus the terminal round");
     let tool_turns: Vec<&str> = bodies[2]
@@ -197,8 +190,8 @@ async fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
+#[test]
+fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
     // The bug report's failing sequence: one round requests a tool, the
     // follow-up round replays the assistant call plus its result. The
     // assertions below pin the exact shape on the replayed round; the
@@ -208,20 +201,18 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
         calls(&[("call_1", "echo", "{\"value\":\"one\"}")]),
         text("done"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('echo once')\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('echo once')
+         models.loop(msgs)
          return msgs[#msgs].content",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the replayed tool-call turn must be accepted");
-    assert_eq!(out, "done");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "done");
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 2, "one tool round plus the terminal round");
     let messages = bodies[1].messages_json();
@@ -248,34 +239,32 @@ async fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_dispatches_local_and_bound_tools() {
+#[test]
+fn models_loop_dispatches_local_and_bound_tools() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"x\"}")]),
         calls(&[("call_2", "echo", "{\"value\":\"y\"}")]),
         text("tools done"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/echo')\n\
-         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
-           return 'grabbed ' .. args.value\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('use both tools')\n\
-         models.loop(msgs)\n\
-         assert(#msgs == 6, 'both exchanges and the terminal record appended')\n\
-         assert(msgs[3].content == 'grabbed x', 'the local handler ran on the section VM')\n\
-         assert(msgs[3].tool_call_id == 'call_1', 'the local result correlates its call')\n\
-         assert(msgs[5].content == 'echoed: y', 'the bound tool ran through dispatch')\n\
+    let source = one_section(
+        "tools.offer('tools/echo')
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)
+           return 'grabbed ' .. args.value
+         end)
+         local msgs = messages.new()
+         msgs:user('use both tools')
+         models.loop(msgs)
+         assert(#msgs == 6, 'both exchanges and the terminal record appended')
+         assert(msgs[3].content == 'grabbed x', 'the local handler ran on the section VM')
+         assert(msgs[3].tool_call_id == 'call_1', 'the local result correlates its call')
+         assert(msgs[5].content == 'echoed: y', 'the bound tool ran through dispatch')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop routes local and bound tools");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
     let bodies = gateway.requests();
     assert_eq!(
         bodies[0].tools.len(),
@@ -284,37 +273,30 @@ async fn models_loop_dispatches_local_and_bound_tools() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn models_loop_reads_the_tool_scope_at_each_call() {
+#[test]
+fn models_loop_reads_the_tool_scope_at_each_call() {
     let gateway = ScriptedChat::new(vec![
         text("no tools yet"),
         calls(&[("call_1", "echo", "{\"value\":\"late\"}")]),
         text("scoped in"),
     ]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('first')\n\
-         models.loop(msgs)\n\
-         tools.offer('tools/echo')\n\
-         msgs:user('second')\n\
-         models.loop(msgs)\n\
-         assert(msgs[#msgs].content == 'scoped in', 'the second loop converged')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('first')
+         models.loop(msgs)
+         tools.offer('tools/echo')
+         msgs:user('second')
+         models.loop(msgs)
+         assert(msgs[#msgs].content == 'scoped in', 'the second loop converged')
          return 'ok'",
     );
-    let prompt = parse(&md);
     // Nothing in scope at first: the first call advertises no tools, the
     // `tools.offer` between calls scopes `echo` in for the second.
-    let tools = FixtureTools::new(vec![fixture_binding(
-        "echo",
-        "echo capability",
-        Arc::new(EchoTool),
-    )]);
-    let (ctx, fixture) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("each call reads the current scope");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "ok");
     let bodies = gateway.requests();
     assert_eq!(
         bodies.len(),
@@ -332,26 +314,21 @@ async fn models_loop_reads_the_tool_scope_at_each_call() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_handles_loop_runs_on_its_frozen_binding() {
+#[test]
+fn a_handles_loop_runs_on_its_frozen_binding() {
     let gateway = ScriptedChat::new(vec![text("first"), text("second")]);
-    let md = loop_prompt(
-        "local other = models.get('other')\n\
-         local msgs = messages.new()\n\
-         msgs:user('one')\n\
-         other:loop(msgs)\n\
-         msgs:user('two')\n\
-         other:loop(msgs)\n\
-         assert(#msgs == 4, 'each call appends its terminal record')\n\
+    let source = one_section(
+        "local other = models.get('other')
+         local msgs = messages.new()
+         msgs:user('one')
+         other:loop(msgs)
+         msgs:user('two')
+         other:loop(msgs)
+         assert(#msgs == 4, 'each call appends its terminal record')
          return msgs[2].content .. '|' .. msgs[4].content",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("an explicit handle runs at any point in the section");
-    assert_eq!(out, "first|second");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "first|second");
     let bodies = gateway.requests();
     assert_eq!(bodies.len(), 2, "two loops, two requests");
     for body in &bodies {
@@ -363,8 +340,8 @@ async fn a_handles_loop_runs_on_its_frozen_binding() {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn the_author_list_never_shows_a_half_answered_tool_batch() {
+#[test]
+fn the_author_list_never_shows_a_half_answered_tool_batch() {
     // Two calls in one round: each handler runs while its sibling is
     // unanswered, and the list it reads must not yet hold the batch's
     // assistant record. After the round the assistant record and both
@@ -376,36 +353,31 @@ async fn the_author_list_never_shows_a_half_answered_tool_batch() {
         ]),
         text("done"),
     ]);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('grab twice')\n\
-         local seen = {}\n\
-         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)\n\
-           seen[#seen + 1] = #msgs\n\
-           for _, m in ipairs(msgs) do\n\
-             assert(m.tool_calls == nil, 'no assistant call record is visible mid-batch')\n\
-             assert(m.role ~= 'tool', 'no tool record is visible mid-batch')\n\
-           end\n\
-           return 'grabbed ' .. args.value\n\
-         end)\n\
-         models.loop(msgs)\n\
-         assert(#seen == 2, 'both calls in the batch ran')\n\
-         assert(seen[1] == 1 and seen[2] == 1, 'each handler saw only the user message')\n\
-         assert(#msgs == 5, 'user, the batch record, two results, and the terminal text')\n\
-         assert(msgs[2].role == 'assistant' and #msgs[2].tool_calls == 2, 'one record holds the whole batch')\n\
-         assert(msgs[2].tool_calls[1].id == 'c1' and msgs[2].tool_calls[2].id == 'c2', 'calls keep their order')\n\
-         assert(msgs[3].tool_call_id == 'c1' and msgs[3].content == 'grabbed a', 'the first result follows')\n\
-         assert(msgs[4].tool_call_id == 'c2' and msgs[4].content == 'grabbed b', 'the second result follows')\n\
-         assert(msgs[5].role == 'assistant' and msgs[5].content == 'done', 'the terminal text is last')\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('grab twice')
+         local seen = {}
+         tools.offer_local('grab', 'Local grab', { value = 'string' }, function(args)
+           seen[#seen + 1] = #msgs
+           for _, m in ipairs(msgs) do
+             assert(m.tool_calls == nil, 'no assistant call record is visible mid-batch')
+             assert(m.role ~= 'tool', 'no tool record is visible mid-batch')
+           end
+           return 'grabbed ' .. args.value
+         end)
+         models.loop(msgs)
+         assert(#seen == 2, 'both calls in the batch ran')
+         assert(seen[1] == 1 and seen[2] == 1, 'each handler saw only the user message')
+         assert(#msgs == 5, 'user, the batch record, two results, and the terminal text')
+         assert(msgs[2].role == 'assistant' and #msgs[2].tool_calls == 2, 'one record holds the whole batch')
+         assert(msgs[2].tool_calls[1].id == 'c1' and msgs[2].tool_calls[2].id == 'c2', 'calls keep their order')
+         assert(msgs[3].tool_call_id == 'c1' and msgs[3].content == 'grabbed a', 'the first result follows')
+         assert(msgs[4].tool_call_id == 'c2' and msgs[4].content == 'grabbed b', 'the second result follows')
+         assert(msgs[5].role == 'assistant' and msgs[5].content == 'done', 'the terminal text is last')
          return 'ok'",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a two-call batch appends atomically");
-    assert_eq!(out, "ok");
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "ok");
     let tool_turns = gateway.requests()[1]
         .messages
         .iter()

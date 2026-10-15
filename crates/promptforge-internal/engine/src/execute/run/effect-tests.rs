@@ -6,14 +6,12 @@
 //! trust; and every failure projects to its display text. Each record
 //! round-trips through serde, as a run log and a replay depend on.
 
-use std::num::NonZeroU32;
-
 use promptforge_model_client::client::{RawExchange, ToolCall};
-use promptforge_model_client::model::{CompletionErrorKind, ModelInvocation};
-use promptforge_types::detail::model_id_from_validated;
+use promptforge_model_client::model::CompletionErrorKind;
 use serde_json::json;
 
 use super::*;
+use crate::test_support::scenario::test_binding;
 
 /// Serializes the record and reads it back.
 fn round_trip(record: &AnswerRecord) -> AnswerRecord {
@@ -23,17 +21,7 @@ fn round_trip(record: &AnswerRecord) -> AnswerRecord {
 
 /// Round 3's effect over `messages`, extending `after` by `keep` of them.
 fn chat_effect(messages: Vec<Message>, after: Option<RoundId>, keep: u64) -> Effect {
-    let binding = ModelBinding::new(
-        "writer",
-        "A general model for tests",
-        model_id_from_validated("gateway", "test-model"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
-        NonZeroU32::new(4096).expect("4096 is non-zero"),
-    );
+    let binding = test_binding("writer", "A general model for tests", "test-model");
     Effect::Chat {
         options: binding.completion_options(),
         binding,

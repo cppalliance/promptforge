@@ -38,7 +38,7 @@ const EFFECT_FIRST: &str = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\
 /// `preludes`, and starts a run over the prepared context.
 fn prelude_run(md: &str, preludes: Vec<Prelude>) -> Run {
     let prompt = parse(md);
-    let (catalog, _table) = fixture_tools(&[Arc::new(EchoTool) as Arc<dyn TestTool>]);
+    let (catalog, _table) = fixture_tools(&[Arc::new(echo_tool()) as Arc<dyn TestTool>]);
     let model = test_model_catalog()
         .models()
         .first()

@@ -5,40 +5,41 @@
 //! back to the model verbatim. `jump` is refused only while a handler
 //! runs, even through a saved reference.
 
-use super::models_loop::{loop_context, loop_context_observed, loop_prompt};
+use promptforge_parser::test_support::{one_section, prompt};
+
+use super::models_loop::loop_scenario;
 use super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
-use crate::lua::ToolSet;
-use crate::test_support::tokio_driver::TokioDriver;
 
 /// The `grab` local tool registration the loop tests open with, followed
 /// by one loop over a single user message; `handler` is the Lua body of
 /// the handler function, given `args`.
 fn grab_loop(handler: &str) -> String {
-    loop_prompt(&format!(
-        "tools.offer_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)\n\
-           {handler}\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('Use the tool.')\n\
-         models.loop(msgs)\n\
+    one_section(&format!(
+        "tools.offer_local('grab', 'Grab a value', {{ value = 'string' }}, function(args)
+           {handler}
+         end)
+         local msgs = messages.new()
+         msgs:user('Use the tool.')
+         models.loop(msgs)
          return msgs[#msgs].content"
     ))
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn local_tool_handler_result_returns_to_the_model() {
+/// The section the jump tests' `## Only` jumps to, returning a fixed
+/// marker when a jump lands there.
+const OTHER: (&str, &str) = ("Other", "return 'jumped'");
+
+#[test]
+fn local_tool_handler_result_returns_to_the_model() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&grab_loop("return 'got ' .. args.value"));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the local handler answers the model's call");
-    assert_eq!(out, "final answer");
+    let trace = loop_scenario(grab_loop("return 'got ' .. args.value"))
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
 
     let bodies = gateway.requests();
     let function = &bodies[0].tools[0];
@@ -56,8 +57,8 @@ async fn local_tool_handler_result_returns_to_the_model() {
     assert_eq!(last_tool_turn_content(&bodies), "got hi");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn local_tool_multiple_calls_in_one_response_all_run() {
+#[test]
+fn local_tool_multiple_calls_in_one_response_all_run() {
     let gateway = ScriptedChat::new(vec![
         calls(&[
             ("c1", "grab", "{\"value\":\"a\"}"),
@@ -65,25 +66,21 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
         ]),
         text("final answer"),
     ]);
-    let md = loop_prompt(
-        "local calls = {}\n\
-         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           calls[#calls + 1] = args.value\n\
-           return 'ok ' .. args.value\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('Use the tool.')\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "local calls = {}
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+           calls[#calls + 1] = args.value
+           return 'ok ' .. args.value
+         end)
+         local msgs = messages.new()
+         msgs:user('Use the tool.')
+         models.loop(msgs)
          return table.concat(calls, ',') .. '|' .. msgs[#msgs].content",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("both calls in the one response run");
+    let trace = loop_scenario(source).chat(&gateway).run();
     assert_eq!(
-        out, "a,b|final answer",
+        trace.text(),
+        "a,b|final answer",
         "both calls in the one response must run, in order"
     );
 
@@ -99,27 +96,22 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
+#[test]
+fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("unreachable"),
     ]);
-    let prompt = parse(&grab_loop("error('handler exploded')"));
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a handler Lua error must fail the tool call");
+    let trace = loop_scenario(grab_loop("error('handler exploded')"))
+        .chat(&gateway)
+        .run();
+    let error = trace.error();
     assert!(
         error.to_string().contains("handler exploded"),
         "the handler's error must surface: {error}"
     );
+    let recorder = ToolRecorder::default();
+    trace.replay(&recorder);
     let lines = recorder.lines();
     assert!(
         lines.contains(&format!("Only: {}", detail::TOOL_CALL_FAILED)),
@@ -136,54 +128,38 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
-    use std::time::{Duration, Instant};
-
+#[test]
+fn cancel_during_a_looping_local_tool_handler_returns_promptly() {
+    // The round's answer hands the model's call to the looping handler in
+    // the next step. A cancel landing before that step starts ends the run
+    // the same way, and a hang fails through nextest's timeout.
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("unreachable"),
     ]);
-    let prompt = parse(&grab_loop("while true do end"));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let canceller = driver.cancel_handle();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        canceller.cancel();
-    });
-
-    let start = Instant::now();
-    let result = driver.drive().await;
-
+    let trace = loop_scenario(grab_loop("while true do end"))
+        .chat(&gateway)
+        .cancel_when(|effect| matches!(effect, Effect::Chat { .. }))
+        .run();
     assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "cancel during a looping local tool handler must return promptly, took {:?}",
-        start.elapsed()
-    );
-    assert!(
-        matches!(result, Err(crate::Error::Interrupted)),
-        "expected Interrupted, got {result:?}"
+        matches!(trace.result(), RunResult::Cancelled),
+        "expected the cancelled run, got {:?}",
+        trace.result()
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text() {
+#[test]
+fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&grab_loop(
-        "store.write('grab.txt', 'kept ' .. args.value)\n\
-           return store.read('grab.txt')",
-    ));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the handler's store calls suspend and resume inside the loop");
-    assert_eq!(out, "final answer");
+    let source = grab_loop(
+        "store.write('grab.txt', 'kept ' .. args.value)
+         return store.read('grab.txt')",
+    );
+    let trace = loop_scenario(source).chat(&gateway).run();
+    assert_eq!(trace.text(), "final answer");
     assert_eq!(
         last_tool_turn_content(&gateway.requests()),
         "kept hi",
@@ -191,36 +167,23 @@ async fn a_loop_handler_writes_and_reads_the_store_and_the_model_gets_the_text()
     );
 }
 
-/// The two-section shell the jump tests drive: `lua` runs in `## Only`,
-/// and `## Other` returns a fixed marker when a jump lands there.
-fn jump_prompt(lua: &str) -> String {
-    format!(
-        "---\nname: loop\ndescription: d\npromptforge: 0\n---\n\n# Loop\n\n## Only\n\n```lua\n{lua}\n```\n\n\
-         ## Other\n\n```lua\nreturn 'jumped'\n```\n"
-    )
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn a_handler_that_calls_jump_fails_the_run() {
+#[test]
+fn a_handler_that_calls_jump_fails_the_run() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("unreachable"),
     ]);
-    let prompt = parse(&jump_prompt(
-        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           jump('## Other')\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('Use the tool.')\n\
-         models.loop(msgs)\n\
-         return 'no jump'",
-    ));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("jump is refused while the handler runs");
-    let message = error.to_string();
+    let only = "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+                  jump('## Other')
+                end)
+                local msgs = messages.new()
+                msgs:user('Use the tool.')
+                models.loop(msgs)
+                return 'no jump'";
+    let trace = loop_scenario(prompt("", &[("Only", only), OTHER]))
+        .chat(&gateway)
+        .run();
+    let message = trace.error().to_string();
     assert!(
         message.contains(JUMP_REFUSAL),
         "the handler's call is refused with the guard's message: {message}"
@@ -237,132 +200,109 @@ const SAVED_JUMP_GRAB: &str = "local j = jump\n\
        j('## Other')\n\
      end)\n";
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_saved_jump_reference_is_refused_in_a_handler_the_script_calls() {
-    let prompt = parse(&jump_prompt(&format!(
+#[test]
+fn a_saved_jump_reference_is_refused_in_a_handler_the_script_calls() {
+    let only = format!(
         "{SAVED_JUMP_GRAB}tools.call('grab', {{ value = 'hi' }})\n\
          return 'no jump'"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect_err("a saved reference to jump is refused inside the handler");
-    let message = error.to_string();
+    );
+    let trace = loop_scenario(prompt("", &[("Only", &only), OTHER])).run();
+    let message = trace.error().to_string();
     assert!(
         message.contains(JUMP_REFUSAL),
         "the refusal fails the run, and no jump lands: {message}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_saved_jump_reference_is_refused_in_a_handler_the_model_calls() {
+#[test]
+fn a_saved_jump_reference_is_refused_in_a_handler_the_model_calls() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("unreachable"),
     ]);
-    let prompt = parse(&jump_prompt(&format!(
+    let only = format!(
         "{SAVED_JUMP_GRAB}local msgs = messages.new()\n\
          msgs:user('Use the tool.')\n\
          models.loop(msgs)\n\
          return 'no jump'"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a saved reference to jump is refused inside the handler");
-    let message = error.to_string();
+    );
+    let trace = loop_scenario(prompt("", &[("Only", &only), OTHER]))
+        .chat(&gateway)
+        .run();
+    let message = trace.error().to_string();
     assert!(
         message.contains(JUMP_REFUSAL),
         "the refusal fails the run, and no jump lands: {message}"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_caller_that_catches_the_jump_refusal_continues_the_block() {
-    let prompt = parse(&jump_prompt(&format!(
+#[test]
+fn a_caller_that_catches_the_jump_refusal_continues_the_block() {
+    let only = format!(
         "{SAVED_JUMP_GRAB}local ok, err = pcall(tools.call, 'grab', {{ value = 'hi' }})\n\
          assert(not ok, 'the refusal reaches the call site')\n\
          assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))\n\
          return 'no jump'"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the caller catches the refusal");
-    assert_eq!(out, "no jump");
+    );
+    let trace = loop_scenario(prompt("", &[("Only", &only), OTHER])).run();
+    assert_eq!(trace.text(), "no jump");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
-    let prompt = parse(&jump_prompt(&format!(
-        "tools.offer_local('inner', 'Inner', {{}}, function() return 'inner' end)\n\
-         tools.offer_local('outer', 'Outer', {{}}, function()\n\
-           local inner = tools.call('inner', {{}})\n\
-           local ok, err = pcall(jump, '## Other')\n\
-           assert(not ok, 'jump is still refused in the outer handler')\n\
-           assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))\n\
-           return inner\n\
-         end)\n\
-         assert(tools.call('outer', {{}}) == 'inner', 'the outer handler returns')\n\
+#[test]
+fn jump_stays_refused_in_an_outer_handler_after_an_inner_one_returns() {
+    let only = format!(
+        "tools.offer_local('inner', 'Inner', {{}}, function() return 'inner' end)
+         tools.offer_local('outer', 'Outer', {{}}, function()
+           local inner = tools.call('inner', {{}})
+           local ok, err = pcall(jump, '## Other')
+           assert(not ok, 'jump is still refused in the outer handler')
+           assert(tostring(err):find('{JUMP_REFUSAL}', 1, true), tostring(err))
+           return inner
+         end)
+         assert(tools.call('outer', {{}}) == 'inner', 'the outer handler returns')
          jump('## Other')"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("jump works in the block once the outer handler returns");
-    assert_eq!(out, "jumped");
+    );
+    let trace = loop_scenario(prompt("", &[("Only", &only), OTHER])).run();
+    assert_eq!(trace.text(), "jumped");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn jump_works_in_the_same_block_after_the_loop_returns() {
+#[test]
+fn jump_works_in_the_same_block_after_the_loop_returns() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&jump_prompt(
-        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           return 'got ' .. args.value\n\
-         end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('Use the tool.')\n\
-         models.loop(msgs)\n\
-         jump('## Other')",
-    ));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("jump is restored once the handler returns");
-    assert_eq!(out, "jumped");
+    let only = "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+                  return 'got ' .. args.value
+                end)
+                local msgs = messages.new()
+                msgs:user('Use the tool.')
+                models.loop(msgs)
+                jump('## Other')";
+    let trace = loop_scenario(prompt("", &[("Only", only), OTHER]))
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "jumped");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
+#[test]
+fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "grab", "{\"value\":\"hi\"}")]),
         text("unreachable"),
     ]);
-    let prompt = parse(&grab_loop("return { args.value }"));
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a table return has no text form");
+    let trace = loop_scenario(grab_loop("return { args.value }"))
+        .chat(&gateway)
+        .run();
+    let error = trace.error();
     assert!(
         error
             .to_string()
             .contains("cannot return a table as a result"),
         "the scalar-return rule names the rejected type: {error}"
     );
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
     assert!(
         recorder
             .events()
@@ -371,32 +311,26 @@ async fn a_handler_returning_a_table_raises_and_is_observed_as_a_failure() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
+#[test]
+fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "tools_concrete", "{}")]),
         text("final answer"),
     ]);
-    let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let tools = FixtureTools::new(vec![fixture_binding(
-        "tools_concrete",
-        "Concrete description.",
-        Arc::clone(&tool) as Arc<dyn TestTool>,
-    )]);
-    let prompt = parse(&loop_prompt(
-        "tools.offer('tools/concrete')\n\
-         tools.offer_local('tools_concrete', 'Local concrete', {}, function() return 'local' end)\n\
-         local msgs = messages.new()\n\
-         msgs:user('Use the tool.')\n\
-         models.loop(msgs)\n\
+    let (tool, called) = scoped_tool("concrete", "Concrete description.");
+    let source = one_section(
+        "tools.offer('tools/concrete')
+         tools.offer_local('tools_concrete', 'Local concrete', {}, function() return 'local' end)
+         local msgs = messages.new()
+         msgs:user('Use the tool.')
+         models.loop(msgs)
          return msgs[#msgs].content",
-    ));
-    let (ctx, fixture) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the local tool answers the shared name");
-    assert_eq!(out, "final answer");
+    );
+    let trace = loop_scenario(source)
+        .offer("tools_concrete", tool)
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
     let bodies = gateway.requests();
     assert_eq!(
         bodies[0].tools.len(),
@@ -406,24 +340,20 @@ async fn a_local_tool_may_take_an_offered_wire_name_and_wins_in_scope() {
     assert_eq!(bodies[0].tools[0].description(), "Local concrete");
     assert_eq!(last_tool_turn_content(&bodies), "local");
     assert_eq!(
-        tool.calls.load(Ordering::SeqCst),
+        called.load(Ordering::SeqCst),
         0,
         "the offered catalog tool is never called"
     );
 }
 
-#[tokio::test]
-async fn local_tool_alias_cannot_be_registered_twice() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
-# Test prompt\n\n\
-## Only\n\n\
-```lua\n\
-tools.offer_local('grab', 'First grab', {}, function() return 'first' end)\n\
-tools.offer_local('grab', 'Second grab', {}, function() return 'second' end)\n\
-```\n";
-    let error = run_offline(md)
-        .await
-        .expect_err("a local alias must not be registered twice");
+#[test]
+fn local_tool_alias_cannot_be_registered_twice() {
+    let source = one_section(
+        "tools.offer_local('grab', 'First grab', {}, function() return 'first' end)
+         tools.offer_local('grab', 'Second grab', {}, function() return 'second' end)",
+    );
+    let trace = Scenario::new(source).run();
+    let error = trace.error();
     assert!(
         error.to_string().contains("is already registered"),
         "the error must identify the duplicate local alias: {error}"

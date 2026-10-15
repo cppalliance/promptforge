@@ -146,6 +146,13 @@ impl RunError {
         self.inner
     }
 
+    /// The Engine's own error behind the boundary one, for a test that
+    /// matches on its variant.
+    #[cfg(test)]
+    pub(crate) fn inner(&self) -> &Error {
+        &self.inner
+    }
+
     /// Returns `true` when retrying the run may succeed (transient transport or
     /// backend failures).
     #[must_use]

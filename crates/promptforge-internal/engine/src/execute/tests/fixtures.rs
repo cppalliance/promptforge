@@ -1,7 +1,6 @@
 //! Fixture tools the execution suites bind and call.
 
 use super::*;
-use crate::test_support::FnTool;
 
 // Wrap/nonce tests live in the untrusted module; these just confirm wiring.
 
@@ -12,6 +11,11 @@ fn value_schema() -> Value {
         "properties": { "value": { "type": "string" } },
         "required": ["value"]
     })
+}
+
+/// The schema of a tool that takes no arguments.
+fn no_arguments() -> Value {
+    json!({ "type": "object", "properties": {} })
 }
 
 /// The fixture Plugin's `tools/echo`, which echoes its `value` argument.
@@ -35,37 +39,6 @@ pub(super) fn untrusted_echo_tool() -> FnTool {
     .description("Echo the value argument back as untrusted external data.")
 }
 
-/// A trivial tool that echoes back the `value` argument it is given.
-pub(super) struct EchoTool;
-
-#[async_trait::async_trait]
-impl TestTool for EchoTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Echo the value argument back to the caller."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": { "value": { "type": "string" } },
-            "required": ["value"]
-        })
-    }
-
-    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        let value = require_string_arg(&args, "value")?;
-        Ok(ToolOutput::trusted(format!("echoed: {value}")))
-    }
-}
-
 /// Reads a required string argument from a fixture tool's call arguments.
 ///
 /// The fixtures declare their arguments `required` in their JSON schema, so a
@@ -79,101 +52,31 @@ fn require_string_arg<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a
     })
 }
 
-/// A tool whose output opts in to guard-wrapping, standing in for a tool
-/// like `web_fetch` that returns attacker-controllable text.
-pub(super) struct UntrustedEchoTool;
-
-#[async_trait::async_trait]
-impl TestTool for UntrustedEchoTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/untrusted_echo").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Echo the value argument back as untrusted external data."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": { "value": { "type": "string" } },
-            "required": ["value"]
-        })
-    }
-
-    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        let value = require_string_arg(&args, "value")?;
-        Ok(ToolOutput::untrusted(format!("echoed: {value}")))
-    }
-}
-
-/// A tool returning a JSON object as text, bound structured in scheduler
-/// fixtures so a script `tools.call` resumes it as a Lua table.
-pub(super) struct StructuredFixtureTool {
-    /// The exact output text; valid JSON for the happy path, garbage for
-    /// the invalid-JSON tool-error path.
-    pub(super) body: &'static str,
-    /// Whether the output is trusted. An untrusted output is nonce-wrapped
-    /// before the structured classification, so even valid JSON fails the
-    /// parse - the ordering that restricts structured output to trusted
-    /// tools.
-    pub(super) trusted: bool,
-}
-
-#[async_trait::async_trait]
-impl TestTool for StructuredFixtureTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/structured").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Return a structured payload."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        Ok(if self.trusted {
-            ToolOutput::trusted(self.body)
+/// `tools/structured`, a structured tool returning `body` as its exact
+/// output text, so a script `tools.call` resumes valid JSON as a Lua
+/// table and garbage as the invalid-JSON tool error. An untrusted output
+/// is nonce-wrapped before the structured classification, so even valid
+/// JSON fails the parse: the ordering that restricts structured output to
+/// trusted tools.
+#[track_caller]
+pub(super) fn structured_tool(body: &'static str, trusted: bool) -> FnTool {
+    FnTool::new("tools/structured", no_arguments(), move |_| {
+        Ok(if trusted {
+            ToolOutput::trusted(body)
         } else {
-            ToolOutput::untrusted(self.body)
+            ToolOutput::untrusted(body)
         })
-    }
+    })
+    .description("Return a structured payload.")
+    .structured()
 }
 
-/// A tool whose every call fails, standing in for a tool that hits a broken
-/// backend, so a test can observe what the loop reports on its way out.
-pub(super) struct FailingTool;
-
-#[async_trait::async_trait]
-impl TestTool for FailingTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse("tools/failing").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Always fail."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+/// `tools/failing`, whose every call fails, standing in for a tool that
+/// hits a broken backend, so a test can observe what the loop reports on
+/// its way out.
+#[track_caller]
+pub(super) fn failing_tool() -> FnTool {
+    FnTool::new("tools/failing", no_arguments(), |_| {
         // Attach an inner cause so the executor's error can be checked for source
         // preservation (item 4): the tool error must not be flattened to a string.
         let cause = std::io::Error::other("upstream socket reset");
@@ -181,49 +84,22 @@ impl TestTool for FailingTool {
             ToolError::with_source("the tool's own backend failed", cause)
                 .with_kind(ToolErrorKind::Backend),
         )
-    }
+    })
+    .description("Always fail.")
 }
 
-pub(super) struct ScopedFixtureTool {
-    id: ToolId,
-    description: &'static str,
-    pub(super) calls: Arc<AtomicUsize>,
-}
-
-impl ScopedFixtureTool {
-    pub(super) fn new(name: &str, description: &'static str) -> Self {
-        Self {
-            id: ToolId::parse(&format!("tools/{name}")).expect("valid id"),
-            description,
-            calls: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl TestTool for ScopedFixtureTool {
-    fn id(&self) -> ToolId {
-        self.id.clone()
-    }
-
-    fn description(&self) -> &str {
-        self.description
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {"value": {"type": "string"}},
-            "required": ["value"]
-        })
-    }
-
-    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+/// `tools/<name>`, which answers its `value` argument with `called <name>
+/// with <value>`, beside the count of its calls.
+#[track_caller]
+pub(super) fn scoped_tool(name: &str, description: &str) -> (FnTool, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let called = format!("called {name} with");
+    let tool = FnTool::new(&format!("tools/{name}"), value_schema(), move |args| {
+        counted.fetch_add(1, Ordering::SeqCst);
         let value = require_string_arg(&args, "value")?;
-        Ok(ToolOutput::trusted(format!(
-            "called {} with {value}",
-            self.id.name(),
-        )))
-    }
+        Ok(ToolOutput::trusted(format!("{called} {value}")))
+    })
+    .description(description);
+    (tool, calls)
 }

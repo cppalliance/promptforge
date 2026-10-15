@@ -6,25 +6,17 @@
 //! them.
 
 use super::*;
-use crate::model::ModelBinding;
-use promptforge_model_client::model::ModelInvocation;
-use promptforge_types::detail::model_id_from_validated;
+use crate::test_support::scenario::test_binding;
 
 /// The model set the live H1 pass would leave behind: one `writer` binding
 /// as the prompt-wide default. The scheduler's tests bypass H1, so they
 /// pre-fill the run's shared set directly.
 fn writer_models() -> ModelSet {
     ModelSet {
-        bindings: vec![ModelBinding::new(
+        bindings: vec![test_binding(
             "writer",
             "A general model for tests",
-            model_id_from_validated("gateway", "test-model"),
-            ModelInvocation {
-                temperature: None,
-                max_tokens: None,
-                thinking: None,
-            },
-            NonZeroU32::new(4096).expect("4096 is non-zero"),
+            "test-model",
         )],
         default: Some("writer".to_owned()),
     }

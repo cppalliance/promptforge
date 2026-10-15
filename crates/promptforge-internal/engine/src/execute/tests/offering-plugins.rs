@@ -55,9 +55,9 @@ async fn an_offered_plugin_reaches_only_the_rounds_of_the_section_entry_that_off
     let (ctx, fixture) = offering_context(
         &prompt,
         &[
-            Offered::at("kit/a"),
-            Offered::at("kit/b"),
-            Offered::at("web/fetch"),
+            offered_tool("kit/a"),
+            offered_tool("kit/b"),
+            offered_tool("web/fetch"),
         ],
     );
     let mut scheduler = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));

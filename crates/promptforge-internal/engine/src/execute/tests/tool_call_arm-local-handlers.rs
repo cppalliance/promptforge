@@ -6,42 +6,33 @@
 //! raises kind `tool` in the handler and whose untrusted wrapper
 //! survives.
 
-use super::super::models_loop::{bound_tool, echo_tools};
+use promptforge_parser::test_support::prompt;
+
 use super::*;
 
 /// The `grab` local tool registration every local-tool test opens with.
 const ADD_LOCAL_GRAB: &str = "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \
      function(args) return 'got ' .. args.value end)\n";
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_local_lua_tool_call_issues_no_leaf_work() {
-    let md = arm_prompt(&format!(
+#[test]
+fn a_local_lua_tool_call_issues_no_leaf_work() {
+    let source = one_section(&format!(
         "{ADD_LOCAL_GRAB}\
          local out = tools.call('grab', {{ value = 'hi' }})\n\
          return out .. '|' .. tostring(tools.calls.grab)"
     ));
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a local tool answers on the parked chain's VM");
+    let trace = arm_scenario(source).run();
     assert_eq!(
-        out, "got hi|1",
+        trace.text(),
+        "got hi|1",
         "the handler's text resumes and the call counts"
     );
     assert_eq!(
-        scheduler.leaf_requests_issued(),
+        trace.effects().len(),
         0,
         "a local tool call spawns no leaf request"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         lines
             .iter()
@@ -56,31 +47,20 @@ async fn a_local_lua_tool_call_issues_no_leaf_work() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
-    let md = arm_prompt(&format!(
+#[test]
+fn a_model_issued_local_tool_call_reports_under_its_call_id() {
+    let source = one_section(&format!(
         "{ADD_LOCAL_GRAB}\
          return tools.call_as_model('call_7', 'grab', {{ value = 'hi' }})"
     ));
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a model-issued local call answers inline");
-    assert_eq!(out, "got hi");
+    let trace = arm_scenario(source).run();
+    assert_eq!(trace.text(), "got hi");
     assert_eq!(
-        scheduler.leaf_requests_issued(),
+        trace.effects().len(),
         0,
         "a model-issued local call spawns no leaf request"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         lines.iter().any(
             |line| line == "Only: tool_result id=call_7 alias=grab trusted=true content=got hi"
@@ -89,59 +69,39 @@ async fn a_model_issued_local_tool_call_reports_under_its_call_id() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_called_local_handler_uses_the_store() {
-    let md = arm_prompt(
-        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           store.write('grab.txt', 'kept ' .. args.value)\n\
-           return store.read('grab.txt')\n\
-         end)\n\
+#[test]
+fn a_script_called_local_handler_uses_the_store() {
+    let source = one_section(
+        "tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+           store.write('grab.txt', 'kept ' .. args.value)
+           return store.read('grab.txt')
+         end)
          return tools.call('grab', { value = 'hi' })",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the handler's store calls suspend and resume the block");
-    assert_eq!(out, "kept hi");
+    let trace = arm_scenario(source).run();
+    assert_eq!(trace.text(), "kept hi");
     assert_eq!(
-        tool_result_lines(&recorder),
+        tool_result_lines(&tool_lines(&trace)),
         vec!["Only: tool_result id= alias=grab trusted=true content=kept hi".to_owned()]
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
-    let md = arm_prompt(
-        "local raised = { kind = 'custom', message = 'handler exploded' }\n\
-         tools.offer_local('grab', 'Grab a value', {}, function() error(raised) end)\n\
-         local ok, err = pcall(tools.call, 'grab', {})\n\
-         assert(not ok, 'the handler raise reaches the call site')\n\
-         assert(err == raised and err.kind == 'custom', 'the caller catches the handler table')\n\
-         jump('## Other')",
-    ) + "\n## Other\n\n```lua\nreturn 'jumped'\n```\n";
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the handler's raise is pcall-able at the call site");
+#[test]
+fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
+    let only = "local raised = { kind = 'custom', message = 'handler exploded' }
+                tools.offer_local('grab', 'Grab a value', {}, function() error(raised) end)
+                local ok, err = pcall(tools.call, 'grab', {})
+                assert(not ok, 'the handler raise reaches the call site')
+                assert(err == raised and err.kind == 'custom', 'the caller catches the handler table')
+                jump('## Other')";
+    let source = prompt("", &[("Only", only), ("Other", "return 'jumped'")]);
+    let trace = arm_scenario(source).run();
     assert_eq!(
-        out, "jumped",
+        trace.text(),
+        "jumped",
         "after the caught failure the block's `jump` transfers"
     );
-    let lines = recorder.lines();
+    let lines = tool_lines(&trace).lines();
     assert!(
         lines
             .iter()
@@ -154,31 +114,21 @@ async fn a_script_caller_catches_the_handlers_own_error_and_jump_is_restored() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_nested_local_call_reports_both_results_innermost_first() {
-    let md = arm_prompt(
-        "tools.offer_local('inner', 'Inner', { value = 'string' }, function(args)\n\
-           return 'inner ' .. args.value\n\
-         end)\n\
-         tools.offer_local('outer', 'Outer', { value = 'string' }, function(args)\n\
-           return 'outer ' .. tools.call('inner', { value = args.value })\n\
-         end)\n\
+#[test]
+fn a_nested_local_call_reports_both_results_innermost_first() {
+    let source = one_section(
+        "tools.offer_local('inner', 'Inner', { value = 'string' }, function(args)
+           return 'inner ' .. args.value
+         end)
+         tools.offer_local('outer', 'Outer', { value = 'string' }, function(args)
+           return 'outer ' .. tools.call('inner', { value = args.value })
+         end)
          return tools.call_as_model('call_1', 'outer', { value = 'hi' })",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("a handler may call another local tool");
-    assert_eq!(out, "outer inner hi");
+    let trace = arm_scenario(source).run();
+    assert_eq!(trace.text(), "outer inner hi");
     assert_eq!(
-        tool_result_lines(&recorder),
+        tool_result_lines(&tool_lines(&trace)),
         vec![
             "Only: tool_result id= alias=inner trusted=true content=inner hi".to_owned(),
             "Only: tool_result id=call_1 alias=outer trusted=true content=outer inner hi"
@@ -188,90 +138,66 @@ async fn a_nested_local_call_reports_both_results_innermost_first() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
-    let md = arm_prompt(
-        "tools.offer('tools/echo')\n\
-         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           return tools.call('tools/echo', { value = args.value })\n\
-         end)\n\
-         local out = tools.call('grab', { value = 'hi' })\n\
+#[test]
+fn a_handler_dispatches_a_bound_tool_as_one_leaf_request() {
+    let source = one_section(
+        "tools.offer('tools/echo')
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+           return tools.call('tools/echo', { value = args.value })
+         end)
+         local out = tools.call('grab', { value = 'hi' })
          return out .. '|' .. tostring(tools.calls.grab) .. '|' .. tostring(tools.calls['tools/echo'])",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        echo_tools(),
-        Arc::new(NullObserver::default()) as Arc<dyn Observer>,
-    );
-    let mut scheduler = TokioDriver::new(&ctx, fixture, None);
-    let out = scheduler
-        .drive()
-        .await
-        .expect("a handler's bound call resumes inside the handler");
-    assert_eq!(out, "echoed: hi|1|1", "both calls count once");
+    let trace = arm_scenario(source).offer("echo", echo_tool()).run();
+    assert_eq!(trace.text(), "echoed: hi|1|1", "both calls count once");
     assert_eq!(
-        scheduler.leaf_requests_issued(),
+        trace.effects().len(),
         1,
         "the echo call is the one leaf request; the local call issues none"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_the_handler() {
-    let md = arm_prompt(
-        "tools.offer('tools/failing')\n\
-         tools.offer_local('grab', 'Grab a value', {}, function()\n\
-           local ok, err = pcall(tools.call, 'tools/failing', {})\n\
-           assert(not ok, 'the bound failure raises inside the handler')\n\
-           return err.kind\n\
-         end)\n\
+#[test]
+fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_the_handler() {
+    let source = one_section(
+        "tools.offer('tools/failing')
+         tools.offer_local('grab', 'Grab a value', {}, function()
+           local ok, err = pcall(tools.call, 'tools/failing', {})
+           assert(not ok, 'the bound failure raises inside the handler')
+           return err.kind
+         end)
          return tools.call_as_model('call_1', 'grab', {})",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        failing_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("the handler catches its own bound call's failure");
+    let trace = arm_scenario(source).offer("fail", failing_tool()).run();
     assert_eq!(
-        out, "tool",
+        trace.text(),
+        "tool",
         "the handler's call is a script call, raising kind `tool`"
     );
     assert_eq!(
-        tool_result_lines(&recorder),
+        tool_result_lines(&tool_lines(&trace)),
         vec!["Only: tool_result id=call_1 alias=grab trusted=true content=tool".to_owned()],
         "the inner failure fires no ToolResult; only the local call reports under call_1"
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
-    let md = arm_prompt(
-        "tools.offer('tools/untrusted_echo')\n\
-         tools.offer_local('plain', 'Plain', {}, function() return 'plain text' end)\n\
-         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
-           return tools.call('tools/untrusted_echo', { value = args.value })\n\
-         end)\n\
+#[test]
+fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
+    let source = one_section(
+        "tools.offer('tools/untrusted_echo')
+         tools.offer_local('plain', 'Plain', {}, function() return 'plain text' end)
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)
+           return tools.call('tools/untrusted_echo', { value = args.value })
+         end)
          return tools.call('plain', {}) .. '||' .. tools.call('grab', { value = 'hi' })",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(ToolRecorder::default());
-    let (ctx, fixture) = tool_context(
-        &prompt,
-        bound_tool("echo", Arc::new(UntrustedEchoTool)),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, None)
-        .drive()
-        .await
-        .expect("both local calls answer");
-    let (plain, wrapped) = out.split_once("||").expect("the block joins both results");
+    let trace = arm_scenario(source)
+        .offer("echo", untrusted_echo_tool())
+        .run();
+    let (plain, wrapped) = trace
+        .text()
+        .split_once("||")
+        .expect("the block joins both results");
     assert_eq!(plain, "plain text", "a handler's own text gets no wrapper");
     assert!(
         wrapped.contains("<untrusted_input_")
@@ -279,7 +205,7 @@ async fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
             && wrapped.contains("echoed: hi"),
         "the bound tool's untrusted output keeps its wrapper through the handler: {wrapped}"
     );
-    let lines = tool_result_lines(&recorder);
+    let lines = tool_result_lines(&tool_lines(&trace));
     assert!(
         lines.contains(
             &"Only: tool_result id= alias=plain trusted=true content=plain text".to_owned()

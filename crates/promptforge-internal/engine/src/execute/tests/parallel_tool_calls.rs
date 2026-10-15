@@ -15,7 +15,7 @@ use super::models_loop::{echo_tools, loop_context, loop_prompt};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Run, Step};
 use crate::model::{Completion, CompletionResult, ToolCall};
-use crate::test_support::scenario::{chat_answer, text_of};
+use crate::test_support::scenario::{chat_answer, only_effect, text_of};
 
 /// The effects one step issued, in issue order, and the events it
 /// reported. Panics when the run is over.
@@ -31,13 +31,6 @@ fn pending(step: Step) -> (Vec<(EffectId, Effect)>, Vec<Event>) {
         .map(|(id, _, effect)| (id, effect))
         .collect();
     (effects, events)
-}
-
-/// The one effect a step issued; panics on any other count.
-fn only_effect(step: Step) -> (EffectId, Effect) {
-    let (mut effects, _) = pending(step);
-    assert_eq!(effects.len(), 1, "one effect is issued: {effects:?}");
-    effects.remove(0)
 }
 
 /// A round requesting every `(id, name, arguments)` call, in order.

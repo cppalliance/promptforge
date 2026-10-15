@@ -4,31 +4,21 @@
 
 use super::*;
 
-/// The run offers `scoped` (id `tools/scoped`) and `global_tool` (id
-/// `tools/global_tool`); [`scoped_loop`] offers only `scoped`.
-fn scoped_and_global_tools() -> FixtureTools {
-    FixtureTools::new(vec![
-        fixture_binding(
-            "scoped",
-            "A scoped tool.",
-            Arc::new(ScopedFixtureTool::new("scoped", "A scoped tool.")),
-        ),
-        fixture_binding(
+/// A run of the loop section that offers `tools/scoped` (wire name
+/// `scoped`) and leaves `tools/global_tool` (wire name `global_tool`)
+/// unoffered, though the run offers both.
+fn scoped_loop() -> Scenario {
+    let source = one_section(&format!("tools.offer('tools/scoped')\n{LOOP_TO_TEXT}"));
+    loop_scenario(source)
+        .offer("scoped", scoped_tool("scoped", "A scoped tool.").0)
+        .offer(
             "global_tool",
-            "A global tool.",
-            Arc::new(ScopedFixtureTool::new("global_tool", "A global tool.")),
-        ),
-    ])
+            scoped_tool("global_tool", "A global tool.").0,
+        )
 }
 
-/// The loop section that offers `tools/scoped` and leaves
-/// `tools/global_tool` unoffered.
-fn scoped_loop() -> String {
-    loop_prompt(&format!("tools.offer('tools/scoped')\n{LOOP_TO_TEXT}"))
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
+#[test]
+fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
     // The loop's scope gate: a model call naming a tool the run offers but
     // the section never offered fails with OutOfScopeToolCall holding the
     // offered-but-unscoped hint.
@@ -37,13 +27,9 @@ async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
         "global_tool",
         "{\"value\":\"x\"}",
     )])]);
-    let prompt = parse(&scoped_loop());
-    let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("model calling a global-but-unscoped tool must fail");
-    match &error {
+    let trace = scoped_loop().chat(&gateway).run();
+    let error = trace.error().inner();
+    match error {
         Error::OutOfScopeToolCall {
             name,
             global_exists,
@@ -64,8 +50,8 @@ async fn model_calling_an_offered_but_unscoped_tool_is_a_hard_error() {
     assert_eq!(gateway.call_count(), 1, "the rejected round is the last");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_suffix() {
+#[test]
+fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_suffix() {
     // A model reaches a tool only by the wire name its round advertised.
     // The canonical id of the advertised `scoped` is out of scope, but it
     // names no tool the section left unoffered, so the error drops the
@@ -75,13 +61,9 @@ async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_su
         "tools/scoped",
         "{\"value\":\"x\"}",
     )])]);
-    let prompt = parse(&scoped_loop());
-    let (ctx, fixture) = loop_context(&prompt, scoped_and_global_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("model calling an advertised tool by its id must fail");
-    match &error {
+    let trace = scoped_loop().chat(&gateway).run();
+    let error = trace.error().inner();
+    match error {
         Error::OutOfScopeToolCall {
             name,
             global_exists,
@@ -104,22 +86,20 @@ async fn model_calling_an_advertised_tool_by_canonical_id_gets_no_not_offered_su
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn model_calling_pure_unknown_tool_is_a_hard_error() {
+#[test]
+fn model_calling_pure_unknown_tool_is_a_hard_error() {
     let gateway = ScriptedChat::new(vec![calls(&[(
         "call_1",
         "nonexistent",
         "{\"value\":\"x\"}",
     )])]);
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("model calling a pure unknown tool must fail");
-    match &error {
+    let source = one_section(&format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    let error = trace.error().inner();
+    match error {
         Error::OutOfScopeToolCall {
             name,
             global_exists,

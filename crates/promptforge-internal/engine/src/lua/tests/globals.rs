@@ -9,22 +9,20 @@
 //! a declared Plugin and of another one, since a tool is never a global
 //! either.
 
-use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use mlua::Value;
 use serde_json::json;
 
 use promptforge_lua::{RESERVED_NAMES, Reserved, reserved_name};
-use promptforge_model_client::model::ModelInvocation;
-use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{Library, SectionText, SectionVm, ToolBinding, ToolSet};
-use crate::model::{ModelBinding, ModelSet};
+use crate::model::ModelSet;
 use crate::test_support::recording::null_emitter;
+use crate::test_support::scenario::test_binding;
 use crate::untrusted::GuardNonce;
 
 /// The role labels every fully bound VM fills: one plain label, and one
@@ -36,19 +34,7 @@ fn roles() -> ModelSet {
     ModelSet {
         bindings: ROLE_LABELS
             .iter()
-            .map(|label| {
-                ModelBinding::new(
-                    *label,
-                    "a role",
-                    model_id_from_validated("gateway", "test-model"),
-                    ModelInvocation {
-                        temperature: None,
-                        max_tokens: None,
-                        thinking: None,
-                    },
-                    NonZeroU32::new(4096).expect("4096 is non-zero"),
-                )
-            })
+            .map(|label| test_binding(label, "a role", "test-model"))
             .collect(),
         default: None,
     }

@@ -125,6 +125,26 @@ impl Run {
         }
     }
 
+    /// [`Run::new`], with `edit` applied to the assembled state before the
+    /// run starts: how a test fills in what the live H1 pass or the
+    /// offering would otherwise leave in the state.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        prompt: Arc<Prompt>,
+        args: &str,
+        ctx: &RunContext,
+        edit: impl FnOnce(RunState) -> RunState,
+    ) -> Run {
+        match prepare_state(prompt, args, ctx) {
+            Ok(state) => Self::from_state(edit(state)),
+            Err(error) => Run {
+                scheduler: None,
+                stillborn: Some(error),
+                cancel: ctx.cancel.clone(),
+            },
+        }
+    }
+
     /// Builds the run over an assembled context: the constructor the
     /// in-crate drivers and the suites use when they shape the context
     /// themselves.

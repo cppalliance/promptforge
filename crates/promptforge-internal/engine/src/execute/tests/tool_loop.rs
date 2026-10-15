@@ -7,34 +7,18 @@
 //! loop's exit rules sit in `exit_rules`; its append shapes, compactor
 //! paths, and handle calls in `models_loop`.
 
-use super::models_loop::{
-    bound_tool, echo_tools, loop_context, loop_context_observed, loop_events, loop_prompt,
-};
+use promptforge_parser::test_support::{one_section, prompt};
+use promptforge_types::event::Event;
+
+use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
-use crate::lua::ToolSet;
 use crate::model::CompletionErrorKind;
-use crate::test_support::tokio_driver::TokioDriver;
+use crate::test_support::scenario::assert_model_failure;
 
-/// The one-section prompt shell with an explicit frontmatter round cap.
-fn capped_loop_prompt(cap: usize, lua: &str) -> String {
-    format!(
-        "---\nname: loop\ndescription: d\npromptforge: 0\nmax_tool_iterations: {cap}\n---\n\n\
-         # Loop\n\n## Only\n\n```lua\n{lua}\n```\n"
-    )
-}
-
-/// The section body every cap and trust test runs: one loop over a
-/// single user message, then the terminal record's text.
-const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
-     msgs:user('ask the model')\n\
-     models.loop(msgs)\n\
-     return msgs[#msgs].content";
-
-/// The tool set with the always-failing fixture bound as `echo` (the name
-/// the scripted tool-call replies ask for); a section offers it as
-/// `tools/failing`.
-fn failing_echo_tools() -> FixtureTools {
-    bound_tool("echo", Arc::new(FailingTool))
+/// The one-section loop prompt running `lua` under an explicit
+/// frontmatter round cap.
+fn capped(cap: usize, lua: &str) -> String {
+    prompt(&format!("max_tool_iterations: {cap}"), &[("Only", lua)])
 }
 
 /// A never-converging model: `rounds` tool-call replies for `echo`, each
@@ -48,21 +32,18 @@ fn never_converging_script(rounds: usize) -> Vec<ScriptedReply> {
         .collect()
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
+#[test]
+fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // A small explicit cap: the loop must make exactly that many round
     // trips against a never-converging model, then exhaust.
     let cap = 3;
     let gateway = ScriptedChat::new(never_converging_script(cap));
-    let prompt = parse(&capped_loop_prompt(
-        cap,
-        &format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"),
-    ));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a never-converging model should exhaust the loop");
+    let source = capped(cap, &format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    let error = trace.error().inner();
     assert!(matches!(error, Error::ToolLoopExhausted), "got {error:?}");
     assert_eq!(
         gateway.call_count(),
@@ -71,47 +52,46 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges() {
+#[test]
+fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges() {
     // The raise is pcall-able as the `tool_loop_exhausted` kind with the
     // typed error's exact message, and every round before it appended a
     // complete exchange: the list holds no half-answered batch at the cap.
     let gateway = ScriptedChat::new(never_converging_script(2));
-    let md = capped_loop_prompt(
+    let source = capped(
         2,
-        "tools.offer('tools/echo')\n\
-         local msgs = messages.new()\n\
-         msgs:user('loop forever')\n\
-         local ok, err = pcall(models.loop, msgs)\n\
-         assert(not ok, 'the cap raises')\n\
-         assert(#msgs == 5, 'two whole exchanges were appended before the cap')\n\
-         assert(msgs[2].tool_calls[1].id == 'call_0' and msgs[3].tool_call_id == 'call_0')\n\
-         assert(msgs[4].tool_calls[1].id == 'call_1' and msgs[5].tool_call_id == 'call_1')\n\
+        "tools.offer('tools/echo')
+         local msgs = messages.new()
+         msgs:user('loop forever')
+         local ok, err = pcall(models.loop, msgs)
+         assert(not ok, 'the cap raises')
+         assert(#msgs == 5, 'two whole exchanges were appended before the cap')
+         assert(msgs[2].tool_calls[1].id == 'call_0' and msgs[3].tool_call_id == 'call_0')
+         assert(msgs[4].tool_calls[1].id == 'call_1' and msgs[5].tool_call_id == 'call_1')
          return err.kind .. '|' .. tostring(err)",
     );
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the call-site raise is pcall-able");
-    assert_eq!(out, "tool_loop_exhausted|tool-call loop did not converge");
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(
+        trace.text(),
+        "tool_loop_exhausted|tool-call loop did not converge"
+    );
     assert_eq!(gateway.call_count(), 2);
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tool_loop_uses_the_default_cap_when_unspecified() {
+#[test]
+fn tool_loop_uses_the_default_cap_when_unspecified() {
     // A prompt declaring no budget runs the limits default: exactly
     // `DEFAULT_MAX_TOOL_ITERATIONS` round trips.
     let gateway = ScriptedChat::new(never_converging_script(DEFAULT_MAX_TOOL_ITERATIONS));
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a never-converging model should exhaust the loop");
+    let source = one_section(&format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    let error = trace.error().inner();
     assert!(matches!(error, Error::ToolLoopExhausted), "got {error:?}");
     assert_eq!(gateway.call_count(), DEFAULT_MAX_TOOL_ITERATIONS);
     assert_eq!(DEFAULT_MAX_TOOL_ITERATIONS, 24);
@@ -139,32 +119,35 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn tool_loop_dispatches_then_returns_text() {
+#[test]
+fn tool_loop_dispatches_then_returns_text() {
     // One tool-call round and one text round: the terminal text is the
     // list's last record and the run's turn counter advanced twice.
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop converges on the text round");
-    assert_eq!(out, "final answer");
-    assert_eq!(
-        ctx.turns().load(Ordering::Relaxed),
-        2,
-        "one tool-call reply, then the final text"
-    );
+    let source = one_section(&format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
+    let turns: Vec<u32> = trace
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            Event::AssistantToolCalls { turn, .. } | Event::AssistantReply { turn, .. } => {
+                Some(*turn)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(turns, [1, 2], "one tool-call reply, then the final text");
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues() {
+#[test]
+fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues() {
     // A bound tool's own failure is the call's result record - the ToolError
     // message, nonce-wrapped as untrusted - with TOOL_CALL_FAILED firing
     // alongside it, and the loop continues to the terminal reply.
@@ -172,26 +155,20 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
         calls(&[("call_x", "echo", "{\"value\":\"x\"}")]),
         text("final answer"),
     ]);
-    let md = loop_prompt(
-        "tools.offer('tools/failing')\n\
-         local msgs = messages.new()\n\
-         msgs:user('ask the model')\n\
-         models.loop(msgs)\n\
-         assert(msgs[3].role == 'tool' and msgs[3].tool_call_id == 'call_x', 'the failure is the call record')\n\
+    let source = one_section(
+        "tools.offer('tools/failing')
+         local msgs = messages.new()
+         msgs:user('ask the model')
+         models.loop(msgs)
+         assert(msgs[3].role == 'tool' and msgs[3].tool_call_id == 'call_x', 'the failure is the call record')
          return msgs[3].content .. '|' .. msgs[4].content",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        failing_echo_tools(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("a tool's own failure becomes the call's result, not the loop's");
-    let (record, terminal) = out
+    let trace = loop_scenario(source)
+        .offer("echo", failing_tool())
+        .chat(&gateway)
+        .run();
+    let (record, terminal) = trace
+        .text()
         .split_once('|')
         .expect("the section returns the record and the terminal text");
     assert_eq!(terminal, "final answer", "the loop continues to the reply");
@@ -208,6 +185,8 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
         record,
         "the wire sends the same result record the author's list holds"
     );
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
     assert_eq!(
         loop_events(&recorder),
         vec![
@@ -225,22 +204,22 @@ async fn a_failing_tool_becomes_an_untrusted_error_result_and_the_loop_continues
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
+#[test]
+fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
     // Every round's failing call becomes an error result, so a model that
     // keeps calling the failing tool never converges: the loop exits at
     // exactly `max_tool_iterations`.
     let cap = 3;
     let gateway = ScriptedChat::new(never_converging_script(cap));
-    let prompt = parse(&capped_loop_prompt(
+    let source = capped(
         cap,
         &format!("tools.offer('tools/failing')\n{LOOP_TO_TEXT}"),
-    ));
-    let (ctx, fixture) = loop_context(&prompt, failing_echo_tools());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("a never-converging model should exhaust the loop");
+    );
+    let trace = loop_scenario(source)
+        .offer("echo", failing_tool())
+        .chat(&gateway)
+        .run();
+    let error = trace.error().inner();
     assert!(matches!(error, Error::ToolLoopExhausted), "got {error:?}");
     assert_eq!(
         gateway.call_count(),
@@ -249,48 +228,42 @@ async fn repeated_calls_to_a_failing_tool_exit_at_the_iteration_cap() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
+#[test]
+fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     let gateway = ScriptedChat::new(vec![fail(
         CompletionErrorKind::ServerError,
         500,
         "private backend response",
     )]);
-    let client = gateway_client(&gateway);
-    let md = loop_prompt(
-        "local msgs = messages.new()\n\
-         msgs:user('private model input')\n\
-         models.loop(msgs)\n\
+    let source = one_section(
+        "local msgs = messages.new()
+         msgs:user('private model input')
+         models.loop(msgs)
          return 'unreachable'",
     );
-    let prompt = parse(&md);
-    let recorder = Arc::new(Recorder::default());
-    let (ctx, fixture) = loop_context_observed(
-        &prompt,
-        ToolSet::default(),
-        Arc::clone(&recorder) as Arc<dyn Observer>,
-    );
-    let error = TokioDriver::new(&ctx, fixture, Some(client))
-        .drive()
-        .await
-        .expect_err("the backend failure must propagate");
+    let trace = loop_scenario(source).chat(&gateway).run();
     assert_model_failure(
-        &error,
+        trace.error(),
         CompletionErrorKind::ServerError,
         "the model backend reported a fault of its own (status 500)",
     );
+    let recorder = Recorder::default();
+    trace.replay(&recorder);
     assert_eq!(
         loop_events(&recorder),
         vec![detail::MODEL_TURN_FAILED.to_string()]
     );
-    let trace = format!("{:?}", recorder.events());
+    let observed = format!("{:?}", recorder.events());
     for payload in ["private backend response", "private model input"] {
-        assert!(!trace.contains(payload), "observation leaked {payload:?}");
+        assert!(
+            !observed.contains(payload),
+            "observation leaked {payload:?}"
+        );
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
+#[test]
+fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
     // Same status class as a provider overflow, unrelated body: not context
     // overflow, so the bare rejection propagates and no compactor is
     // invoked.
@@ -299,14 +272,11 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
         400,
         "invalid request: unknown field",
     )]);
-    let prompt = parse(&loop_prompt(LOOP_TO_TEXT));
-    let (ctx, fixture) = loop_context(&prompt, ToolSet::default());
-    let error = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect_err("an ordinary backend rejection must propagate unchanged");
+    let trace = loop_scenario(one_section(LOOP_TO_TEXT))
+        .chat(&gateway)
+        .run();
     assert_model_failure(
-        &error,
+        trace.error(),
         CompletionErrorKind::Rejected,
         "the model backend rejected the request (status 400)",
     );
@@ -314,21 +284,20 @@ async fn a_client_rejection_without_overflow_signatures_stays_a_rejection() {
 
 // --- Guard-wrapping of tool results in the loop ---
 
-#[tokio::test(flavor = "current_thread")]
-async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
+#[test]
+fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
+    let source = one_section(&format!(
         "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(UntrustedEchoTool)));
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop converges");
-    assert_eq!(out, "final answer");
+    ));
+    let trace = loop_scenario(source)
+        .offer("echo", untrusted_echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
 
     let content = last_tool_turn_content(&gateway.requests());
     assert!(
@@ -345,8 +314,8 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn untrusted_nonce_is_stable_across_rounds() {
+#[test]
+fn untrusted_nonce_is_stable_across_rounds() {
     // One nonce per run: every round's envelope in a single loop is
     // stamped with the same nonce, so identical content wraps
     // byte-identically and KV-cache prefixes stay shared across rounds.
@@ -355,15 +324,14 @@ async fn untrusted_nonce_is_stable_across_rounds() {
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
+    let source = one_section(&format!(
         "tools.offer('tools/untrusted_echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(UntrustedEchoTool)));
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop converges");
-    assert_eq!(out, "final answer");
+    ));
+    let trace = loop_scenario(source)
+        .offer("echo", untrusted_echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
 
     let nonces = tool_turn_nonces(&gateway.requests());
     assert!(
@@ -376,21 +344,18 @@ async fn untrusted_nonce_is_stable_across_rounds() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
+#[test]
+fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('tools/echo')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, echo_tools());
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the loop converges");
-    assert_eq!(out, "final answer");
+    let source = one_section(&format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("echo", echo_tool())
+        .chat(&gateway)
+        .run();
+    assert_eq!(trace.text(), "final answer");
 
     let content = last_tool_turn_content(&gateway.requests());
     assert_eq!(
@@ -403,37 +368,35 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn cancel_during_in_flight_tool_call_returns_promptly() {
-    use std::time::{Duration, Instant};
-
+#[test]
+fn cancel_during_in_flight_tool_call_returns_promptly() {
+    // The slow tool's call is held, so the run waits on it alone until the
+    // cancel lands between steps.
     let gateway = ScriptedChat::new(vec![
         calls(&[("call_1", "echo", "{\"value\":\"hi\"}")]),
         text("final answer"),
     ]);
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('test/tools/slow')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, bound_tool("echo", Arc::new(SlowTool)));
-
-    let mut driver = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)));
-    let canceller = driver.cancel_handle();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        canceller.cancel();
-    });
-
-    let start = Instant::now();
-    let result = driver.drive().await;
-
+    let source = one_section(&format!("tools.offer('test/tools/slow')\n{LOOP_TO_TEXT}"));
+    let mut driving = loop_scenario(source)
+        .offer("echo", slow_tool())
+        .hold(calls_slow_tool)
+        .chat(&gateway)
+        .start();
+    while driving.step() {}
+    driving.cancel();
+    let trace = driving.finish();
     assert!(
-        start.elapsed() < Duration::from_secs(5),
-        "cancel during an in-flight tool call must return promptly, took {:?}",
-        start.elapsed()
+        matches!(trace.result(), RunResult::Cancelled),
+        "expected the cancelled run, got {:?}",
+        trace.result()
     );
     assert!(
-        matches!(result, Err(crate::Error::Interrupted)),
-        "expected Interrupted, got {result:?}"
+        trace
+            .effects()
+            .iter()
+            .any(|pair| matches!(pair, (EffectRecord::ToolCall { .. }, AnswerRecord::Dropped))),
+        "the cancel lands while the tool call is in flight: {:?}",
+        trace.effects()
     );
 }
 

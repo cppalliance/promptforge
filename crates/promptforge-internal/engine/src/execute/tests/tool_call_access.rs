@@ -23,30 +23,13 @@ use crate::test_support::scenario::{perform_locally, text_of};
 const FILES: &str = "test/tools/files";
 
 /// The tool the run binds. The driver performs its calls itself, through
-/// the effect's access, so its own `call` never runs.
-struct FilesTool;
-
-#[async_trait::async_trait]
-impl TestTool for FilesTool {
-    fn id(&self) -> ToolId {
-        ToolId::parse(FILES).expect("valid files tool id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "reads or writes one of the run's files"
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object" })
-    }
-
-    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+/// the effect's access, so its own call never runs.
+#[track_caller]
+fn files_tool() -> FnTool {
+    FnTool::new(FILES, json!({ "type": "object" }), |_| {
         Err(ToolError::message("the suite's driver performs this tool"))
-    }
+    })
+    .description("reads or writes one of the run's files")
 }
 
 /// Performs one files call through `access`: `read` names a file whose
@@ -101,7 +84,7 @@ fn files_run(md: &str) -> Run {
     let (state, _fixture) = model_task_context_with(
         &prompt,
         Arc::new(NullObserver::default()),
-        Arc::new(FilesTool),
+        Arc::new(files_tool()),
     );
     Run::from_state(state)
 }

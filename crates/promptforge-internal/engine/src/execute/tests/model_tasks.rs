@@ -68,6 +68,18 @@ pub(super) fn model_task_context_with(
     (ctx, fixture)
 }
 
+/// [`model_task_context_with`] as a scenario over the slow tool: the loop
+/// models filled in, nothing offered, and the slow tool as the whole
+/// catalog, its calls held so a parked child stays parked until the run
+/// decides.
+pub(super) fn model_task_scenario(source: impl Into<String>) -> Scenario {
+    Scenario::new(source)
+        .models(loop_models())
+        .offering(Vec::new())
+        .tool(slow_tool())
+        .hold(calls_slow_tool)
+}
+
 /// A two-section prompt: `Only` runs the model loop under `frontmatter`
 /// extras, `Child` is the task target.
 pub(super) fn owner_prompt(frontmatter: &str, owner_body: &str, child_body: &str) -> String {

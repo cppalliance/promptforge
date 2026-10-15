@@ -117,12 +117,6 @@ impl TokioDriver<'_> {
         self.scheduler_for_test().set_max_chains_for_test(limit);
     }
 
-    /// The number of leaf effects the run has issued so far.
-    #[cfg(test)]
-    pub(crate) fn leaf_requests_issued(&mut self) -> u64 {
-        self.scheduler_for_test().leaf_requests_issued()
-    }
-
     /// The run itself, for a test that answers an effect by hand.
     #[cfg(test)]
     pub(crate) fn run_for_test(&mut self) -> &mut Run {

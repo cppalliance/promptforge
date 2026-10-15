@@ -1,5 +1,6 @@
 //! The serial helpers for suites that drive a bare [`Run`]: the canned
-//! chat answer, the local performer, and the batched driver.
+//! chat answer, the one-effect step, the local performer, and the batched
+//! driver.
 
 use std::collections::BTreeMap;
 
@@ -18,6 +19,24 @@ use crate::tools::ToolError;
 /// [`ScriptedChat::complete_now`]: super::super::scripted_chat::ScriptedChat::complete_now
 pub(crate) fn chat_answer(reply: &ScriptedReply) -> EffectAnswer {
     EffectAnswer::Chat(reply.answer().map(Box::new))
+}
+
+/// The one effect a pending step issued, with its id.
+///
+/// # Panics
+/// When the step is done or issued any other number of effects.
+#[track_caller]
+pub(crate) fn only_effect(step: Step) -> (EffectId, Effect) {
+    let Step::Pending { mut effects, .. } = step else {
+        panic!("the step is pending, got {step:?}");
+    };
+    assert_eq!(
+        effects.len(),
+        1,
+        "exactly one effect is issued: {effects:?}"
+    );
+    let (id, _, effect) = effects.remove(0);
+    (id, effect)
 }
 
 /// The first user message of a `Chat` effect, read off its record: the

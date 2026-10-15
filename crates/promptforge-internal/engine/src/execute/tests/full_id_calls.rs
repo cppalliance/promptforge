@@ -61,45 +61,27 @@ fn catalog_context(prompt: &Prompt, tools: &[Arc<dyn TestTool>]) -> (RunState, R
 /// The echo fixture and a second tool the prompts never offer.
 fn echo_and_concrete() -> Vec<Arc<dyn TestTool>> {
     vec![
-        Arc::new(EchoTool),
-        Arc::new(ScopedFixtureTool::new("concrete", "Concrete description.")),
+        Arc::new(echo_tool()),
+        Arc::new(scoped_tool("concrete", "Concrete description.").0),
     ]
 }
 
 /// A catalog tool whose wire name, `task_cancel`, is a task built-in's, so
 /// the run cannot offer it; it echoes its `value` argument.
-struct Unofferable;
-
-#[async_trait::async_trait]
-impl TestTool for Unofferable {
-    fn id(&self) -> ToolId {
-        ToolId::parse("task/cancel").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the TestTool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "A tool the run cannot offer."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": { "value": { "type": "string" } } })
-    }
-
-    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted(format!(
-            "unoffered: {}",
-            args["value"].as_str().unwrap_or_default()
-        )))
-    }
+#[track_caller]
+fn unofferable_tool() -> Arc<dyn TestTool> {
+    let schema = json!({ "type": "object", "properties": { "value": { "type": "string" } } });
+    let tool = FnTool::new("task/cancel", schema, |args| {
+        let value = args["value"].as_str().unwrap_or_default();
+        Ok(ToolOutput::trusted(format!("unoffered: {value}")))
+    });
+    Arc::new(tool.description("A tool the run cannot offer."))
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_script_call_by_id_records_the_offered_tools_wire_name() {
     let prompt = full_id_prompt("return tools.call('tools/echo', { value = 'hi' })");
-    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(echo_tool())]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler
@@ -124,7 +106,7 @@ async fn a_script_reaches_a_catalog_tool_left_out_of_the_offering_by_id() {
         "assert(tools.get('task/cancel') == nil, 'the tool is not offered')\n\
          return tools.call('task/cancel', { value = 'hi' })",
     );
-    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(Unofferable)]);
+    let (ctx, fixture) = catalog_context(&prompt, &[unofferable_tool()]);
     assert!(
         ctx.tool_set().offered().is_empty(),
         "a tool whose wire name is a task built-in's is left out of the offering"
@@ -192,7 +174,7 @@ async fn a_script_call_by_wire_name_or_local_looking_name_is_unbound() {
          assert(not wire_ok and not bare_ok, 'neither name is a catalog id')\n\
          return wire_err.kind .. ':' .. wire_err.name .. '|' .. bare_err.kind .. ':' .. bare_err.name",
     );
-    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(echo_tool())]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler
@@ -237,7 +219,7 @@ async fn a_script_call_by_id_and_by_tool_object_issue_the_same_effect() {
         "return tools.call('tools/echo', { value = 'hi' }) .. '|' .. \
          tools.call(tools.get('tools/echo'), { value = 'hi' })",
     );
-    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let (ctx, fixture) = catalog_context(&prompt, &[Arc::new(echo_tool())]);
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();
     let out = scheduler.drive().await.expect("both calls reach the tool");
@@ -297,7 +279,7 @@ async fn a_model_issued_call_never_resolves_an_id() {
          assert(not ok, 'a model-issued id call is refused')\n\
          return err.kind .. ':' .. err.name",
     );
-    let (mut ctx, fixture) = catalog_context(&prompt, &[Arc::new(EchoTool)]);
+    let (mut ctx, fixture) = catalog_context(&prompt, &[Arc::new(echo_tool())]);
     ctx.expose_raw_shims_for_test();
     let mut scheduler = TokioDriver::new(&ctx, fixture, None);
     let records = scheduler.record_effects_for_test();

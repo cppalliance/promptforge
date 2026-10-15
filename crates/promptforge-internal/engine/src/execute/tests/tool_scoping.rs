@@ -1,15 +1,9 @@
 //! Tests for model-visible tool scoping through `tools.offer`.
 
-use super::models_loop::{loop_context, loop_prompt};
-use super::*;
-use crate::test_support::tokio_driver::TokioDriver;
+use promptforge_parser::test_support::one_section;
 
-/// The one-section loop every scoping test drives: one user message, then
-/// the terminal record's text.
-const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
-     msgs:user('Use the tool.')\n\
-     models.loop(msgs)\n\
-     return msgs[#msgs].content";
+use super::models_loop::{LOOP_TO_TEXT, loop_scenario};
+use super::*;
 
 /// An offered tool stays out of the model-visible scope until
 /// `tools.offer` names it: the scope snapshot over an untouched runtime is
@@ -17,9 +11,12 @@ const LOOP_TO_TEXT: &str = "local msgs = messages.new()\n\
 /// build, pinned by the offer tests below.)
 #[test]
 fn offered_tools_are_not_injected_without_an_offer() {
-    let tool: Arc<dyn TestTool> =
-        Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
-    let tools = FixtureTools::new(vec![fixture_binding("tools_concrete", "capability", tool)]);
+    let (tool, _) = scoped_tool("concrete", "Concrete description.");
+    let tools = FixtureTools::new(vec![fixture_binding(
+        "tools_concrete",
+        "capability",
+        Arc::new(tool),
+    )]);
     let runtime = Mutex::new(promptforge_lua::ToolRuntime::default());
     let effective = current_tool_bindings(tools.set(), &runtime).expect("the scope must snapshot");
     assert!(
@@ -28,17 +25,17 @@ fn offered_tools_are_not_injected_without_an_offer() {
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispatches_by_id() {
+#[test]
+fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispatches_by_id() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("aliased_call", "tools_concrete", "{\"value\":\"payload\"}")]),
         text("aliased final"),
     ]);
-    let tool = Arc::new(ScopedFixtureTool::new("concrete", "Concrete description."));
+    let (tool, called) = scoped_tool("concrete", "Concrete description.");
     let tools = FixtureTools::new(vec![fixture_binding(
         "tools_concrete",
         "Concrete description.",
-        Arc::clone(&tool) as Arc<dyn TestTool>,
+        Arc::new(tool.clone()),
     )]);
     let runtime = Mutex::new(promptforge_lua::ToolRuntime {
         added: vec!["tools_concrete".to_owned()],
@@ -54,17 +51,14 @@ async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_
         "Concrete description."
     );
 
-    let prompt = parse(&loop_prompt(&format!(
-        "tools.offer('tools/concrete')\n{LOOP_TO_TEXT}"
-    )));
-    let (ctx, fixture) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the offered tool dispatches");
+    let source = one_section(&format!("tools.offer('tools/concrete')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("tools_concrete", tool)
+        .chat(&gateway)
+        .run();
 
-    assert_eq!(out, "aliased final");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(trace.text(), "aliased final");
+    assert_eq!(called.load(Ordering::SeqCst), 1);
     let bodies = gateway.requests();
     let function = &bodies[0].tools[0];
     assert_eq!(function.name(), "tools_concrete");
@@ -79,17 +73,17 @@ async fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_
     );
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
+#[test]
+fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     let gateway = ScriptedChat::new(vec![
         calls(&[("aliased_call", "tools_section", "{\"value\":\"payload\"}")]),
         text("aliased final"),
     ]);
-    let tool = Arc::new(ScopedFixtureTool::new("section", "Section concrete."));
+    let (tool, called) = scoped_tool("section", "Section concrete.");
     let tools = FixtureTools::new(vec![fixture_binding(
         "tools_section",
         "capability",
-        Arc::clone(&tool) as Arc<dyn TestTool>,
+        Arc::new(tool.clone()),
     )]);
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(0x7e57),
@@ -125,15 +119,13 @@ async fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     // The same `tools.offer` inside a section scopes the tool for the
     // loop's rounds: the round advertises it and dispatches the concrete
     // tool behind it.
-    let md = loop_prompt(&format!("tools.offer('tools/section')\n{LOOP_TO_TEXT}"));
-    let prompt = parse(&md);
-    let (ctx, fixture) = loop_context(&prompt, tools);
-    let out = TokioDriver::new(&ctx, fixture, Some(gateway_client(&gateway)))
-        .drive()
-        .await
-        .expect("the section-offered tool dispatches");
+    let source = one_section(&format!("tools.offer('tools/section')\n{LOOP_TO_TEXT}"));
+    let trace = loop_scenario(source)
+        .offer("tools_section", tool)
+        .chat(&gateway)
+        .run();
 
-    assert_eq!(out, "aliased final");
-    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(trace.text(), "aliased final");
+    assert_eq!(called.load(Ordering::SeqCst), 1);
     assert_eq!(gateway.requests()[0].tools[0].name(), "tools_section");
 }

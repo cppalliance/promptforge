@@ -31,27 +31,16 @@ use promptforge_lua::Error;
 use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
-use crate::model::{ModelBinding, ModelSet};
+use crate::model::ModelSet;
 use crate::test_support::recording::null_emitter;
+use crate::test_support::scenario::test_binding;
 use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
-use promptforge_model_client::model::ModelInvocation;
-use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::tools::ToolDescriptor;
 
 fn test_models() -> ModelSet {
     ModelSet {
-        bindings: vec![ModelBinding::new(
-            "fast",
-            "a fast model",
-            model_id_from_validated("gateway", "test-model"),
-            ModelInvocation {
-                temperature: None,
-                max_tokens: None,
-                thinking: None,
-            },
-            NonZeroU32::new(4096).expect("4096 is non-zero"),
-        )],
+        bindings: vec![test_binding("fast", "a fast model", "test-model")],
         default: None,
     }
 }
