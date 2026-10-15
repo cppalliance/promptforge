@@ -4,25 +4,25 @@ overview: "Remove the debt the 21 commits since upstream/master (594eb22a7..b29c
 todos:
   - id: d1-4-run-log-seed
     content: "D1-4: run-log to_seed parses through RunSeed's serde Deserialize, keeps LogError::Corrupt, drops hex_digit; verify with run-log nextest (append.rs seed round-trip and refusal)"
-    status: pending
+    status: completed
   - id: stale-docs
     content: "Docs: rewrite Scenario::cancel_when doc (D1-13), lua vm_tally comment, and the RandomState::new ban reason in all three Engine clippy.toml files"
-    status: pending
+    status: completed
   - id: d1-18-fresh-store
     content: "D1-18: add the store-probe regression test, confirm it fails, then give every happens-before run its own store and check files per run; stop if an existing trace fails"
-    status: pending
+    status: completed
   - id: d1-7-target-all
     content: "D1-7: add the wasm32-only graph fixture test, confirm it fails, then add --target all to forbidden_engine_graph; stop if the real workspace reports a new reach"
-    status: pending
+    status: completed
   - id: d1-1-stt-hang
     content: "D1-1: extract construct_with_stuck_interim, add the failing regression test, then add move scenario + drop(while_blocked) before join; verify with nextest -p gateway-stt-engine"
-    status: pending
+    status: completed
   - id: d1-2-d1-3-trim
     content: "D1-2/D1-3: complete_now returns Result directly (doc + 2 call sites); delete engine Seeded::pick and its self-test lines; verify engine nextest + clippy with and without test-support"
-    status: pending
+    status: completed
   - id: exit-gate
     content: "Exit gate: full AGENTS.md nextest, clippy (CARGO_BUILD_WARNINGS=deny), and docs gate"
-    status: pending
+    status: completed
 isProject: false
 ---
 
