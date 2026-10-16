@@ -241,6 +241,28 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
 }
 
 #[test]
+fn the_call_depth_cap_is_a_quota_that_lua_still_reads_as_lua() {
+    // The run classifies the cap as a quota, while an author's `pcall`
+    // keeps reading the `lua` kind it always branched on.
+    for (via, text) in [
+        (DepthVia::Call, "call recursion exceeded cap of 8"),
+        (DepthVia::Fanout, "tasks.fanout recursion exceeded cap of 8"),
+    ] {
+        let error = Error::CallDepthExceeded { cap: 8, via };
+        assert_eq!(error.to_string(), text);
+        assert_eq!(
+            promptforge_lua::ErrorValue::kind(&error),
+            promptforge_lua::ErrorKind::Lua
+        );
+        let run_error = crate::RunError::from(error);
+        assert_eq!(run_error.kind(), crate::RunErrorKind::Quota);
+        assert!(!run_error.is_retryable());
+        assert!(run_error.location().is_none());
+        assert!(run_error.cause().is_none());
+    }
+}
+
+#[test]
 fn an_owned_lua_internal_message_reaches_the_engine_error_whole() {
     let message = format!(
         "tool call counts: name {:?} was not pre-seeded",

@@ -38,6 +38,25 @@ fn cause_suffix(cause: Option<&BoxedSource>) -> String {
     cause.map(|cause| format!(": {cause}")).unwrap_or_default()
 }
 
+/// The author-facing call whose nesting passed the call-depth cap, which
+/// [`Error::CallDepthExceeded`] is named after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DepthVia {
+    /// A `call`, or a `tasks.spawn`, which shares `call`'s cap.
+    Call,
+    /// One arm of a `tasks.fanout`.
+    Fanout,
+}
+
+impl std::fmt::Display for DepthVia {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            DepthVia::Call => "call",
+            DepthVia::Fanout => "tasks.fanout",
+        })
+    }
+}
+
 /// The crate's internal error type, spanning parsing, model, and execution
 /// failures.
 ///
@@ -342,6 +361,17 @@ pub(crate) enum Error {
         resource: crate::lua::QuotaResource,
     },
 
+    /// A `call`, `tasks.spawn`, or `tasks.fanout` arm would run deeper
+    /// than the call-depth cap allows. The dispatch's answer, so an
+    /// author `pcall` catches it, and a quota when it ends the run.
+    #[error("{via} recursion exceeded cap of {cap}")]
+    CallDepthExceeded {
+        /// The deepest nesting a chain may run at.
+        cap: usize,
+        /// The call that tripped the cap.
+        via: DepthVia,
+    },
+
     /// The selected compactor exhausted the model's context window: the
     /// request overflowed on the pre-dispatch precheck or at the provider,
     /// and the policy (`compactors.fail`, the only shipped one) does not
@@ -408,6 +438,7 @@ impl Error {
             | Error::ModelRequired { .. }
             | Error::UnsupportedVersion(_)
             | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
             | Error::ContextExhausted { .. }
             | Error::Determinism(_) => None,
         }

@@ -4,6 +4,7 @@
 //! and tool set they read. Compiled only under test; nothing here exists
 //! in a shipped Engine.
 
+use std::num::NonZeroUsize;
 use std::sync::atomic::Ordering;
 
 use promptforge_types::ids::{ChainId, TaskId};
@@ -14,6 +15,8 @@ use crate::execute::scope::DispatchTarget;
 use crate::execute::walk_target::SlicePath;
 use crate::lua::ToolSet;
 
+use super::chain::ChainStart;
+use super::chain_record::{Admission, CallDepth, ChainKind, SectionIndex};
 pub(crate) use super::tasks::TaskState;
 use super::{ChainIndex, Counters, Scheduler};
 
@@ -24,11 +27,31 @@ impl Scheduler {
         self.max_chains = limit;
     }
 
-    /// Drops the admission limit of the chain at arena index `chain` to
-    /// zero, a limit `tasks.concurrency` refuses, so a test can leave a
-    /// queued task that no slot will ever admit.
+    /// Fills every admission slot of the chain at arena index `chain` with
+    /// a task chain that holds its slot but never runs or ends, so a test
+    /// can leave a queued task that no slot will ever admit.
     pub(crate) fn wedge_admission_for_test(&mut self, chain: u32) {
-        self.chains[ChainIndex(chain).index()].concurrency = 0;
+        let owner = ChainIndex(chain);
+        for _ in 0..self.chains[owner.index()].concurrency.get() {
+            let lineage = self
+                .allocate_child_id(owner)
+                .expect("the wedged chain has a child id left");
+            self.start_chain(ChainStart {
+                lineage,
+                counters: Counters::default(),
+                ctx: self.ctx.clone(),
+                slice: SlicePath::root(),
+                index: SectionIndex::FIRST,
+                kind: ChainKind::Task {
+                    owner,
+                    admission: Admission::Admitted { holding: true },
+                },
+                var: serde_json::json!({}),
+                call_depth: CallDepth::ROOT,
+                concurrency: NonZeroUsize::MIN,
+            })
+            .expect("the arena has room for the wedge");
+        }
     }
 
     /// Adds `name`, bound to `tool`, to the scope the chain at arena index
@@ -69,18 +92,17 @@ impl Scheduler {
     /// Returns [`Error::Internal`](crate::Error::Internal) when the run's
     /// chain count exceeds its bound.
     pub(crate) fn name_before_first_entry_for_test(&mut self, index: usize) -> Result<String> {
-        let ctx = self.ctx.clone();
-        let id = self.start_chain(
-            ChainId::root(),
-            Counters::default(),
-            ctx,
-            SlicePath::root(),
-            index,
-            None,
-            serde_json::json!({}),
-            0,
-            1,
-        )?;
+        let id = self.start_chain(ChainStart {
+            lineage: ChainId::root(),
+            counters: Counters::default(),
+            ctx: self.ctx.clone(),
+            slice: SlicePath::root(),
+            index: SectionIndex::new(index),
+            kind: ChainKind::Root,
+            var: serde_json::json!({}),
+            call_depth: CallDepth::ROOT,
+            concurrency: NonZeroUsize::MIN,
+        })?;
         Ok(self.chains[id.index()].section_name().to_owned())
     }
 }

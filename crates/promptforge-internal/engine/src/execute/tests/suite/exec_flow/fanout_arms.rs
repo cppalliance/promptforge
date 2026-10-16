@@ -249,7 +249,7 @@ fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
         .section("B", "return call('## A')")
         .prose("W", "---\n\n```lua\nreturn item\n```");
     let trace = Scenario::new(source.build()).run();
-    let rendered = format!("{:?}", trace.error());
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("tasks.fanout recursion exceeded cap of 8"),
         "expected the fanout recursion-cap error, got: {rendered}"
@@ -282,7 +282,7 @@ fn call_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
         .prose("W", "---\n\n```lua\nreturn call('## C')\n```")
         .prose("C", "---\n\n```lua\nreturn 'c-reply'\n```");
     let trace = Scenario::new(source.build()).run();
-    let rendered = format!("{:?}", trace.error());
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("call recursion exceeded cap of 8"),
         "expected the call recursion-cap error, got: {rendered}"

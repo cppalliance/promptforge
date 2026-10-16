@@ -105,6 +105,8 @@ fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
     let md = prompt("", &[("Only", owner), ("Child", "return 'child result'")]);
     let trace = model_task_scenario(md).chat(&gateway).run();
     let target = "task: `target` must be a string naming a section heading, such as `## Research`";
+    let unparsable = "task_status: `nope` is not a task id: required a dot-separated path of \
+        decimal components; use the id `task` returned";
     assert_eq!(
         trace.text().lines().collect::<Vec<_>>(),
         vec![
@@ -113,7 +115,7 @@ fn malformed_built_in_arguments_are_refused_with_the_engine_text() {
             "task: `input` must be a string when given",
             "task_status: `id` must be a task id string, exactly as `task` returned it",
             "task_cancel: `id` must be a task id string, exactly as `task` returned it",
-            "task_status: `nope` is not a task id; use the id `task` returned",
+            unparsable,
         ],
         "each refusal names the argument and what it must be"
     );

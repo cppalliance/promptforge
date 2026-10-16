@@ -81,7 +81,7 @@ fn call_depth_cap_reads_the_chain_field() {
     // Two sections calling each other ping-pong through nested call
     // chains; the cap must fire from the requesting chain's call-depth
     // field. The typed error then round-trips through every parent's
-    // answer envelope without flattening.
+    // answer envelope without flattening, and classifies as a quota.
     let md = "---\nname: depth\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
@@ -90,10 +90,19 @@ fn call_depth_cap_reads_the_chain_field() {
         ```lua\nreturn call('## Alpha')\n```\n";
     let trace = scheduler_scenario(md).run();
 
-    match trace.error().inner() {
-        Error::Lua(message) => assert_eq!(message, "call recursion exceeded cap of 8"),
-        other => panic!("expected the typed depth-cap Lua error, got {other:?}"),
-    }
+    let error = trace.error();
+    assert!(
+        matches!(
+            error.inner(),
+            Error::CallDepthExceeded {
+                cap: 8,
+                via: DepthVia::Call
+            }
+        ),
+        "expected the typed call-depth error, got {error:?}"
+    );
+    assert_eq!(error.kind(), RunErrorKind::Quota, "{error}");
+    assert_eq!(error.to_string(), "call recursion exceeded cap of 8");
 }
 
 #[test]

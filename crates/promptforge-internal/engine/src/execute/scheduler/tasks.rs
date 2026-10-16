@@ -21,15 +21,17 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
-use promptforge_vfs::ExecId;
-use promptforge_vfs::detail::{access_id, access_spawn};
+use promptforge_vfs::{ExecId, detail};
 
+use crate::error::DepthVia;
 use crate::execute::protocol::{Answer, Blocked, SpawnVia};
+use crate::execute::run::EffectId;
 use crate::execute::section_context::TaskSeed;
 use crate::{Error, Result};
 
-use super::{ChainIndex, Counters, MAX_CALL_DEPTH, Scheduler, SpawnRecord, prompt_origin};
-use crate::execute::run::EffectId;
+use super::chain::ChainStart;
+use super::chain_record::{Admission, ChainKind};
+use super::{ChainIndex, Counters, Scheduler, SpawnRecord, prompt_origin};
 
 /// Where a task's work runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,15 +43,18 @@ pub(super) enum TaskBacking {
     Effect(EffectId),
 }
 
-/// One task's lifecycle state.
+/// One task's lifecycle state, with whether it ended well once it has
+/// ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TaskState {
     /// The backing chain or request is live.
     Running,
-    /// The backing chain ended; its outcome waits in the slot.
-    Done,
-    /// The owner took the outcome through a wait.
-    Delivered,
+    /// The backing chain ended; its outcome waits in the slot. `ok` is
+    /// whether the chain returned rather than failed.
+    Done { ok: bool },
+    /// The owner took the outcome through a wait. `ok` is the outcome's,
+    /// kept so `status` still reports it after the wait took it.
+    Delivered { ok: bool },
     /// The owner cancelled the task.
     Cancelled,
     /// The owner ended while the task was live, so the Engine ended it.
@@ -61,6 +66,16 @@ impl TaskState {
     /// the one state a chain end must act on.
     pub(super) fn is_live(self) -> bool {
         matches!(self, TaskState::Running)
+    }
+
+    /// Whether the task ended well, once it has ended: a cancelled or
+    /// abandoned task did not.
+    pub(super) fn ok(self) -> Option<bool> {
+        match self {
+            TaskState::Running => None,
+            TaskState::Done { ok } | TaskState::Delivered { ok } => Some(ok),
+            TaskState::Cancelled | TaskState::Abandoned => Some(false),
+        }
     }
 }
 
@@ -79,11 +94,6 @@ pub(super) struct TaskSlot {
     pub(super) target: String,
     /// The task's lifecycle state.
     pub(super) state: TaskState,
-    /// Whether the task ended well, once it has ended: `Some(true)` for a
-    /// chain that returned, `Some(false)` for one that failed, was
-    /// cancelled, or was abandoned. Kept beside `outcome` so `status`
-    /// still reports it after a wait took the outcome.
-    pub(super) ok: Option<bool>,
     /// The chain's final text or failure, held from the chain's end until
     /// the owner takes it.
     pub(super) outcome: Option<Result<String>>,
@@ -169,20 +179,14 @@ impl Scheduler {
         via: SpawnVia,
     ) -> Result<(TaskId, ChainIndex)> {
         let chain = &self.chains[id.index()];
-        let depth = chain.call_depth + 1;
+        let depth = chain.call_depth.deeper(match via {
+            SpawnVia::Fanout => DepthVia::Fanout,
+            SpawnVia::Spawn => DepthVia::Call,
+        })?;
         // The spawning section, captured now: the start event reports it
         // at admission, which may come after the spawner's walk moved to
         // another section.
         let spawner_section = chain.section_name().to_owned();
-        if depth > MAX_CALL_DEPTH {
-            let tripped = match via {
-                SpawnVia::Fanout => "tasks.fanout",
-                SpawnVia::Spawn => "call",
-            };
-            return Err(Error::Lua(format!(
-                "{tripped} recursion exceeded cap of {MAX_CALL_DEPTH}"
-            )));
-        }
         // An explicit input forks the chain's args (and `argv` re-derives
         // from them), as a `call` with input does; otherwise the chain
         // inherits the spawner's context whole. The turn counter is the
@@ -199,7 +203,7 @@ impl Scheduler {
         // target's slice by path, resolved against the shared tree.
         let prompt = self.prompt();
         let target_section = self.resolve_chain_target(id, target)?;
-        let worker = &target_section.slice.resolve(&prompt)[target_section.index];
+        let worker = &target_section.slice.resolve(&prompt)[target_section.index.get()];
         if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items().is_empty() {
             return Err(Error::Lua(format!(
                 "section `{}` is a list section, not a worker template",
@@ -210,7 +214,7 @@ impl Scheduler {
         // is the last fallible step that can leave nothing behind, so it
         // runs ahead of the id allocation and the arena push rather than
         // orphaning a started chain that is neither enqueued nor slotted.
-        let access = access_spawn(
+        let access = detail::access_spawn(
             &spawner_access,
             prompt_origin(&prompt, worker.name(), worker.blocks()),
         )
@@ -218,7 +222,7 @@ impl Scheduler {
         // The task's happens-before identity, recorded before the access
         // moves into the chain: every delivery joins it, and the chain
         // end joins it last.
-        let exec = access_id(&access);
+        let exec = detail::access_id(&access);
         // The task's id is the spawner's next child index, shared with
         // `call` children, so it depends only on the spawner's own
         // dispatch order; the task is its chain, named from the other side.
@@ -228,31 +232,31 @@ impl Scheduler {
         // turn counter, so its events report its provenance and its turns
         // count against its own cap.
         let child_ctx = child_ctx.with_task(task.clone(), Arc::new(AtomicU32::new(0)));
-        let child = self.start_chain(
-            chain_id,
-            Counters::default(),
-            child_ctx,
-            target_section.slice,
-            target_section.index,
-            None,
+        // The task waits for admission from here, and the spawn record
+        // holds what the start event reports once the task first runs.
+        let child = self.start_chain(ChainStart {
+            lineage: chain_id,
+            counters: Counters::default(),
+            ctx: child_ctx,
+            slice: target_section.slice,
+            index: target_section.index,
+            kind: ChainKind::Task {
+                owner: id,
+                admission: Admission::Queued(SpawnRecord {
+                    input: input.map(str::to_owned),
+                    section: spawner_section,
+                }),
+            },
             var,
-            depth,
-            child_concurrency,
-        )?;
+            call_depth: depth,
+            concurrency: child_concurrency,
+        })?;
         let spawned = &mut self.chains[child.index()];
         spawned.access = Some(Arc::new(access));
-        spawned.task = task.clone();
-        spawned.owner = Some(id);
         spawned.seed = Some(seed);
-        // The task waits for admission from here: `blocked` reads
-        // `queued` in `tasks.status` (the slot's state is still
-        // `Running`), and the spawn record holds what the start event
-        // reports once the task first runs.
+        // `blocked` reads `queued` in `tasks.status` while the slot's
+        // state is still `Running`.
         spawned.blocked = Some(Blocked::Queued);
-        spawned.pending_spawn = Some(SpawnRecord {
-            input: input.map(str::to_owned),
-            section: spawner_section,
-        });
         self.tasks.insert(
             task.clone(),
             TaskSlot {
@@ -261,7 +265,6 @@ impl Scheduler {
                 origin,
                 target: worker.name().to_owned(),
                 state: TaskState::Running,
-                ok: None,
                 outcome: None,
                 exec: Some(exec),
             },

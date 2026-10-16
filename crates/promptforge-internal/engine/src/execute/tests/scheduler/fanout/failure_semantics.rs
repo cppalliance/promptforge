@@ -67,9 +67,9 @@ fn fanout_depth_cap_reads_the_chain_field() {
     // the requesting chain's call-depth field. The arm's spawn sets the
     // fanout mark, so the spawn arm names the cap after `tasks.fanout` in the
     // typed error itself; the shim re-raises that table and the retained
-    // typed `Lua` error is substituted back at every `call` level, so the
-    // run's error is the typed error itself: the exact variant, the exact
-    // text, no runtime-error prefix or traceback.
+    // typed error is substituted back at every `call` level, so the run's
+    // error is the typed error itself: the exact variant, the exact text,
+    // no runtime-error prefix or traceback.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Depth\n\n\
         ## Alpha\n\n\
@@ -89,9 +89,16 @@ fn fanout_depth_cap_reads_the_chain_field() {
 
     let error = trace.error();
     assert!(
-        matches!(error.inner(), Error::Lua(message) if message == "tasks.fanout recursion exceeded cap of 8"),
-        "expected the typed Lua depth-cap error with fanout's own wording, got {error:?}"
+        matches!(
+            error.inner(),
+            Error::CallDepthExceeded {
+                cap: 8,
+                via: DepthVia::Fanout
+            }
+        ),
+        "expected the typed depth-cap error named after fanout, got {error:?}"
     );
+    assert_eq!(error.kind(), RunErrorKind::Quota, "{error}");
     assert_eq!(
         error.to_string(),
         "tasks.fanout recursion exceeded cap of 8",

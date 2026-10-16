@@ -48,26 +48,19 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use promptforge_types::event::lifecycle;
+use promptforge_types::tools::{OutputTrust, ToolId};
+use promptforge_vfs::detail;
+
 use crate::execute::protocol::{Answer, LocalToolOutcome, ToolCallOutcome, ToolCallRecord};
 use crate::execute::run::{Effect, ToolCallOrigin, ToolCaller};
 use crate::execute::section_context::LocalCall;
 use crate::lua::{ScriptReport, ToolCallCounts, current_tool_bindings};
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle;
-use promptforge_types::tools::{OutputTrust, ToolId};
-use promptforge_vfs::detail::{access_id, access_spawn};
 
-use super::builtins::is_task_builtin;
+use super::builtins::TaskBuiltin;
 use super::dispatch::unbound_tool_call;
 use super::{CallSite, ChainIndex, Continuation, Scheduler, ToolCallContinuation, prompt_origin};
-
-/// The model built-in names the `tasks` namespace answers from this arm,
-/// recognized before any lookup so no catalog or local tool can shadow
-/// them. A model-issued call to any of them is answered over the task
-/// arena; a script call to any of them is unbound. The offering leaves
-/// out a tool whose name is one of these.
-pub(in crate::execute) const RESERVED_TOOL_NAMES: [&str; 4] =
-    ["task", "task_cancel", "task_status", "await_tasks"];
 
 /// How one `tool_call` dispatch resolved: a bound call issued as an effect
 /// and parked on the pending table, an answer settled on the driver thread
@@ -75,6 +68,7 @@ pub(in crate::execute) const RESERVED_TOOL_NAMES: [&str; 4] =
 /// task chain a `task` built-in started, enqueued behind the caller, or
 /// the chain parked in the model's `await_tasks` on its live tasks,
 /// answered when one ends or its timer fires.
+#[derive(Debug)]
 pub(super) enum ToolCallDispatch {
     Issued,
     Answered(Answer<Error>),
@@ -84,10 +78,11 @@ pub(super) enum ToolCallDispatch {
 
 /// Where one tool call is answered, decided before any catalog lookup so
 /// a lone call and a batched one route alike.
+#[derive(Debug)]
 enum ToolRoute {
-    /// A reserved model built-in name: a model-issued task built-in is
-    /// answered over the task arena, and anything else is unbound.
-    Builtin,
+    /// A reserved model built-in name: a model-issued call is answered
+    /// over the task arena, and a script call is unbound.
+    Builtin(TaskBuiltin),
     /// A local Lua tool of the chain's section VM, answered with its
     /// handler.
     Local,
@@ -151,7 +146,7 @@ impl Scheduler {
         let mut batch = Vec::with_capacity(calls.len());
         for (slot, call) in calls.into_iter().enumerate() {
             let issued = match self.tool_route(id, &call.name) {
-                Ok(ToolRoute::Builtin | ToolRoute::Local) => break,
+                Ok(ToolRoute::Builtin(_) | ToolRoute::Local) => break,
                 Ok(ToolRoute::Catalog) => self.prepare_catalog_call(
                     id,
                     &call.name,
@@ -182,14 +177,14 @@ impl Scheduler {
     /// never reachable. A local tool of the chain's section VM wins over
     /// the catalog.
     fn tool_route(&self, id: ChainIndex, alias: &str) -> Result<ToolRoute> {
-        if RESERVED_TOOL_NAMES.contains(&alias) {
-            return Ok(ToolRoute::Builtin);
+        if let Some(builtin) = TaskBuiltin::from_name(alias) {
+            return Ok(ToolRoute::Builtin(builtin));
         }
-        let frame = self.chains[id.index()]
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        if frame.vm()?.has_local_tool(alias)? {
+        if self.chains[id.index()]
+            .frame()?
+            .vm()?
+            .has_local_tool(alias)?
+        {
             return Ok(ToolRoute::Local);
         }
         Ok(ToolRoute::Catalog)
@@ -207,12 +202,10 @@ impl Scheduler {
     /// call installs.
     fn section_call_counts(&mut self, id: ChainIndex) -> Result<ToolCallCounts> {
         let chain = &mut self.chains[id.index()];
-        let frame = chain
-            .frame
-            .as_mut()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let effective = current_tool_bindings(chain.ctx.tool_set(), frame.vm()?.tool_runtime())?;
-        frame.script_call_counts(&chain.ctx, &effective)
+        let effective =
+            current_tool_bindings(chain.ctx.tool_set(), chain.frame()?.vm()?.tool_runtime())?;
+        let ctx = chain.ctx.clone();
+        chain.frame_mut()?.script_call_counts(&ctx, &effective)
     }
 
     /// Fills `slot` of the batch the chain is parked on with a landed
@@ -233,7 +226,23 @@ impl Scheduler {
         let landed = match answer {
             Answer::ToolCallResult(Ok(ToolCallOutcome::Plain(text))) => Ok(text),
             Answer::ToolCallResult(Err(error)) => Err(error),
-            _ => Err(Error::internal(
+            Answer::ToolCallResult(Ok(
+                ToolCallOutcome::Structured(_) | ToolCallOutcome::Local { .. },
+            ))
+            | Answer::Infer(_)
+            | Answer::Call(_)
+            | Answer::Spawn(_)
+            | Answer::Timer(_)
+            | Answer::JoinAny(_)
+            | Answer::Ready(_)
+            | Answer::Status(_)
+            | Answer::Pending(_)
+            | Answer::Concurrency(_)
+            | Answer::Note(_)
+            | Answer::Cancel(_)
+            | Answer::Chat(_)
+            | Answer::ToolCallsResult(_)
+            | Answer::Store(_) => Err(Error::internal(
                 "a batched call lands as plain text or a failure",
             )),
         };
@@ -285,10 +294,10 @@ impl Scheduler {
             // The built-ins serve the model; the author's own script
             // reaches the arena through the `tasks` namespace, so a script
             // call stays unbound.
-            ToolRoute::Builtin => {
-                if let Some(call_id) = site.call_id().filter(|_| is_task_builtin(alias)) {
+            ToolRoute::Builtin(builtin) => {
+                if let Some(call_id) = site.call_id() {
                     let turn = self.call_turn(id, &site);
-                    return self.answer_task_builtin(id, alias, &args, call_id, turn);
+                    return self.answer_task_builtin(id, builtin, &args, call_id, turn);
                 }
                 Err(unbound_tool_call(
                     self.chains[id.index()].ctx.tool_set(),
@@ -305,9 +314,7 @@ impl Scheduler {
                 counts.ensure(alias)?;
                 counts.increment(alias)?;
                 self.chains[id.index()]
-                    .frame
-                    .as_mut()
-                    .ok_or(Error::internal("a live chain holds its frame"))?
+                    .frame_mut()?
                     .push_local_call(LocalCall {
                         alias: alias.to_owned(),
                         call_id: site.call_id().map(str::to_owned),
@@ -383,12 +390,12 @@ impl Scheduler {
         // counts already taken stay taken.
         let prompt = self.prompt();
         let chain = &self.chains[id.index()];
-        let access = access_spawn(
+        let access = detail::access_spawn(
             chain.access()?,
             prompt_origin(&prompt, &binding.id().to_string(), chain.blocks(&prompt)),
         )
         .map_err(Error::store)?;
-        let exec = access_id(&access);
+        let exec = detail::access_id(&access);
         let origin = ToolCallOrigin::new(
             chain.ctx.execution(),
             chain.section_name(),
@@ -435,14 +442,9 @@ impl Scheduler {
         let chain = &mut self.chains[id.index()];
         let emitter = Arc::clone(chain.ctx.emitter());
         let section = chain.section_name().to_owned();
-        let call = chain
-            .frame
-            .as_mut()
-            .ok_or(Error::internal("a live chain holds its frame"))?
-            .pop_local_call()
-            .ok_or(Error::internal(
-                "a local tool's completion closes the call that opened it",
-            ))?;
+        let call = chain.frame_mut()?.pop_local_call().ok_or(Error::internal(
+            "a local tool's completion closes the call that opened it",
+        ))?;
         let answer = match outcome {
             LocalToolOutcome::Returned(text) => {
                 emitter.report(&section, lifecycle::TOOL_CALL_SUCCEEDED);

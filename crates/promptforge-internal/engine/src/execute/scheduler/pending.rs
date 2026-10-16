@@ -7,16 +7,18 @@
 //! [`EffectAnswer`]: super::EffectAnswer
 //! [`Answer`]: super::Answer
 
-use crate::execute::protocol::VfsOp;
-use crate::lua::{ScriptReport, ToolBinding};
 use promptforge_types::event::lifecycle::Lifecycle;
 use promptforge_types::ids::RoundId;
 use promptforge_vfs::ExecId;
+
+use crate::execute::protocol::VfsOp;
+use crate::lua::{ScriptReport, ToolBinding};
 
 use super::ChainIndex;
 
 /// The driver-side half of one issued leaf effect: how its answer resumes
 /// the chain parked on it.
+#[derive(Debug)]
 pub(super) enum Continuation {
     /// A nested `models.infer`: the completion becomes the round's text
     /// under the single-prose-round reporting rules. The round's id waits
@@ -44,6 +46,7 @@ pub(super) enum Continuation {
 /// What a store answer is applied with: the operation the chain yielded,
 /// so its failure's model-facing message and determinism classification
 /// render from the call surface the author used.
+#[derive(Debug)]
 pub(super) struct VfsContinuation {
     /// The operation the effect performs.
     pub(super) op: VfsOp,
@@ -56,6 +59,7 @@ pub(super) struct VfsContinuation {
 /// resolved to (its alias, output kind, and trust rules), the coordinates
 /// the `ToolResult` reports under, the call's site, and the call's
 /// identity the answer joins.
+#[derive(Debug)]
 pub(super) struct ToolCallContinuation {
     /// The binding the alias resolved to at dispatch.
     pub(super) binding: ToolBinding,
@@ -71,6 +75,7 @@ pub(super) struct ToolCallContinuation {
 
 /// Who asked for one tool call, and where its answer goes. Only a
 /// model-issued call carries a call id, and only a batched one a slot.
+#[derive(Debug)]
 pub(super) enum CallSite {
     /// A script's `tools.call`, under the turn its request named, if any.
     /// The answer resumes the chain directly, classified by the binding's
@@ -109,6 +114,7 @@ impl CallSite {
 
 /// One in-flight leaf effect's pending entry: the chain parked on it and
 /// how its answer resumes that chain.
+#[derive(Debug)]
 pub(super) struct Pending {
     /// The parked chain (for a timer, the owner whose wait the timer
     /// serves).

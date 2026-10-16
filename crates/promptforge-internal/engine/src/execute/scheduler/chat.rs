@@ -26,6 +26,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use promptforge_model_client::detail::tool_call_arguments;
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::{ReplyOrigin, lifecycle};
+use promptforge_types::ids::RoundId;
 use promptforge_types::metrics::ToolCallEvent;
 
 use crate::execute::protocol::{
@@ -38,13 +41,8 @@ use crate::lua::{
     MessageList, OverflowReason, current_tool_bindings, output_reserve, precheck, project_messages,
     resolve_model_binding,
 };
-use crate::model::ModelBinding;
-use crate::model::{Completion, CompletionErrorKind, CompletionResult, ToolCall};
+use crate::model::{Completion, CompletionErrorKind, CompletionResult, ModelBinding, ToolCall};
 use crate::{Error, Result};
-use promptforge_types::emitter::Emitter;
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::event::lifecycle;
-use promptforge_types::ids::RoundId;
 
 use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
@@ -72,6 +70,7 @@ fn notice_record(notice: String) -> MessageRecord {
 /// How one `chat` dispatch resolved: a round issued as an effect and
 /// parked on the pending table, or an answer settled without leaving (the
 /// precheck overflow).
+#[derive(Debug)]
 enum ChatDispatch {
     Issued,
     Answered(Answer<Error>),
@@ -119,8 +118,9 @@ impl Scheduler {
     ) -> Result<ChatDispatch> {
         for notice in self.drain_task_notices(id) {
             // The list refuses only a late system record.
-            list.push(notice_record(notice))
-                .map_err(|_| Error::internal("the list refused a notice's user record"))?;
+            list.push(notice_record(notice)).map_err(|error| {
+                Error::internal_with_cause("the list takes a notice's user record", error)
+            })?;
         }
         let messages = list.to_records();
         if messages.is_empty() {
@@ -128,10 +128,7 @@ impl Scheduler {
         }
         let chain = &self.chains[id.index()];
         let section = chain.section_name().to_owned();
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
+        let frame = chain.frame()?;
         let vm = frame.vm()?;
         let binding = if let Some(binding) = binding {
             binding
@@ -228,11 +225,7 @@ impl Scheduler {
         result: Result<Box<Completion>>,
     ) -> Result<Answer<Error>> {
         let chain = &self.chains[id.index()];
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let handles = frame.reporting_handles();
+        let handles = chain.frame()?.reporting_handles();
         let round = ArrivedRound {
             id: round,
             section: chain.section_name().to_owned(),
@@ -281,6 +274,7 @@ impl Scheduler {
 /// One arrived round's reporting context: the round's id, the chain's
 /// section label, its task-scoped emitter, and the turn counter it
 /// advances (a task chain's own, so its turns count against its own cap).
+#[derive(Debug)]
 struct ArrivedRound {
     id: RoundId,
     section: String,
@@ -371,7 +365,7 @@ impl ArrivedRound {
                 ToolCallEvent::new(call.id(), call.name(), tool_call_arguments(call).clone())
                     .with_tool(match advertised.get(call.name()) {
                         Some(DispatchTarget::Bound(tool)) => Some(tool.clone()),
-                        _ => None,
+                        Some(DispatchTarget::Local | DispatchTarget::Builtin) | None => None,
                     })
             })
             .collect();

@@ -800,7 +800,7 @@ Paths starting `E/` are under `crates/promptforge-internal/engine/src/`.
 </step-6>
 <step-7>
 
-### Step 7: engine scheduler
+### Step 7: engine scheduler [completed]
 
 - Component: `engine`
 - Tests: Verify runs these from the repository root in PowerShell, in this order. A search passes only when it prints nothing.

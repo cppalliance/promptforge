@@ -18,6 +18,7 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::LuaRuntime { .. }
             | Error::LuaCompile { .. }
             | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
             | Error::Substitution(_) => ErrorKind::Lua,
             Error::ContextExhausted { .. } => ErrorKind::ContextExhausted,
             Error::Completion(error) if error.kind() == CompletionErrorKind::EmptyReply => {
@@ -90,6 +91,7 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::Tool { .. }
             | Error::Internal { .. }
             | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
             | Error::Determinism(_) => Vec::new(),
         }
     }

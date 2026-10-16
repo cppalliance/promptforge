@@ -17,8 +17,7 @@
 
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{ToolError, ToolOutput};
-use promptforge_vfs::detail::{access_id, end_access};
-use promptforge_vfs::{ExecId, VfsError};
+use promptforge_vfs::{ExecId, VfsError, detail};
 
 use crate::execute::infer::accept_infer;
 use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
@@ -30,7 +29,7 @@ use super::dispatch::classify_vfs_failure;
 use super::tasks::{TaskBacking, TaskState};
 use super::{
     CallSite, ChainIndex, Continuation, EffectAnswer, EffectId, Pending, Scheduler,
-    ToolCallContinuation,
+    ToolCallContinuation, VfsContinuation,
 };
 
 /// The cancelled answer for a chain parked on `resume`'s kind of effect:
@@ -86,7 +85,10 @@ impl Scheduler {
                     CallSite::Script { .. } | CallSite::Model { .. } => None,
                 }
             }
-            _ => None,
+            Continuation::Infer(_)
+            | Continuation::Chat(_)
+            | Continuation::Vfs(_)
+            | Continuation::Timer => None,
         };
         let answer = match (resume, answer) {
             (Continuation::Timer, EffectAnswer::Dropped) => {
@@ -113,7 +115,22 @@ impl Scheduler {
                 }
             }
             (Continuation::Timer, EffectAnswer::Timer) => return self.fire_timer(id),
-            _ => {
+            (
+                Continuation::Infer(_) | Continuation::Chat(_),
+                EffectAnswer::ToolCall(_) | EffectAnswer::Vfs(_) | EffectAnswer::Timer,
+            )
+            | (
+                Continuation::ToolCall(_),
+                EffectAnswer::Chat(_) | EffectAnswer::Vfs(_) | EffectAnswer::Timer,
+            )
+            | (
+                Continuation::Vfs(_),
+                EffectAnswer::Chat(_) | EffectAnswer::ToolCall(_) | EffectAnswer::Timer,
+            )
+            | (
+                Continuation::Timer,
+                EffectAnswer::Chat(_) | EffectAnswer::ToolCall(_) | EffectAnswer::Vfs(_),
+            ) => {
                 return Err(Error::internal(
                     "an effect's answer must be of the effect's own kind",
                 ));
@@ -139,8 +156,8 @@ impl Scheduler {
         let owner = self.chains[chain.index()]
             .access()
             .ok()
-            .map(|access| access_id(access));
-        end_access(scope, owner, exec);
+            .map(|access| detail::access_id(access));
+        detail::end_access(scope, owner, exec);
     }
 
     /// Applies a nested infer round's completion: the single-prose-round
@@ -230,7 +247,7 @@ impl Scheduler {
     fn accept_vfs(
         &self,
         chain: ChainIndex,
-        continuation: &super::VfsContinuation,
+        continuation: &VfsContinuation,
         result: std::result::Result<VfsOutcome, VfsError>,
     ) -> Result<VfsOutcome> {
         let chain = &self.chains[chain.index()];
@@ -240,7 +257,7 @@ impl Scheduler {
                 if result.is_ok() { succeeded } else { failed },
             );
         }
-        result.map_err(|error| classify_vfs_failure(&continuation.op, &error))
+        result.map_err(|error| classify_vfs_failure(&continuation.op, error))
     }
 
     /// Applies a dropped timer: the slot backed by the effect moves to
@@ -253,18 +270,15 @@ impl Scheduler {
     /// drop wakes no one, since the cancel tears the waiter down with
     /// every other chain.
     fn drop_timer(&mut self, effect: EffectId) {
-        let Some((task, owner)) = self
+        let Some((task, slot)) = self
             .tasks
             .iter_mut()
             .find(|(_, slot)| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
-            .map(|(task, slot)| {
-                slot.state = TaskState::Cancelled;
-                slot.ok = Some(false);
-                (task.clone(), slot.owner)
-            })
         else {
             return;
         };
+        slot.state = TaskState::Cancelled;
+        let (task, owner) = (task.clone(), slot.owner);
         if self.ctx.cancel().is_cancelled()
             || !self.chains[owner.index()].waiting_on.contains(&task)
         {

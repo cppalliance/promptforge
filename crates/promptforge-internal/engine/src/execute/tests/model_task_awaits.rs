@@ -119,7 +119,7 @@ fn await_tasks_cancels_the_timer_when_a_member_ends_first() {
     );
     assert_eq!(
         rig.task_state_for_test(&task("0.0")),
-        Some(TaskState::Done),
+        Some(TaskState::Done { ok: true }),
         "the member's own slot holds its outcome; the notice delivered it"
     );
     let notices = NoticeRecorder::replayed(rig.trace()).notices();

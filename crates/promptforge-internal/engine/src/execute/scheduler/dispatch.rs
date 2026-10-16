@@ -11,19 +11,21 @@
 
 use std::sync::Arc;
 
+use promptforge_types::event::ReplyOrigin;
+use promptforge_types::event::lifecycle::{self, Lifecycle};
+use promptforge_vfs::VfsError;
+
+use crate::error::DepthVia;
 use crate::execute::protocol::{Answer, Blocked, Request, VfsOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::lua::{ToolSet, resolve_model_binding};
-use crate::model::Message;
-use crate::model::ModelBinding;
+use crate::model::{Message, ModelBinding};
 use crate::{Error, Result};
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::event::lifecycle;
-use promptforge_types::event::lifecycle::Lifecycle;
-use promptforge_vfs::VfsError;
 
-use super::{ChainIndex, Continuation, Counters, MAX_CALL_DEPTH, Scheduler, VfsContinuation};
+use super::chain::ChainStart;
+use super::chain_record::ChainKind;
+use super::{ChainIndex, Continuation, Counters, Scheduler, VfsContinuation};
 
 /// The error for a name that resolves to no tool in the run: the name and
 /// the id of every tool the run offers, so the message reads required
@@ -103,11 +105,13 @@ fn blocked_on(request: &Request) -> Option<Blocked> {
 /// [`Error::Store`] holding the model-facing message rendered for the
 /// operation and the structured cause, which ends the run as a
 /// `RunErrorKind::Vfs` error if it aborts the chunk uncaught.
-pub(super) fn classify_vfs_failure(op: &VfsOp, error: &VfsError) -> Error {
-    if let VfsError::Conflict { detail, .. } = error {
-        return Error::Determinism(detail.clone());
+pub(super) fn classify_vfs_failure(op: &VfsOp, error: VfsError) -> Error {
+    match error {
+        VfsError::Conflict { detail, .. } => Error::Determinism(detail),
+        // `VfsError` is `#[non_exhaustive]` across the crate seam; every
+        // other failure is the call's answer.
+        error => Error::store_op(op, error),
     }
-    Error::store_op(op, error.clone())
 }
 
 impl Scheduler {
@@ -226,15 +230,10 @@ impl Scheduler {
         let binding = if let Some(binding) = binding {
             binding
         } else {
-            let frame = chain
-                .frame
-                .as_ref()
-                .ok_or(Error::internal("a live chain holds its frame"))?;
-            resolve_model_binding(chain.ctx.models(), frame.vm()?.model_runtime())?.ok_or_else(
-                || Error::ModelRequired {
+            resolve_model_binding(chain.ctx.models(), chain.frame()?.vm()?.model_runtime())?
+                .ok_or_else(|| Error::ModelRequired {
                     section: chain.section_name().to_owned(),
-                },
-            )?
+                })?
         };
         // A nested infer round consumes only the accumulated completion;
         // its `Infer` origin tells the caller its live deltas have no
@@ -313,12 +312,7 @@ impl Scheduler {
         var: &serde_json::Value,
     ) -> Result<ChainIndex> {
         let chain = &self.chains[id.index()];
-        let depth = chain.call_depth + 1;
-        if depth > MAX_CALL_DEPTH {
-            return Err(Error::Lua(format!(
-                "call recursion exceeded cap of {MAX_CALL_DEPTH}"
-            )));
-        }
+        let depth = chain.call_depth.deeper(DepthVia::Call)?;
         // An explicit input forks the chain's args (and `argv` re-derives
         // from them); a no-input call inherits the caller's context whole,
         // so the run's frozen `argv` - H1's repair included - reaches the
@@ -341,17 +335,20 @@ impl Scheduler {
         // and spawned tasks share the caller's counter, so the id depends
         // only on the caller's own dispatch order.
         let chain_id = self.allocate_child_id(id)?;
-        let child = self.start_chain(
-            chain_id,
-            Counters::default(),
-            child_ctx,
-            target_section.slice,
-            target_section.index,
-            Some(id),
-            var.clone(),
-            depth,
-            child_concurrency,
-        )?;
+        let child = self.start_chain(ChainStart {
+            lineage: chain_id,
+            counters: Counters::default(),
+            ctx: child_ctx,
+            slice: target_section.slice,
+            index: target_section.index,
+            kind: ChainKind::Call {
+                parent: id,
+                released_holder: None,
+            },
+            var: var.clone(),
+            call_depth: depth,
+            concurrency: child_concurrency,
+        })?;
         self.chains[child.index()].access = access;
         Ok(child)
     }

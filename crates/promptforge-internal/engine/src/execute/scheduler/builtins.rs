@@ -28,6 +28,7 @@ mod schemas;
 
 use std::fmt::Write as _;
 
+use promptforge_types::event::lifecycle;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::tools::OutputTrust;
 use serde_json::Value;
@@ -36,20 +37,52 @@ use crate::execute::protocol::{Answer, SpawnVia, TaskPhase, TaskStatus, ToolCall
 use crate::execute::section_context::TaskSeed;
 use crate::lua::{SectionVm, TaskAllowlist};
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle;
 
 use super::tool_call::ToolCallDispatch;
 use super::{ChainIndex, Scheduler};
 
 pub(super) use schemas::advertise_task_builtins;
 
-/// The built-in names answered over the arena, in the order the model
-/// sees them advertised.
-const TASK_BUILTINS: [&str; 4] = ["task", "task_cancel", "task_status", "await_tasks"];
+/// One of the model's task built-ins. Their names are reserved: no
+/// catalog or local tool can take one, and a script call to one is
+/// unbound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::execute) enum TaskBuiltin {
+    /// `task`: start a task.
+    Task,
+    /// `task_cancel`: cancel a model task.
+    TaskCancel,
+    /// `task_status`: report a model task.
+    TaskStatus,
+    /// `await_tasks`: wait for a model task to end.
+    AwaitTasks,
+}
 
-/// Whether `name` is one of the built-ins answered here.
-pub(super) fn is_task_builtin(name: &str) -> bool {
-    TASK_BUILTINS.contains(&name)
+impl TaskBuiltin {
+    /// Every built-in, in the order the model sees them advertised.
+    pub(in crate::execute) const ALL: [TaskBuiltin; 4] = [
+        TaskBuiltin::Task,
+        TaskBuiltin::TaskCancel,
+        TaskBuiltin::TaskStatus,
+        TaskBuiltin::AwaitTasks,
+    ];
+
+    /// The built-in's tool name.
+    pub(in crate::execute) fn name(self) -> &'static str {
+        match self {
+            TaskBuiltin::Task => "task",
+            TaskBuiltin::TaskCancel => "task_cancel",
+            TaskBuiltin::TaskStatus => "task_status",
+            TaskBuiltin::AwaitTasks => "await_tasks",
+        }
+    }
+
+    /// The built-in a tool name reserves, if it reserves one.
+    pub(in crate::execute) fn from_name(name: &str) -> Option<TaskBuiltin> {
+        TaskBuiltin::ALL
+            .into_iter()
+            .find(|builtin| builtin.name() == name)
+    }
 }
 
 /// The section's task allowlist, read off its VM's tool runtime: `None`
@@ -61,7 +94,7 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
     let runtime = vm
         .tool_runtime()
         .lock()
-        .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
+        .map_err(|error| Error::Lua(format!("tool declaration runtime was poisoned: {error}")))?;
     Ok(runtime.allowed_tasks.clone())
 }
 
@@ -70,6 +103,7 @@ pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
 /// caller, which the dispatcher enqueues after the caller so the caller
 /// runs first as it does after `tasks.spawn`. The text is the Engine's
 /// own, so it always resumes trusted.
+#[derive(Debug)]
 pub(super) struct BuiltinAnswer {
     text: String,
     ok: bool,
@@ -96,6 +130,7 @@ impl BuiltinAnswer {
 
 /// How one built-in call resolved: an answer for the caller now, or the
 /// caller parked (`await_tasks` on live tasks), answered when it wakes.
+#[derive(Debug)]
 pub(super) enum BuiltinOutcome {
     Answered(BuiltinAnswer),
     Parked,
@@ -103,14 +138,19 @@ pub(super) enum BuiltinOutcome {
 
 /// Reads the `id` argument of `task_cancel` or `task_status`, or the
 /// refusal text for a missing or malformed one.
-fn task_id_argument(name: &str, args: &Value) -> std::result::Result<TaskId, String> {
+fn task_id_argument(builtin: TaskBuiltin, args: &Value) -> std::result::Result<TaskId, String> {
+    let name = builtin.name();
     let Some(id) = args.get("id").and_then(Value::as_str) else {
         return Err(format!(
             "{name}: `id` must be a task id string, exactly as `task` returned it"
         ));
     };
-    id.parse()
-        .map_err(|_| format!("{name}: `{id}` is not a task id; use the id `task` returned"))
+    id.parse().map_err(|_| {
+        format!(
+            "{name}: `{id}` is not a task id: required a dot-separated path of decimal \
+             components; use the id `task` returned"
+        )
+    })
 }
 
 /// Renders one status for the model: the id, the target heading, the
@@ -154,39 +194,32 @@ impl Scheduler {
     /// the chain parked, for an `await_tasks` whose answer comes when a
     /// task ends. Only the caller's own bookkeeping can fail here (a lost
     /// frame, a poisoned runtime); every model-facing fault is the
-    /// answer's text. The `tool_call` arm routes only [`is_task_builtin`]
-    /// names here. `turn` is the turn the call was dispatched under, which
-    /// every report of its answer carries, including a parked answer's
-    /// later one.
+    /// answer's text. `turn` is the turn the call was dispatched under,
+    /// which every report of its answer carries, including a parked
+    /// answer's later one.
     ///
     /// # Errors
-    /// Returns the internal fault the arm met, or [`Error::Internal`] for
-    /// a name outside [`TASK_BUILTINS`].
+    /// Returns the internal fault the arm met.
     pub(super) fn answer_task_builtin(
         &mut self,
         id: ChainIndex,
-        name: &str,
+        builtin: TaskBuiltin,
         args: &Value,
         call_id: &str,
         turn: u32,
     ) -> Result<ToolCallDispatch> {
-        let outcome = match name {
-            "task" => BuiltinOutcome::Answered(self.builtin_task(id, args)?),
-            "task_cancel" => BuiltinOutcome::Answered(self.builtin_task_cancel(id, args)),
-            "task_status" => BuiltinOutcome::Answered(self.builtin_task_status(id, args)),
-            "await_tasks" => self.builtin_await_tasks(id, args, call_id, turn),
-            _ => {
-                return Err(Error::internal(
-                    "the tool_call arm routes only the answered task built-ins here",
-                ));
-            }
+        let outcome = match builtin {
+            TaskBuiltin::Task => BuiltinOutcome::Answered(self.builtin_task(id, args)?),
+            TaskBuiltin::TaskCancel => BuiltinOutcome::Answered(self.builtin_task_cancel(id, args)),
+            TaskBuiltin::TaskStatus => BuiltinOutcome::Answered(self.builtin_task_status(id, args)),
+            TaskBuiltin::AwaitTasks => self.builtin_await_tasks(id, args, call_id, turn),
         };
         let answer = match outcome {
             BuiltinOutcome::Answered(answer) => answer,
             BuiltinOutcome::Parked => return Ok(ToolCallDispatch::Parked),
         };
         let started = answer.started;
-        let answer = self.report_builtin_answer(id, name, call_id, turn, answer);
+        let answer = self.report_builtin_answer(id, builtin, call_id, turn, answer);
         Ok(match started {
             Some(child) => ToolCallDispatch::Started(answer, child),
             None => ToolCallDispatch::Answered(answer),
@@ -200,7 +233,7 @@ impl Scheduler {
     pub(super) fn report_builtin_answer(
         &self,
         id: ChainIndex,
-        name: &str,
+        builtin: TaskBuiltin,
         call_id: &str,
         turn: u32,
         answer: BuiltinAnswer,
@@ -220,7 +253,7 @@ impl Scheduler {
             section,
             turn,
             call_id,
-            name,
+            builtin.name(),
             None,
             &answer.text,
             OutputTrust::Trusted,
@@ -249,12 +282,7 @@ impl Scheduler {
                 ));
             }
         };
-        let chain = &self.chains[id.index()];
-        let frame = chain
-            .frame
-            .as_ref()
-            .ok_or(Error::internal("a live chain holds its frame"))?;
-        let vm = frame.vm()?;
+        let vm = self.chains[id.index()].frame()?.vm()?;
         match task_allowlist(vm)? {
             None => {
                 return Ok(BuiltinAnswer::refused(
@@ -300,10 +328,10 @@ impl Scheduler {
     fn model_task(
         &self,
         caller: ChainIndex,
-        name: &str,
+        builtin: TaskBuiltin,
         args: &Value,
     ) -> std::result::Result<TaskId, String> {
-        let task = task_id_argument(name, args)?;
+        let task = task_id_argument(builtin, args)?;
         match self.tasks.get(&task) {
             Some(slot)
                 if slot.owner == caller
@@ -312,7 +340,7 @@ impl Scheduler {
             {
                 Ok(task)
             }
-            _ => Err(format!("{name}: no model task with id {task}")),
+            _ => Err(format!("{}: no model task with id {task}", builtin.name())),
         }
     }
 
@@ -321,7 +349,7 @@ impl Scheduler {
     /// whole word on it: no `was canceled` notice follows, unlike an
     /// author's cancel of a model task.
     fn builtin_task_cancel(&mut self, id: ChainIndex, args: &Value) -> BuiltinAnswer {
-        let task = match self.model_task(id, "task_cancel", args) {
+        let task = match self.model_task(id, TaskBuiltin::TaskCancel, args) {
             Ok(task) => task,
             Err(text) => return BuiltinAnswer::refused(text),
         };
@@ -334,7 +362,7 @@ impl Scheduler {
     /// The `task_status` built-in over a model task the caller owns: the
     /// status line, trusted.
     fn builtin_task_status(&self, id: ChainIndex, args: &Value) -> BuiltinAnswer {
-        let task = match self.model_task(id, "task_status", args) {
+        let task = match self.model_task(id, TaskBuiltin::TaskStatus, args) {
             Ok(task) => task,
             Err(text) => return BuiltinAnswer::refused(text),
         };
@@ -344,3 +372,7 @@ impl Scheduler {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "builtins-tests.rs"]
+mod tests;

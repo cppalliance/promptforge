@@ -84,21 +84,21 @@ mod walk;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use promptforge_types::event::{ReplyOrigin, lifecycle};
 use promptforge_types::ids::{Provenance, RoundId, TaskId};
 use promptforge_vfs::Origin;
 use promptforge_vfs::detail::ScopeHandle;
 
 use crate::parser::{Block, Prompt};
 use crate::{Error, Result};
-use promptforge_types::event::{ReplyOrigin, lifecycle};
 
 use super::context::RunState;
 use super::protocol::Answer;
 use super::run::{Effect, EffectAnswer, EffectId, Round};
+pub(in crate::execute) use builtins::TaskBuiltin;
 use chain_record::{Chain, ChatAnchor};
 use pending::{CallSite, Continuation, Pending, ToolCallContinuation, VfsContinuation};
 use tasks::TaskSlot;
-pub(in crate::execute) use tool_call::RESERVED_TOOL_NAMES;
 
 /// Maximum nested `call()` depth (inclusive of the first call).
 const MAX_CALL_DEPTH: usize = 8;

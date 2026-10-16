@@ -37,7 +37,8 @@ pub enum RunErrorKind {
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
     /// A Lua resource quota (log events, log bytes, or instructions) was
-    /// exhausted.
+    /// exhausted, or a `call`, `tasks.spawn`, or `tasks.fanout` arm would
+    /// have nested past the call-depth cap.
     Quota,
     /// The request overflowed the model's context window, and the selected
     /// compactor left it over the limit.
@@ -144,7 +145,7 @@ impl RunError {
     pub fn kind(&self) -> RunErrorKind {
         match &self.inner {
             Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => RunErrorKind::Parse,
-            Error::LuaQuota { .. } => RunErrorKind::Quota,
+            Error::LuaQuota { .. } | Error::CallDepthExceeded { .. } => RunErrorKind::Quota,
             Error::ContextExhausted { .. } => RunErrorKind::ContextExhausted,
             // A leaked task, a task reached for by a chain that does not
             // own it, a result waited on twice, and a wait's delivery of a
@@ -226,6 +227,7 @@ impl RunError {
             | Error::Tool { .. }
             | Error::Internal { .. }
             | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
             | Error::ContextExhausted { .. }
             | Error::Store { .. }
             | Error::Determinism(_) => false,
@@ -283,6 +285,7 @@ impl RunError {
             | Error::RequirementsUnmet { .. }
             | Error::Tool { .. }
             | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
             | Error::ContextExhausted { .. }
             | Error::Store { .. }
             | Error::Determinism(_) => None,

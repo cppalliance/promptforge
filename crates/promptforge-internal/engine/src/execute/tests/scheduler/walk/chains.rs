@@ -249,13 +249,17 @@ fn a_jump_descent_does_not_consume_call_depth() {
         ```\n";
     let rig = Rig::run(scheduler_scenario(md));
 
-    match rig.trace().error().inner() {
-        Error::Lua(message) => assert_eq!(
-            message, "call recursion exceeded cap of 8",
-            "the depth cap must fail the run"
+    let error = rig.trace().error();
+    assert!(
+        matches!(
+            error.inner(),
+            Error::CallDepthExceeded {
+                cap: 8,
+                via: DepthVia::Call
+            }
         ),
-        other => panic!("expected the typed depth-cap Lua error, got {other:?}"),
-    }
+        "the depth cap must fail the run, got {error:?}"
+    );
     assert_eq!(
         rig.trace().read("depth.txt").expect("depth log"),
         "x\ny\nx\ny\nx\ny\nx\ny\nx\n",

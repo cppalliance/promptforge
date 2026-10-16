@@ -1,8 +1,11 @@
-//! The chain record: one chain's identity, walk position, in-flight
+//! The chain record: one chain's identity, kind, walk position, in-flight
 //! coroutine, task bookkeeping, and walk-scoped slots. The scheduler's
-//! arena holds one per chain it has started, indexed by [`ChainIndex`].
+//! arena holds one per chain it has started, indexed by
+//! [`ChainIndex`](super::ChainIndex).
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use mlua::Thread;
@@ -10,6 +13,7 @@ use promptforge_types::ids::{ChainId, TaskId};
 use promptforge_types::metrics::Usage;
 use promptforge_vfs::Access;
 
+use crate::error::DepthVia;
 use crate::execute::context::RunState;
 use crate::execute::protocol::{Answer, Blocked};
 use crate::execute::scope::DispatchTarget;
@@ -21,7 +25,12 @@ use crate::parser::{Block, BodyText, Prompt, Section};
 use crate::{Error, Result};
 
 use super::await_tasks::AwaitTasks;
-use super::{ChainIndex, Counters, SpawnRecord};
+use super::{Counters, MAX_CALL_DEPTH};
+
+#[path = "chain_record-kind.rs"]
+mod kind;
+
+pub(super) use kind::{Admission, ChainKind};
 
 /// What the chain's `chat` rounds taught the context precheck about token
 /// counts: the provider's numbers for the newest round that reported usage.
@@ -39,7 +48,7 @@ use super::{ChainIndex, Counters, SpawnRecord};
 /// alias is only a prompt-local label: two aliases of one model, with
 /// other temperature or thinking settings, count tokens alike and share a
 /// measurement.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct ChatAnchor {
     in_flight: Option<(ModelId, Vec<Message>)>,
     measured: Option<(ModelId, UsageAnchor)>,
@@ -73,6 +82,76 @@ impl ChatAnchor {
     }
 }
 
+/// A section's position in the sibling slice a chain walks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SectionIndex(usize);
+
+impl SectionIndex {
+    /// The slice's first section.
+    pub(super) const FIRST: SectionIndex = SectionIndex(0);
+
+    /// The section at `index` in its slice.
+    pub(super) fn new(index: usize) -> SectionIndex {
+        SectionIndex(index)
+    }
+
+    /// The position as a slice index.
+    pub(super) fn get(self) -> usize {
+        self.0
+    }
+
+    /// The section after this one in the same slice.
+    pub(super) fn next(self) -> SectionIndex {
+        SectionIndex(self.0 + 1)
+    }
+}
+
+/// A block's position in the section, or the H1 pass, a chain runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BlockIndex(usize);
+
+impl BlockIndex {
+    /// The section's first block.
+    pub(super) const FIRST: BlockIndex = BlockIndex(0);
+
+    /// The block after this one.
+    pub(super) fn next(self) -> BlockIndex {
+        BlockIndex(self.0 + 1)
+    }
+}
+
+/// A chain's call nesting depth: each `call` child and each spawned task
+/// runs one level deeper than the chain that started it, so the cap holds
+/// across a spawn boundary as well as a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CallDepth(usize);
+
+impl CallDepth {
+    /// The depth of the root walk and the H1 pass.
+    pub(super) const ROOT: CallDepth = CallDepth(0);
+
+    /// The depth a chain started one level deeper runs at.
+    ///
+    /// # Errors
+    /// Returns [`Error::CallDepthExceeded`], named after `via`, when that
+    /// depth passes the cap.
+    pub(super) fn deeper(self, via: DepthVia) -> Result<CallDepth> {
+        let depth = self.0 + 1;
+        if depth > MAX_CALL_DEPTH {
+            return Err(Error::CallDepthExceeded {
+                cap: MAX_CALL_DEPTH,
+                via,
+            });
+        }
+        Ok(CallDepth(depth))
+    }
+
+    /// The depth as a count of nesting levels.
+    pub(super) fn get(self) -> usize {
+        self.0
+    }
+}
+
 /// One chain: a contained line of section execution.
 ///
 /// The chain owns its per-section frame and adds the chain position (the
@@ -95,16 +174,15 @@ pub(super) struct Chain {
     /// or not the prompt has H1 blocks, so the first walked section is
     /// always `0.1`.
     pub(super) counters: Counters,
+    /// What kind of chain this is, with the links and admission state
+    /// only that kind has.
+    pub(super) kind: ChainKind,
     /// The nearest enclosing task: the chain's own id when the chain is a
     /// spawned task (a fanout arm included), its caller's task for a
     /// `call` child (a blocking child never interleaves with its caller,
     /// so the two share one task), and task `0` for the root chain. Every
     /// section the chain enters reads it as `sys.taskid`.
     pub(super) task: TaskId,
-    /// The chain that spawned this chain, when the chain is a task's
-    /// backing chain: the task's owner, the only chain allowed to wait on,
-    /// inspect, or cancel it. `None` for the root and a `call` child.
-    pub(super) owner: Option<ChainIndex>,
     /// A spawned chain's `item` and `sys.index` seeds, consumed by its
     /// first section entry; `None` afterward and on every other chain.
     pub(super) seed: Option<TaskSeed>,
@@ -162,7 +240,7 @@ pub(super) struct Chain {
     pub(super) slice: SlicePath,
     /// The section of `slice` the chain is running, or the next entry
     /// candidate while the chain is between sections.
-    pub(super) index: usize,
+    pub(super) index: SectionIndex,
     /// The name of the section the chain most recently entered: the name
     /// its reports carry on the walk, including between sections and after
     /// the walk runs off its slice, where `index` names no running section.
@@ -173,11 +251,11 @@ pub(super) struct Chain {
     /// walks: the parent slice plus the jumper's index in it. A jump to a
     /// child pushes the current position and descends; when the child
     /// level exhausts, the pop resumes the parent after the jumper.
-    pub(super) positions: Vec<(SlicePath, usize)>,
+    pub(super) positions: Vec<(SlicePath, SectionIndex)>,
     /// The section's in-flight or next Lua/prose block: while `coroutine`
     /// is `Some` this is the suspended block's index, otherwise the next
     /// block to start.
-    pub(super) block: usize,
+    pub(super) block: BlockIndex,
     /// The coroutine handle for the in-flight Lua block: exists only while
     /// a block is running or suspended; a block that returns disposes of it.
     pub(super) coroutine: Option<Thread>,
@@ -194,42 +272,14 @@ pub(super) struct Chain {
     /// is discarded with the chain, so the caller never sees the chain's
     /// writes.
     pub(super) var: serde_json::Value,
-    /// The chain's call nesting depth: each call child and each spawned
-    /// task runs one level deeper. The recursion cap checks this field,
-    /// which carries the depth across a spawn boundary as well as a call.
-    pub(super) call_depth: usize,
+    /// The chain's call nesting depth, which the recursion cap checks.
+    pub(super) call_depth: CallDepth,
     /// The chain's effective admission limit: the most tasks this chain
     /// may have admitted at once. The root's is the run's ceiling
     /// ([`RunLimits::max_concurrency`](crate::execute::RunLimits::max_concurrency));
     /// a spawned task and a call chain start with their parent's, and
     /// `tasks.concurrency` lowers it, clamped to the parent's.
-    pub(super) concurrency: usize,
-    /// The number of admitted tasks currently holding a slot against
-    /// this chain: the chain's own children and, transitively, every
-    /// descendant's. A task's admission takes a slot here and at every
-    /// enclosing ancestor, so the count never exceeds `concurrency`.
-    pub(super) slots_used: usize,
-    /// Whether this chain currently holds its own admission slots: `true`
-    /// from admission until it ends or parks on a task wait, which gives
-    /// the slots back so its descendants can run. A task blocked on a
-    /// `call` child gives them back while that child parks on a task
-    /// wait.
-    pub(super) holding: bool,
-    /// The nearest holding ancestor whose slots this call chain gave back
-    /// when it parked on a task wait: the chain's wake takes that
-    /// ancestor's slots back before the chain continues. `None` on every
-    /// other chain and once the slots are retaken.
-    pub(super) released_holder: Option<ChainIndex>,
-    /// Whether the chain was admitted at least once: the start event has
-    /// fired, so its terminal event may fire too. A cancelled or
-    /// abandoned chain that never ran reports no terminal.
-    pub(super) admitted: bool,
-    /// A queued task's spawn record, held from spawn until its
-    /// admission and consumed by the start event; `None` on every other
-    /// chain and after admission.
-    pub(super) pending_spawn: Option<SpawnRecord>,
-    /// The call parent blocked on this chain, if any.
-    pub(super) parent: Option<ChainIndex>,
+    pub(super) concurrency: NonZeroUsize,
     /// The tool scope the chain's last `chat` round advertised, keyed by
     /// alias: the round's answer is checked against it, so a tool name the
     /// model invents or reaches for outside the scope fails as out of
@@ -238,14 +288,24 @@ pub(super) struct Chain {
     /// The provider's token counts for the chain's `chat` rounds, which the
     /// next round's context precheck counts from.
     pub(super) anchor: ChatAnchor,
-    /// The H1 marker: the chain runs the prompt's H1 blocks under its
-    /// title - section 0. Such a chain runs the walk's rules with three
-    /// deltas: the frame keeps id 0 (no section observations fire), a
-    /// scalar return short-circuits the whole run, and the pass's end
-    /// starts the root walk with the H1 `var` hand-off. The `slice`/`index`
-    /// walk position stays at the top-level slice, unused until a jump out
-    /// of H1 starts the walk at the resolved target.
-    pub(super) h1: bool,
+}
+
+impl fmt::Debug for Chain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Chain")
+            .field("lineage", &self.lineage)
+            .field("kind", &self.kind)
+            .field("task", &self.task)
+            .field("slice", &self.slice)
+            .field("index", &self.index)
+            .field("entered", &self.entered)
+            .field("block", &self.block)
+            .field("blocked", &self.blocked)
+            .field("waiting_on", &self.waiting_on)
+            .field("call_depth", &self.call_depth)
+            .field("concurrency", &self.concurrency)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Chain {
@@ -262,21 +322,51 @@ impl Chain {
             .ok_or(Error::internal("a live chain holds its access capability"))
     }
 
+    /// The frame of the section the chain is running.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the chain is between sections,
+    /// which no caller that reached the chain through a suspended or
+    /// running block can see.
+    #[track_caller]
+    pub(super) fn frame(&self) -> Result<&SectionContext> {
+        self.frame
+            .as_ref()
+            .ok_or(Error::internal("a live chain holds its frame"))
+    }
+
+    /// The frame of the section the chain is running, mutably.
+    ///
+    /// # Errors
+    /// As [`frame`](Self::frame).
+    #[track_caller]
+    pub(super) fn frame_mut(&mut self) -> Result<&mut SectionContext> {
+        self.frame
+            .as_mut()
+            .ok_or(Error::internal("a live chain holds its frame"))
+    }
+
     /// The chain's current section within `prompt`: the section at its
     /// walk position. Resolved against the caller's handle on the tree so
     /// the result outlives a mutable borrow of the chain.
     fn section<'p>(&self, prompt: &'p Prompt) -> &'p Section {
-        &self.slice.resolve(prompt)[self.index]
+        &self.slice.resolve(prompt)[self.index.get()]
     }
 
     /// The chain's current block sequence: the H1 pass's blocks, or
     /// the current section's blocks on the walk.
     pub(super) fn blocks<'p>(&self, prompt: &'p Prompt) -> &'p [Block] {
-        if self.h1 {
+        if self.kind.is_h1() {
             promptforge_parser::detail::h1_blocks(prompt)
         } else {
             self.section(prompt).blocks()
         }
+    }
+
+    /// The block at the chain's block position, or `None` once the
+    /// section's blocks are exhausted.
+    pub(super) fn current_block<'p>(&self, prompt: &'p Prompt) -> Option<&'p Block> {
+        self.blocks(prompt).get(self.block.0)
     }
 
     /// The chain's current section name for observations and errors: the
@@ -284,7 +374,7 @@ impl Chain {
     /// the chain most recently entered - so a chain between sections, or
     /// past its slice's last section, reports the section it just left.
     pub(super) fn section_name(&self) -> &str {
-        if self.h1 {
+        if self.kind.is_h1() {
             self.ctx.prompt().title()
         } else {
             &self.entered

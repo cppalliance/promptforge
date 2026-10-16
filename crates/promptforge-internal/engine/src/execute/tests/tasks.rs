@@ -140,7 +140,7 @@ fn a_finished_child_moves_its_slot_to_done_and_reports_task_succeeded() {
 
     assert_eq!(
         rig.task_state_for_test(&task("0.0")),
-        Some(TaskState::Done),
+        Some(TaskState::Done { ok: true }),
         "the child's completion moves its slot to Done"
     );
     let recorder = TaskRecorder::replayed(rig.trace());
@@ -185,7 +185,7 @@ fn a_failed_child_moves_its_slot_to_done_and_reports_task_failed() {
 
     assert_eq!(
         rig.task_state_for_test(&task("0.0")),
-        Some(TaskState::Done),
+        Some(TaskState::Done { ok: false }),
         "a failed child's slot is Done with a failed outcome"
     );
     let recorder = TaskRecorder::replayed(rig.trace());

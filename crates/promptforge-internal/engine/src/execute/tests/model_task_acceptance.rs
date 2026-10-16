@@ -152,7 +152,7 @@ fn one_model_task_reads_as_a_single_transcript_with_one_terminal() {
     assert_eq!(message_count(&gateway, 2), 6, "round 3 holds the notice");
     assert_eq!(
         rig.task_state_for_test(&task("0.0")),
-        Some(TaskState::Done),
+        Some(TaskState::Done { ok: true }),
         "the model's task holds its outcome; the notice delivered it"
     );
     let recorder = NoticeRecorder::replayed(rig.trace());
@@ -217,7 +217,7 @@ fn the_author_adopts_a_model_task_and_collects_its_result() {
     );
     assert_eq!(
         rig.task_state_for_test(&task("0.0")),
-        Some(TaskState::Delivered),
+        Some(TaskState::Delivered { ok: true }),
         "the author's wait consumed the outcome"
     );
     assert_eq!(
@@ -308,8 +308,14 @@ fn two_waits_deliver_two_notices_once_each_in_finish_order() {
         9,
         "the reply round drains no notice a wait already delivered"
     );
-    assert_eq!(rig.task_state_for_test(&task("0.0")), Some(TaskState::Done));
-    assert_eq!(rig.task_state_for_test(&task("0.1")), Some(TaskState::Done));
+    assert_eq!(
+        rig.task_state_for_test(&task("0.0")),
+        Some(TaskState::Done { ok: true })
+    );
+    assert_eq!(
+        rig.task_state_for_test(&task("0.1")),
+        Some(TaskState::Done { ok: true })
+    );
     assert_eq!(
         rig.task_state_for_test(&task("0.2")),
         None,
@@ -370,7 +376,7 @@ fn a_timed_out_wait_then_the_models_cancel_leaves_the_task_cancelled_without_a_n
     );
     assert_eq!(
         rig.task_state_for_test(&task("0.1")),
-        Some(TaskState::Done),
+        Some(TaskState::Done { ok: true }),
         "the wait's timer fired"
     );
     let recorder = NoticeRecorder::replayed(rig.trace());

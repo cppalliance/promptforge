@@ -57,7 +57,7 @@ fn join_any_returns_nil_when_the_timer_wins_and_the_member_keeps_running() {
     // its firing was delivered to the wait.
     assert_eq!(
         rig.task_state_for_test(&task("0.1")),
-        Some(TaskState::Delivered),
+        Some(TaskState::Delivered { ok: true }),
         "the fired timer's slot was delivered to the wait"
     );
     assert!(

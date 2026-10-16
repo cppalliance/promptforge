@@ -31,7 +31,7 @@ use crate::Error;
 use super::{ChainIndex, Scheduler};
 
 /// How a model task ended, as the notice tells it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum TaskEnd<'a> {
     /// The chain returned its final text.
     Completed(&'a str),
@@ -83,12 +83,11 @@ impl Scheduler {
     /// everything the task did happens before the model's next step.
     pub(super) fn drain_task_notices(&mut self, id: ChainIndex) -> Vec<String> {
         let notices = std::mem::take(&mut self.chains[id.index()].task_notices);
-        notices
-            .into_iter()
-            .map(|(task, text)| {
-                self.join_task(id, &task);
-                text
-            })
-            .collect()
+        let mut texts = Vec::with_capacity(notices.len());
+        for (task, text) in notices {
+            self.join_task(id, &task);
+            texts.push(text);
+        }
+        texts
     }
 }

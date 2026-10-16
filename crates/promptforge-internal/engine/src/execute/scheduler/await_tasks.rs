@@ -32,8 +32,9 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 use serde_json::Value;
 
 use crate::execute::protocol::Blocked;
+use crate::{Error, Result};
 
-use super::builtins::{BuiltinAnswer, BuiltinOutcome};
+use super::builtins::{BuiltinAnswer, BuiltinOutcome, TaskBuiltin};
 use super::{ChainIndex, Scheduler};
 
 /// The model's parked `await_tasks`, recorded on its chain until a member
@@ -45,11 +46,17 @@ pub(super) struct AwaitTasks {
     /// The turn the call was dispatched under, which the wake's
     /// `ToolResult` reports.
     turn: u32,
-    /// The timeout timer's slot id, when the call gave a timeout; listed
-    /// last in the wait set.
-    timer: Option<TaskId>,
-    /// The timeout, for the plain-sleep rendering.
-    timeout: Option<Duration>,
+    /// The timeout, when the call gave one.
+    timeout: Option<AwaitTimeout>,
+}
+
+/// A parked `await_tasks` call's timeout.
+#[derive(Debug)]
+struct AwaitTimeout {
+    /// The timer's slot id, listed last in the wait set.
+    timer: TaskId,
+    /// How long the call waits, for the plain-sleep rendering.
+    duration: Duration,
 }
 
 /// The refusal for a `timeout` that is not a non-negative finite number
@@ -122,11 +129,11 @@ impl Scheduler {
             ));
         }
         let mut set = live;
-        let timer = match timeout {
-            Some(timeout) => match self.prepare_timer(id, timeout) {
+        let timeout = match timeout {
+            Some(duration) => match self.prepare_timer(id, duration) {
                 Ok(timer) => {
                     set.push(timer.clone());
-                    Some(timer)
+                    Some(AwaitTimeout { timer, duration })
                 }
                 Err(error) => {
                     return BuiltinOutcome::Answered(BuiltinAnswer::refused(format!(
@@ -141,7 +148,6 @@ impl Scheduler {
         chain.awaiting = Some(AwaitTasks {
             call_id: call_id.to_owned(),
             turn,
-            timer,
             timeout,
         });
         chain.blocked = Some(Blocked::Tasks);
@@ -157,31 +163,38 @@ impl Scheduler {
     /// owner's notices are drained, and the rendered text resumes the
     /// model's tool call. The caller has already cleared `waiting_on`
     /// and taken `awaiting`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the owner no longer owns its own
+    /// timer, which only a scheduler bug produces.
     pub(super) fn finish_await_tasks(
         &mut self,
         owner: ChainIndex,
         awaiting: &AwaitTasks,
         woke: &TaskId,
-    ) {
-        let timed_out = awaiting.timer.as_ref() == Some(woke);
-        if !timed_out && let Some(timer) = &awaiting.timer {
-            // An internal slot: the cancel reports nothing, and a fault
-            // here (the owner no longer owning its own timer) cannot
-            // happen outside a scheduler bug, so the result is not
-            // inspected.
-            let _ = self.cancel_task(owner, timer);
-        }
+    ) -> Result<()> {
+        let fired = match &awaiting.timeout {
+            Some(timeout) if timeout.timer == *woke => Some(timeout.duration),
+            Some(timeout) => {
+                // An internal slot: the cancel reports nothing.
+                self.cancel_task(owner, &timeout.timer).map_err(|error| {
+                    Error::internal_with_cause("an await_tasks owner owns its timer", error)
+                })?;
+                None
+            }
+            None => None,
+        };
         let notices = self.drain_task_notices(owner);
         let still_running = self.live_tasks_of(owner, Some(TaskOrigin::Model));
-        let fired = if timed_out { awaiting.timeout } else { None };
         let text = render_wake(notices, fired, &still_running);
         let answer = self.report_builtin_answer(
             owner,
-            "await_tasks",
+            TaskBuiltin::AwaitTasks,
             &awaiting.call_id,
             awaiting.turn,
             BuiltinAnswer::served(text),
         );
         self.wake_from_wait(owner, answer);
+        Ok(())
     }
 }

@@ -351,7 +351,7 @@ fn call_recursion_is_capped() {
         &[("A", "return call('## B')"), ("B", "return call('## A')")],
     );
     let trace = Scenario::new(source).run();
-    let rendered = format!("{:?}", trace.error());
+    let rendered = trace.error().to_string();
     assert!(
         rendered.contains("recursion exceeded cap"),
         "expected a recursion-cap error, got: {rendered}"

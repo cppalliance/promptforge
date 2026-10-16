@@ -8,7 +8,7 @@ use promptforge_parser::ModelKeyword;
 use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
-use crate::execute::scheduler::RESERVED_TOOL_NAMES;
+use crate::execute::scheduler::TaskBuiltin;
 use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelBinding, ModelInvocation, ModelSet};
 use crate::parser::Prompt;
@@ -38,7 +38,7 @@ pub(super) fn bound_tool_set(
 /// line; a script still reaches it by id through the catalog bindings.
 fn offered_bindings(ctx: &RunContext) -> Vec<ToolBinding> {
     let mut tools: Vec<&ToolDescriptor> = ctx.tools.tools().iter().collect();
-    tools.sort_by(|left, right| left.id.cmp(&right.id));
+    tools.sort_unstable_by(|left, right| left.id.cmp(&right.id));
     let mut taken = BTreeSet::new();
     let mut offered = Vec::new();
     for tool in tools {
@@ -57,7 +57,7 @@ fn offered_bindings(ctx: &RunContext) -> Vec<ToolBinding> {
 /// name, no model round could advertise it, or an earlier offered tool has
 /// it. `None` when it can be offered.
 fn offer_refusal(name: &str, tool: &ToolDescriptor, taken: &BTreeSet<String>) -> Option<String> {
-    if RESERVED_TOOL_NAMES.contains(&name) {
+    if TaskBuiltin::from_name(name).is_some() {
         return Some("a task built-in has the same name".to_owned());
     }
     if let Err(error) = detail::tool_schema_new(

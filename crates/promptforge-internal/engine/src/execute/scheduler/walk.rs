@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use promptforge_types::ids::ChainId;
+use promptforge_vfs::Access;
 
 use crate::execute::section_context::SectionContext;
 use crate::execute::walk_target::{
@@ -21,17 +22,19 @@ use crate::heading_address::{self, Visible};
 use crate::parser::Block;
 use crate::{Error, Result};
 
+use super::chain::{ChainStart, ChainStep};
+use super::chain_record::{BlockIndex, CallDepth, ChainKind, SectionIndex};
 use super::{Chain, ChainIndex, Counters, Scheduler, prompt_origin};
-use promptforge_vfs::Access;
 
 /// A heading resolved against a chain's visible set: the slice the walk or
 /// a contained chain continues on, the target's index in it, and whether
 /// the target is a direct child of the current section (a descent).
+#[derive(Debug)]
 pub(super) struct ChainTarget {
     /// The slice the walk or chain continues on.
     pub(super) slice: SlicePath,
     /// The target's index in `slice`.
-    pub(super) index: usize,
+    pub(super) index: SectionIndex,
     /// True when the target is a direct child of the current section.
     child: bool,
 }
@@ -54,17 +57,17 @@ impl Scheduler {
             next_child: 0,
             next_entry: 1,
         };
-        let root = self.start_chain(
-            ChainId::root(),
-            after_h1,
-            self.ctx.clone(),
-            SlicePath::root(),
-            0,
-            None,
-            serde_json::json!({}),
-            0,
-            self.ctx.limits().concurrency().get(),
-        )?;
+        let root = self.start_chain(ChainStart {
+            lineage: ChainId::root(),
+            counters: after_h1,
+            ctx: self.ctx.clone(),
+            slice: SlicePath::root(),
+            index: SectionIndex::FIRST,
+            kind: ChainKind::Root,
+            var: serde_json::json!({}),
+            call_depth: CallDepth::ROOT,
+            concurrency: self.ctx.limits().concurrency(),
+        })?;
         self.install_root_slots(root, None)?;
         self.ready.push_back(root);
         Ok(())
@@ -134,7 +137,7 @@ impl Scheduler {
         let prompt = self.prompt();
         let chain = &mut self.chains[id.index()];
         chain.pending_prose = None;
-        if chain.h1 {
+        if chain.kind.is_h1() {
             // The H1 pass enters its frame exactly once: section 0 under
             // the prompt's title, through the same install path as any
             // section - and no SECTION_STARTED, the pass is not a walked
@@ -142,10 +145,10 @@ impl Scheduler {
             let section_id = Self::next_entry_id(chain)?;
             let frame = SectionContext::new_live_h1(&chain.ctx, chain.access()?, &section_id)?;
             chain.frame = Some(frame);
-            chain.block = 0;
+            chain.block = BlockIndex::FIRST;
             return Ok(true);
         }
-        let index = chain.index;
+        let index = chain.index.get();
         // `slice` borrows the shared prompt tree, not the arena, so the
         // frame construction can borrow the chain's own context and slots.
         let slice = chain.slice.resolve(&prompt);
@@ -169,7 +172,7 @@ impl Scheduler {
         )?;
         chain.frame = Some(frame);
         slice[index].name().clone_into(&mut chain.entered);
-        chain.block = 0;
+        chain.block = BlockIndex::FIRST;
         Ok(true)
     }
 
@@ -179,22 +182,15 @@ impl Scheduler {
     /// # Errors
     /// Returns the [`Error`] of frame construction, as documented on
     /// [`SectionContext::new`].
-    pub(super) fn advance_entry(
-        &mut self,
-        id: ChainIndex,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
-        if self.enter_section(id)? {
+    pub(super) fn advance_entry(&mut self, id: ChainIndex) -> Result<ChainStep> {
+        if self.enter_section(id)? || self.pop_position(id) {
+            // A section was entered, or a jump-started child level
+            // exhausted and the parent walk resumes after the jumper.
             self.ready.push_back(id);
-        } else if self.pop_position(id) {
-            // A jump-started child level exhausted: the parent walk resumes
-            // after the jumper.
-            self.ready.push_back(id);
-        } else {
-            // The walk ran off the slice's last section: the chain ends.
-            self.finish(id, Ok(None), root_result);
+            return Ok(ChainStep::Continue);
         }
-        Ok(())
+        // The walk ran off the slice's last section: the chain ends.
+        Ok(self.finish(id, Ok(None)))
     }
 
     /// Resumes a jump-suspended parent position when a child level
@@ -208,7 +204,7 @@ impl Scheduler {
             return false;
         };
         chain.slice = slice;
-        chain.index = jumper + 1;
+        chain.index = jumper.next();
         true
     }
 
@@ -230,7 +226,7 @@ impl Scheduler {
         chain.var = frame.read_var()?;
         frame.mark_completed();
         drop(frame);
-        chain.index += 1;
+        chain.index = chain.index.next();
         Ok(())
     }
 
@@ -285,7 +281,7 @@ impl Scheduler {
     ) -> Result<ChainTarget> {
         let prompt = self.ctx.prompt();
         let chain = &self.chains[id.index()];
-        if chain.h1 {
+        if chain.kind.is_h1() {
             let sections = h1_visible_sections(prompt);
             let target = heading_address::resolve_visible(heading, Visible::all(sections))?;
             let index = section_position(sections, target).ok_or(Error::internal(
@@ -293,21 +289,21 @@ impl Scheduler {
             ))?;
             return Ok(ChainTarget {
                 slice: SlicePath::root(),
-                index,
+                index: SectionIndex::new(index),
                 child: false,
             });
         }
         let slice = chain.slice.resolve(prompt);
-        let index = chain.index;
+        let index = chain.index.get();
         match resolve_jump_target(heading, slice, index)? {
             JumpTarget::Child(child) => Ok(ChainTarget {
                 slice: chain.slice.child(index),
-                index: child,
+                index: SectionIndex::new(child),
                 child: true,
             }),
             JumpTarget::Sibling(sibling) => Ok(ChainTarget {
                 slice: chain.slice.clone(),
-                index: sibling,
+                index: SectionIndex::new(sibling),
                 child: false,
             }),
         }

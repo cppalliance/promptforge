@@ -4,6 +4,8 @@
 //! parent, or a task slot) and the abort of a chain with everything it
 //! transitively blocks on or owns.
 
+use std::num::NonZeroUsize;
+
 use promptforge_types::ids::{AbandonReason, ChainId, TaskId};
 
 use crate::execute::context::RunState;
@@ -12,9 +14,47 @@ use crate::execute::run::EffectId;
 use crate::execute::walk_target::SlicePath;
 use crate::{Error, Result};
 
+use super::chain_record::{BlockIndex, CallDepth, ChainKind, SectionIndex};
 use super::{
     Chain, ChainIndex, ChatAnchor, Continuation, Counters, GENERIC_COMPLETION, Pending, Scheduler,
 };
+
+/// What one chain's step left the run with: the run goes on, or the step
+/// decided the run's result.
+#[derive(Debug)]
+pub(super) enum ChainStep {
+    /// The run goes on.
+    Continue,
+    /// The run ended with this result: the root's outcome, an H1
+    /// short-circuit, or a failure fatal to the whole run.
+    RunEnded(Result<String>),
+}
+
+/// Everything a new chain starts from.
+pub(super) struct ChainStart {
+    /// The chain's hierarchical id.
+    pub(super) lineage: ChainId,
+    /// The id counters the chain continues from: zero for a fresh chain,
+    /// the H1 pass's for the root walk that follows it.
+    pub(super) counters: Counters,
+    /// The chain's fork of the run context.
+    pub(super) ctx: RunState,
+    /// The slice the chain walks.
+    pub(super) slice: SlicePath,
+    /// The section of `slice` the chain starts at.
+    pub(super) index: SectionIndex,
+    /// What kind of chain it is.
+    pub(super) kind: ChainKind,
+    /// The `var` the chain's first section seeds from: a call or task
+    /// chain's caller snapshot, discarded with the chain.
+    pub(super) var: serde_json::Value,
+    /// The chain's call nesting depth.
+    pub(super) call_depth: CallDepth,
+    /// The chain's effective admission limit for the tasks it spawns:
+    /// the caller's own for a call child or a task, the run's ceiling for
+    /// the root.
+    pub(super) concurrency: NonZeroUsize,
+}
 
 impl Scheduler {
     /// Allocates the next child id under `owner`'s chain: the owner's id
@@ -34,57 +74,38 @@ impl Scheduler {
         Ok(chain.lineage.child(index))
     }
 
-    /// Creates one chain over `slice` from `index` under the hierarchical
-    /// `lineage` with its id `counters` and returns its arena index. A
-    /// fresh chain starts its counters at zero and enters its first
-    /// section on its first step, taking entry 0 of its own id; the root
-    /// walk continues the counters of the H1 pass it follows. The live H1
-    /// pass starts here too, then takes its capability and its H1 mark.
-    /// Until its first entry the chain reports under the section at
-    /// `index`, or the prompt's title when `index` is past the slice. The
-    /// chain's `var` slot seeds from `var` (a call chain's or task chain's
-    /// caller snapshot, discarded with the chain). The chain's task is its
-    /// call parent's when it has one, else task `0`; a spawned chain's
-    /// dispatch overwrites it with the chain's own id. `concurrency` is the
-    /// chain's effective admission limit for the tasks it spawns: the
-    /// caller's own for a call child or a task, the run's ceiling for the
-    /// root.
+    /// Creates one chain from `start` and returns its arena index. A
+    /// fresh chain enters its first section on its first step, taking
+    /// entry 0 of its own id; the root walk continues the counters of the
+    /// H1 pass it follows. Until its first entry the chain reports under
+    /// the section at its start index, or the prompt's title when the
+    /// index is past the slice. The chain's task is its own id for a task
+    /// chain, its call parent's for a `call` child, and task `0` for the
+    /// root walk and the H1 pass.
     ///
     /// # Errors
     /// Returns [`Error::Internal`] when the run's chain count exceeds `u32`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the chain keeps its lineage, counters, context fork, position, parent, var seed, depth, and limit explicit and linear"
-    )]
-    pub(super) fn start_chain(
-        &mut self,
-        lineage: ChainId,
-        counters: Counters,
-        ctx: RunState,
-        slice: SlicePath,
-        index: usize,
-        parent: Option<ChainIndex>,
-        var: serde_json::Value,
-        call_depth: usize,
-        concurrency: usize,
-    ) -> Result<ChainIndex> {
+    pub(super) fn start_chain(&mut self, start: ChainStart) -> Result<ChainIndex> {
         if self.chains.len() >= self.max_chains {
             return Err(Error::internal("a run's chain count cannot exceed u32"));
         }
-        let id = ChainIndex(
-            u32::try_from(self.chains.len())
-                .map_err(|_| Error::internal("a run's chain count cannot exceed u32"))?,
-        );
-        let task = parent.map_or_else(
-            || TaskId::from(ChainId::root()),
-            |parent| self.chains[parent.index()].task.clone(),
-        );
-        let entered = slice.name_at(ctx.prompt(), index).to_owned();
+        let id = ChainIndex(u32::try_from(self.chains.len()).map_err(|error| {
+            Error::internal_with_cause("a run's chain count cannot exceed u32", error)
+        })?);
+        let task = match &start.kind {
+            ChainKind::Root | ChainKind::H1 => TaskId::from(ChainId::root()),
+            ChainKind::Call { parent, .. } => self.chains[parent.index()].task.clone(),
+            ChainKind::Task { .. } => TaskId::from(start.lineage.clone()),
+        };
+        let entered = start
+            .slice
+            .name_at(start.ctx.prompt(), start.index.get())
+            .to_owned();
         self.chains.push(Chain {
-            lineage,
-            counters,
+            lineage: start.lineage,
+            counters: start.counters,
+            kind: start.kind,
             task,
-            owner: None,
             seed: None,
             waiting_on: Vec::new(),
             awaiting: None,
@@ -92,29 +113,22 @@ impl Scheduler {
             blocked: None,
             task_notices: Vec::new(),
             note: None,
-            ctx,
+            ctx: start.ctx,
             access: None,
             frame: None,
-            slice,
-            index,
+            slice: start.slice,
+            index: start.index,
             entered,
             positions: Vec::new(),
-            block: 0,
+            block: BlockIndex::FIRST,
             coroutine: None,
             incoming: None,
             pending_prose: None,
-            var,
-            call_depth,
-            concurrency,
-            slots_used: 0,
-            holding: false,
-            released_holder: None,
-            admitted: false,
-            pending_spawn: None,
-            parent,
+            var: start.var,
+            call_depth: start.call_depth,
+            concurrency: start.concurrency,
             advertised: None,
             anchor: ChatAnchor::default(),
-            h1: false,
         });
         Ok(id)
     }
@@ -130,15 +144,10 @@ impl Scheduler {
     ///
     /// `outcome` is the chain's end: a scalar return's value, `None` for a
     /// walk that ran off its slice's last section, or the chain's failure.
-    pub(super) fn finish(
-        &mut self,
-        id: ChainIndex,
-        outcome: Result<Option<String>>,
-        root_result: &mut Option<Result<String>>,
-    ) {
+    pub(super) fn finish(&mut self, id: ChainIndex, outcome: Result<Option<String>>) -> ChainStep {
         let chain = &mut self.chains[id.index()];
-        let parent = chain.parent;
-        let is_task = chain.owner.is_some();
+        let parent = chain.kind.parent();
+        let is_task = chain.kind.owner().is_some();
         // `None` when the chain ended by exhausting its slice: the last
         // section's frame already dropped at the fall-through.
         let mut frame = chain.frame.take();
@@ -152,7 +161,7 @@ impl Scheduler {
         // paths (fall-through, scalar return) handle the frame themselves;
         // this guard keeps an H1 frame that reaches here - an error path -
         // unarmed.
-        let is_h1 = chain.h1;
+        let is_h1 = chain.kind.is_h1();
         let outcome = outcome.and_then(|returned| {
             // A chain ending mid-section (a scalar return) reads its final
             // var back before teardown, exactly as a completed section does
@@ -199,21 +208,24 @@ impl Scheduler {
         // that re-raises it after its own cleanup yields would flatten
         // the typed error, so the outcome ends the run here, exactly as
         // the answer boundary does.
-        if let Err(Error::Determinism(detail)) = &outcome {
-            *root_result = Some(Err(Error::Determinism(detail.clone())));
-            return;
-        }
+        let outcome = match outcome {
+            Err(error @ Error::Determinism(_)) => return ChainStep::RunEnded(Err(error)),
+            outcome => outcome,
+        };
         if is_task {
             // A missing slot is a scheduler bug: fail the run loudly rather
             // than lose the task's outcome.
-            if let Err(error) = self.complete_task(id, outcome) {
-                *root_result = Some(Err(error));
-            }
-            return;
+            return match self.complete_task(id, outcome) {
+                Ok(()) => ChainStep::Continue,
+                Err(error) => ChainStep::RunEnded(Err(error)),
+            };
         }
         match parent {
-            None => *root_result = Some(outcome),
-            Some(parent_id) => self.answer_inline(parent_id, Answer::Call(outcome)),
+            None => ChainStep::RunEnded(outcome),
+            Some(parent_id) => {
+                self.answer_inline(parent_id, Answer::Call(outcome));
+                ChainStep::Continue
+            }
         }
     }
 
@@ -228,13 +240,12 @@ impl Scheduler {
     /// arm cancels it.
     pub(super) fn abort_subtree(&mut self, id: ChainIndex) {
         // The arena is u32-bounded at insertion (`start_chain`), so the
-        // index conversion cannot fail.
-        let children: Vec<ChainIndex> = self
-            .chains
-            .iter()
-            .enumerate()
-            .filter(|(_, chain)| chain.parent == Some(id))
-            .filter_map(|(index, _)| u32::try_from(index).ok().map(ChainIndex))
+        // index range covers every chain.
+        let children: Vec<ChainIndex> = (0..)
+            .map(ChainIndex)
+            .zip(&self.chains)
+            .filter(|(_, chain)| chain.kind.parent() == Some(id))
+            .map(|(child, _)| child)
             .collect();
         for child in children {
             self.abort_subtree(child);

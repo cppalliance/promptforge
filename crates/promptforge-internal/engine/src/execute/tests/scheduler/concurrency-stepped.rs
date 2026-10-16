@@ -47,12 +47,12 @@ fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
 
 #[test]
 fn a_queued_task_that_can_never_be_admitted_is_reported_as_a_stall() {
-    // The walk parks on its store write, and the test wedges the walk's
-    // limit at zero. Once the write is answered the walk spawns its child
-    // and parks on the join: nothing is ready, nothing is in flight, and
-    // no slot will ever admit the queued child. The step must end the run
-    // with a stall report rather than return Pending with nothing to
-    // answer.
+    // The walk parks on its store write, and the test fills the walk's one
+    // slot with a task that never ends. Once the write is answered the
+    // walk spawns its child and parks on the join: nothing is ready,
+    // nothing is in flight, and no slot will ever admit the queued child.
+    // The step must end the run with a stall report rather than return
+    // Pending with nothing to answer.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Limits\n\n\
         ## Main\n\n\

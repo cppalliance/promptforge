@@ -17,10 +17,11 @@ use std::sync::Arc;
 
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
-use promptforge_vfs::{Access, ExecId};
+use promptforge_vfs::Access;
 
 use crate::{Error, Result};
 
+use super::chain_record::ChainKind;
 use super::notices::TaskEnd;
 use super::tasks::{TaskBacking, TaskState};
 use super::{ChainIndex, Scheduler};
@@ -37,7 +38,8 @@ impl Scheduler {
     /// # Errors
     /// Returns [`Error::Internal`] when the chain has no slot, which only a
     /// scheduler bug produces: every task chain registers its slot before
-    /// it is enqueued.
+    /// it is enqueued; or the internal fault of waking an owner parked in
+    /// the model's `await_tasks`.
     pub(super) fn complete_task(&mut self, id: ChainIndex, outcome: Result<String>) -> Result<()> {
         let chain = &self.chains[id.index()];
         let task = chain.task.clone();
@@ -47,8 +49,7 @@ impl Scheduler {
             return Err(Error::internal("a task chain's end implies its slot"));
         };
         let succeeded = outcome.is_ok();
-        slot.state = TaskState::Done;
-        slot.ok = Some(succeeded);
+        slot.state = TaskState::Done { ok: succeeded };
         let owner = slot.owner;
         let origin = slot.origin;
         let target = slot.target.clone();
@@ -80,8 +81,7 @@ impl Scheduler {
         if let Some(slot) = self.tasks.get_mut(&task) {
             slot.outcome = Some(outcome);
         }
-        self.wake_waiter(owner, &task);
-        Ok(())
+        self.wake_waiter(owner, &task)
     }
 
     /// Applies the chain-end rules for tasks to `owner`'s `outcome`: every
@@ -126,12 +126,11 @@ impl Scheduler {
     /// so the chain's own final clock transitively covers everything its
     /// tasks did even when no wait delivered them.
     pub(super) fn join_owned_tasks(&self, owner: ChainIndex, access: &Access) {
-        let execs: Vec<ExecId> = self
+        let execs = self
             .tasks
             .values()
             .filter(|slot| slot.owner == owner)
-            .filter_map(|slot| slot.exec)
-            .collect();
+            .filter_map(|slot| slot.exec);
         for exec in execs {
             promptforge_vfs::detail::access_join(access, exec);
         }
@@ -163,12 +162,11 @@ impl Scheduler {
             .filter(|(_, slot)| slot.owner == owner && slot.state.is_live())
             .map(|(task, slot)| (task.clone(), slot.origin, slot.backing, slot.target.clone()))
             .collect();
-        live.sort_by(|left, right| left.0.cmp(&right.0));
+        live.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let mut leaked = Vec::new();
         for (task, origin, backing, target) in live {
             if let Some(slot) = self.tasks.get_mut(&task) {
                 slot.state = TaskState::Abandoned;
-                slot.ok = Some(false);
             }
             // The backing ends first, so anything it owned reports before
             // the task's own terminal event, which is the last word on it.
@@ -184,7 +182,7 @@ impl Scheduler {
             // abort clears the chain's state. A task that was never
             // admitted (still queued for a slot) has no start event, so
             // it reports no terminal either.
-            let admitted = self.chains[backing_chain.index()].admitted;
+            let admitted = self.chains[backing_chain.index()].kind.admitted();
             let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
             self.abort_subtree(backing_chain);
             if admitted {
@@ -246,16 +244,14 @@ impl Scheduler {
     /// chain (`0`) on either side, so a task the pass spawned is waited
     /// on, inspected, cancelled, or leaked by the walk exactly as if the
     /// walk had spawned it. The pass's admission accounting moves with
-    /// the tasks: the walk inherits the slots the pass's tasks hold and
-    /// the limit that gates them.
+    /// the owner links: the slots the pass's tasks hold count against the
+    /// walk from here, under the limit the walk inherited from the pass.
     pub(super) fn reassign_tasks(&mut self, from: ChainIndex, to: ChainIndex) {
         for slot in self.tasks.values_mut() {
             if slot.owner == from {
                 slot.owner = to;
             }
         }
-        self.chains[to.index()].slots_used += self.chains[from.index()].slots_used;
-        self.chains[from.index()].slots_used = 0;
         // An effect-backed slot's effect is keyed under its owner in the
         // pending table; the pass has no parked effect of its own at the
         // hand-off, so every entry under it is such a slot's.
@@ -265,8 +261,10 @@ impl Scheduler {
             }
         }
         for chain in &mut self.chains {
-            if chain.owner == Some(from) {
-                chain.owner = Some(to);
+            if let ChainKind::Task { owner, .. } = &mut chain.kind
+                && *owner == from
+            {
+                *owner = to;
             }
         }
         let notices = std::mem::take(&mut self.chains[from.index()].task_notices);

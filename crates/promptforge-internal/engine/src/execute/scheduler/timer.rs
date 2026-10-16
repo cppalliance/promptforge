@@ -59,7 +59,6 @@ impl Scheduler {
                 origin: TaskOrigin::Author,
                 target: "timer".to_owned(),
                 state: TaskState::Running,
-                ok: None,
                 outcome: None,
                 exec: None,
             },
@@ -79,20 +78,16 @@ impl Scheduler {
     /// abandoned timer's effect is aborted and its late firing discarded
     /// before it reaches here.
     pub(super) fn fire_timer(&mut self, effect: EffectId) -> Result<()> {
-        let Some((task, owner)) = self
+        let Some((task, slot)) = self
             .tasks
-            .iter()
+            .iter_mut()
             .find(|(_, slot)| slot.backing == TaskBacking::Effect(effect) && slot.state.is_live())
-            .map(|(task, slot)| (task.clone(), slot.owner))
         else {
             return Err(Error::internal("a fired timer has a live slot"));
         };
-        if let Some(slot) = self.tasks.get_mut(&task) {
-            slot.state = TaskState::Done;
-            slot.ok = Some(true);
-            slot.outcome = Some(Ok(String::new()));
-        }
-        self.wake_waiter(owner, &task);
-        Ok(())
+        slot.state = TaskState::Done { ok: true };
+        slot.outcome = Some(Ok(String::new()));
+        let (task, owner) = (task.clone(), slot.owner);
+        self.wake_waiter(owner, &task)
     }
 }

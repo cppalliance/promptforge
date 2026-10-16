@@ -98,13 +98,21 @@ fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
     let trace = h1_scenario(md).run();
 
     let error = trace.error();
+    let Error::RequirementsUnmet { notice, .. } = error.inner() else {
+        panic!("the failed assertion classifies as RequirementsUnmet: {error}");
+    };
+    let cause = error
+        .cause()
+        .expect("the remap keeps the chunk's own failure as the cause")
+        .to_string();
     assert!(
-        matches!(error.inner(), Error::RequirementsUnmet { .. }),
-        "the failed assertion classifies as RequirementsUnmet: {error}"
+        cause.contains("the gate cannot hold") && !notice.contains("the gate cannot hold"),
+        "the assertion's message is the cause, not the notice: {notice:?} / {cause:?}"
     );
-    assert!(
-        error.to_string().contains("the gate cannot hold"),
-        "the notice includes the assertion's message: {error}"
+    assert_eq!(
+        error.to_string(),
+        format!("{notice}: {cause}"),
+        "the message is the notice and the cause's text once"
     );
     assert!(
         trace.read("later.txt").is_err(),
@@ -166,7 +174,7 @@ fn an_h1_scalar_return_still_reads_var_back() {
 fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
     // A library runs inside the H1 chunk that requires it, so its
     // uncaught raise is the chunk's own failure: the failed H1 gate,
-    // with the library's message as the notice.
+    // with the library's raise as the cause.
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n\
         # Gate\n\n\
         ```lua\n\
@@ -180,12 +188,14 @@ fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
     let trace = h1_scenario(md).run();
 
     let error = trace.error();
-    let Error::RequirementsUnmet { notice, .. } = error.inner() else {
-        panic!("the library's raise is the failed H1 gate: {error}");
-    };
     assert!(
-        notice.contains("library boom"),
-        "the notice is the library's message: {notice}"
+        matches!(error.inner(), Error::RequirementsUnmet { .. }),
+        "the library's raise is the failed H1 gate: {error}"
+    );
+    let cause = error.cause().map(ToString::to_string).unwrap_or_default();
+    assert!(
+        cause.contains("library boom"),
+        "the cause is the library's raise: {error}"
     );
 }
 

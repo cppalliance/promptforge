@@ -9,15 +9,16 @@
 //! every issued effect has its answer, so every effect the caller was
 //! handed has exactly one answer.
 
-use crate::execute::RunResult;
-use crate::execute::error::RunError;
-use crate::execute::run::{EffectAnswer, EffectId, Step};
-use crate::execute::scheduler::ChainIndex;
-use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::ids::AbandonReason;
 
-use super::{GENERIC_COMPLETION, Phase, Scheduler};
+use crate::execute::RunResult;
+use crate::execute::error::RunError;
+use crate::execute::run::{EffectAnswer, EffectId, Step};
+use crate::{Error, Result};
+
+use super::chain::ChainStep;
+use super::{ChainIndex, GENERIC_COMPLETION, Phase, Scheduler};
 
 impl Scheduler {
     /// Drains the ready queue and returns the step's outcome: the effects
@@ -56,11 +57,9 @@ impl Scheduler {
         let mut withdrawn = std::mem::take(&mut self.withdrawn);
         withdrawn.sort_unstable();
         let events = self.ctx.take_events();
-        match &self.phase {
-            Phase::Ending(_) if self.pending.is_empty() && self.orphaned.is_empty() => {
-                let Phase::Ending(result) = std::mem::replace(&mut self.phase, Phase::Done) else {
-                    unreachable!("the phase was matched as ending");
-                };
+        let answered = self.pending.is_empty() && self.orphaned.is_empty();
+        match std::mem::replace(&mut self.phase, Phase::Done) {
+            Phase::Ending(result) if answered => {
                 // Only here, with every pending and orphaned effect
                 // answered, so an orphan's store effect still runs in the
                 // live scope.
@@ -80,11 +79,14 @@ impl Scheduler {
                 ))),
                 events,
             },
-            Phase::Fresh | Phase::Running | Phase::Ending(_) => Step::Pending {
-                effects,
-                events,
-                withdrawn,
-            },
+            phase @ (Phase::Fresh | Phase::Running | Phase::Ending(_)) => {
+                self.phase = phase;
+                Step::Pending {
+                    effects,
+                    events,
+                    withdrawn,
+                }
+            }
         }
     }
 
@@ -139,23 +141,26 @@ impl Scheduler {
     /// deferring it to the drain's edge lets a woken owner cancel its
     /// queued siblings before they start.
     fn drain(&mut self) {
-        let mut root_result = None;
         loop {
             if self.ctx.cancel().is_cancelled() {
                 self.end(Err(Error::Interrupted));
                 return;
             }
             let Some(id) = self.ready.pop_front() else {
-                self.admit();
+                if let Err(error) = self.admit() {
+                    self.end(Err(error));
+                    return;
+                }
                 if self.ready.is_empty() {
                     return;
                 }
                 continue;
             };
-            if let Err(error) = self.step_chain(id, &mut root_result) {
-                self.finish(id, Err(error), &mut root_result);
-            }
-            if let Some(result) = root_result.take() {
+            let step = match self.step_chain(id) {
+                Ok(step) => step,
+                Err(error) => self.finish(id, Err(error)),
+            };
+            if let ChainStep::RunEnded(result) = step {
                 self.end(result);
                 return;
             }
@@ -223,7 +228,7 @@ impl Scheduler {
             chain.frame = None;
             chain.access = None;
         }
-        let pending: Vec<EffectId> = self.pending.drain().map(|(id, _)| id).collect();
-        self.orphaned.extend(pending);
+        self.orphaned
+            .extend(self.pending.drain().map(|(effect, _)| effect));
     }
 }

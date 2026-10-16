@@ -9,6 +9,7 @@
 use std::num::NonZeroUsize;
 
 use super::*;
+use crate::error::DepthVia;
 use crate::execute::EffectRecord;
 use crate::test_support::rig::RigTrace;
 use crate::test_support::scenario::{infer_prompt, test_binding};

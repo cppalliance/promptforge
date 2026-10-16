@@ -17,6 +17,8 @@ use crate::execute::walk_target::{SlicePath, h1_visible_sections, section_positi
 use crate::heading_address::{self, Visible};
 use crate::{Error, Result};
 
+use super::chain::{ChainStart, ChainStep};
+use super::chain_record::{CallDepth, ChainKind, SectionIndex};
 use super::{ChainIndex, Counters, GENERIC_COMPLETION, Scheduler, prompt_origin};
 
 impl Scheduler {
@@ -40,20 +42,18 @@ impl Scheduler {
         // The pass is the root chain: its one frame takes entry 0, and the
         // walk that follows continues its counters as the same chain. Its
         // admission limit is the run's ceiling.
-        let id = self.start_chain(
-            ChainId::root(),
-            Counters::default(),
-            self.ctx.clone(),
-            SlicePath::root(),
-            0,
-            None,
-            serde_json::json!({}),
-            0,
-            self.ctx.limits().concurrency().get(),
-        )?;
-        let chain = &mut self.chains[id.index()];
-        chain.access = Some(Arc::new(access));
-        chain.h1 = true;
+        let id = self.start_chain(ChainStart {
+            lineage: ChainId::root(),
+            counters: Counters::default(),
+            ctx: self.ctx.clone(),
+            slice: SlicePath::root(),
+            index: SectionIndex::FIRST,
+            kind: ChainKind::H1,
+            var: serde_json::json!({}),
+            call_depth: CallDepth::ROOT,
+            concurrency: self.ctx.limits().concurrency(),
+        })?;
+        self.chains[id.index()].access = Some(Arc::new(access));
         Ok(id)
     }
 
@@ -61,8 +61,8 @@ impl Scheduler {
     /// while the VM is live, then the frame drops unarmed - the
     /// pass never arms completion, so `SECTION_FINISHED` never fires for
     /// it. The root walk then starts from the `var` hand-off at section
-    /// `start` (0 on a fall-through, the resolved target on a jump out)
-    /// under the walk's own context fork; with no sections the run's
+    /// `start` (the first on a fall-through, the resolved target on a jump
+    /// out) under the walk's own context fork; with no sections the run's
     /// result is the shared generic completion.
     ///
     /// # Errors
@@ -70,12 +70,7 @@ impl Scheduler {
     /// left `argv` as non-JSON data,
     /// or [`Error::Internal`] when the chain holds no frame. The walk
     /// reuses the pass's capability, so the hand-off acquires nothing.
-    pub(super) fn end_live_h1(
-        &mut self,
-        id: ChainIndex,
-        root_result: &mut Option<Result<String>>,
-        start: usize,
-    ) -> Result<()> {
+    pub(super) fn end_live_h1(&mut self, id: ChainIndex, start: SectionIndex) -> Result<ChainStep> {
         let chain = &mut self.chains[id.index()];
         let Some(frame) = chain.frame.take() else {
             return Err(Error::internal("the H1 pass ends with a live frame"));
@@ -101,31 +96,32 @@ impl Scheduler {
             // No walk follows, so the pass's end is the run's end: a task
             // the pass spawned and left live ends here under the same
             // rules as a finishing chain.
-            *root_result = Some(self.settle_owned_tasks(id, Ok(GENERIC_COMPLETION.to_owned())));
-            return Ok(());
+            return Ok(ChainStep::RunEnded(
+                self.settle_owned_tasks(id, Ok(GENERIC_COMPLETION.to_owned())),
+            ));
         }
         // The H1-to-walk handoff: the walk's context takes the frozen
         // `argv`; H1's prompt-wide records already landed in the shared
         // sets the views read, and `when` is the run's own.
         let walk_ctx = self.ctx.with_walk_state(argv);
-        let root = self.start_chain(
-            ChainId::root(),
+        let root = self.start_chain(ChainStart {
+            lineage: ChainId::root(),
             counters,
-            walk_ctx,
-            SlicePath::root(),
-            start,
-            None,
+            ctx: walk_ctx,
+            slice: SlicePath::root(),
+            index: start,
+            kind: ChainKind::Root,
             var,
-            0,
+            call_depth: CallDepth::ROOT,
             concurrency,
-        )?;
+        })?;
         self.install_root_slots(root, Some(walk_access))?;
         // The walk is the pass's continuation, so the tasks the pass
         // spawned are the walk's from here: it waits on, cancels, or leaks
         // them exactly as if it had spawned them.
         self.reassign_tasks(id, root);
         self.ready.push_back(root);
-        Ok(())
+        Ok(ChainStep::Continue)
     }
 
     /// Ends the H1 pass on a jump out: the heading resolves against
@@ -140,14 +136,13 @@ impl Scheduler {
         &mut self,
         id: ChainIndex,
         heading: &str,
-        root_result: &mut Option<Result<String>>,
-    ) -> Result<()> {
+    ) -> Result<ChainStep> {
         let prompt = self.prompt();
         let sections = h1_visible_sections(&prompt);
         let target = heading_address::resolve_visible(heading, Visible::all(sections))?;
         let start = section_position(sections, target).ok_or(Error::internal(
             "a resolved H1 jump target is absent from the top-level slice",
         ))?;
-        self.end_live_h1(id, root_result, start)
+        self.end_live_h1(id, SectionIndex::new(start))
     }
 }

@@ -31,16 +31,16 @@
 //! once under its target; a task already in a terminal state is left as it
 //! is and reports nothing.
 
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use promptforge_types::event::Event;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::execute::protocol::{Answer, TaskDelivery, TaskPhase, TaskStatus};
 use crate::lua::NonEmpty;
 use crate::{Error, Result};
-use promptforge_types::event::Event;
 
 use super::notices::TaskEnd;
 use super::tasks::{TaskBacking, TaskSlot, TaskState};
@@ -51,7 +51,7 @@ use super::{ChainIndex, Scheduler};
 fn task_phase(state: TaskState) -> TaskPhase {
     match state {
         TaskState::Running => TaskPhase::Running,
-        TaskState::Done | TaskState::Delivered => TaskPhase::Done,
+        TaskState::Done { .. } | TaskState::Delivered { .. } => TaskPhase::Done,
         TaskState::Cancelled => TaskPhase::Cancelled,
         TaskState::Abandoned => TaskPhase::Abandoned,
     }
@@ -94,7 +94,7 @@ impl Scheduler {
             .filter(|(_, slot)| origin.is_none_or(|origin| slot.origin == origin))
             .map(|(task, _)| task.clone())
             .collect();
-        live.sort();
+        live.sort_unstable();
         live
     }
 
@@ -127,9 +127,11 @@ impl Scheduler {
         for task in tasks {
             let slot = self.owned_slot(id, task)?;
             match slot.state {
-                TaskState::Delivered => return Err(Error::TaskConsumed { task: task.clone() }),
+                TaskState::Delivered { .. } => {
+                    return Err(Error::TaskConsumed { task: task.clone() });
+                }
                 TaskState::Running => {}
-                TaskState::Done | TaskState::Cancelled | TaskState::Abandoned => {
+                TaskState::Done { .. } | TaskState::Cancelled | TaskState::Abandoned => {
                     if first.is_none() {
                         first = Some(task.clone());
                     }
@@ -154,8 +156,8 @@ impl Scheduler {
         }
         let outcome = match self.tasks.get_mut(task) {
             Some(slot) => match slot.state {
-                TaskState::Done => {
-                    slot.state = TaskState::Delivered;
+                TaskState::Done { ok } => {
+                    slot.state = TaskState::Delivered { ok };
                     slot.outcome
                         .take()
                         .unwrap_or_else(|| Err(Error::internal("a done slot holds its outcome")))
@@ -164,7 +166,7 @@ impl Scheduler {
                 TaskState::Abandoned => Err(Error::internal(
                     "an abandoned task's owner ended, so no wait can deliver it",
                 )),
-                TaskState::Running | TaskState::Delivered => Err(Error::internal(
+                TaskState::Running | TaskState::Delivered { .. } => Err(Error::internal(
                     "only a terminal, undelivered slot is delivered",
                 )),
             },
@@ -182,17 +184,21 @@ impl Scheduler {
     /// through that arm instead - the member is not delivered, its notice
     /// already sits in the owner's queue - so the slot stays `Done` for a
     /// later author wait.
-    pub(super) fn wake_waiter(&mut self, owner: ChainIndex, task: &TaskId) {
+    ///
+    /// # Errors
+    /// Returns the internal fault [`finish_await_tasks`](Self::finish_await_tasks)
+    /// meets.
+    pub(super) fn wake_waiter(&mut self, owner: ChainIndex, task: &TaskId) -> Result<()> {
         if !self.chains[owner.index()].waiting_on.contains(task) {
-            return;
+            return Ok(());
         }
         self.chains[owner.index()].waiting_on.clear();
         if let Some(awaiting) = self.chains[owner.index()].awaiting.take() {
-            self.finish_await_tasks(owner, &awaiting, task);
-            return;
+            return self.finish_await_tasks(owner, &awaiting, task);
         }
         let delivery = self.deliver(task);
         self.wake_from_wait(owner, Answer::JoinAny(Ok(delivery)));
+        Ok(())
     }
 
     /// Dispatches a `ready` request: whether a task the chain owns has
@@ -219,7 +225,7 @@ impl Scheduler {
             target: slot.target.clone(),
             origin: slot.origin,
             state: task_phase(slot.state),
-            ok: slot.ok,
+            ok: slot.state.ok(),
             section: None,
             blocked: None,
             turns: 0,
@@ -230,7 +236,7 @@ impl Scheduler {
         if let TaskBacking::Chain(backing) = slot.backing {
             let chain = &self.chains[backing.index()];
             status.turns = chain.ctx.turns().load(Ordering::Relaxed);
-            status.depth = u32::try_from(chain.call_depth).unwrap_or(u32::MAX);
+            status.depth = u32::try_from(chain.call_depth.get()).unwrap_or(u32::MAX);
             status.note.clone_from(&chain.note);
             if slot.state.is_live() {
                 status.section = chain
@@ -262,16 +268,16 @@ impl Scheduler {
         let effective = if let Some(limit) = limit {
             let parent_limit = match self.enclosing(id) {
                 Some(parent) => self.chains[parent.index()].concurrency,
-                None => self.ctx.limits().concurrency().get(),
+                None => self.ctx.limits().concurrency(),
             };
-            let limit = usize::try_from(limit.get()).unwrap_or(usize::MAX);
+            let limit = NonZeroUsize::try_from(limit).unwrap_or(NonZeroUsize::MAX);
             let effective = limit.min(parent_limit);
             self.chains[id.index()].concurrency = effective;
             effective
         } else {
             self.chains[id.index()].concurrency
         };
-        self.answer_inline(id, Answer::Concurrency(Ok(effective)));
+        self.answer_inline(id, Answer::Concurrency(Ok(effective.get())));
     }
 
     /// Dispatches a `note` request: the text becomes the latest note of the
@@ -324,7 +330,6 @@ impl Scheduler {
         let origin = slot.origin;
         if let Some(slot) = self.tasks.get_mut(task) {
             slot.state = TaskState::Cancelled;
-            slot.ok = Some(false);
         }
         // The backing ends first, so anything it owned reports before the
         // task's own terminal event, which is the last word on it.
@@ -340,7 +345,7 @@ impl Scheduler {
         // clears the chain's state. A task that was never admitted (still
         // queued for a slot) has no start event, so it reports no
         // terminal either.
-        let admitted = self.chains[backing_chain.index()].admitted;
+        let admitted = self.chains[backing_chain.index()].kind.admitted();
         let emitter = Arc::clone(self.chains[backing_chain.index()].ctx.emitter());
         self.abort_subtree(backing_chain);
         if admitted {
