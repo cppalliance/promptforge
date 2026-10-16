@@ -12,9 +12,12 @@ const TEMPERATURE_MAX: f64 = 2.0;
 /// A validated sampling temperature: finite and within `[0.0, 2.0]`.
 ///
 /// A temperature enters a request only as a `Temperature`, so the backend
-/// receives only valid temperatures.
+/// receives only valid temperatures. Being finite, it compares as a total
+/// equivalence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Temperature(f64);
+
+impl Eq for Temperature {}
 
 impl Temperature {
     /// Builds a temperature from a finite `value` within `[0.0, 2.0]`.
@@ -64,7 +67,8 @@ pub enum TemperatureError {
 }
 
 /// The fixed request settings that a model binding applies to every completion.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ModelInvocation {
     /// The sampling temperature, when the binding's builder or a `models.use`
     /// option set one.
@@ -83,9 +87,38 @@ pub struct ModelInvocation {
     pub thinking: Option<bool>,
 }
 
+impl ModelInvocation {
+    /// Builds settings that set no temperature, token cap, or thinking
+    /// switch.
+    #[must_use]
+    pub fn new() -> ModelInvocation {
+        ModelInvocation::default()
+    }
+
+    /// Sets the sampling temperature.
+    #[must_use]
+    pub fn with_temperature(mut self, temperature: Option<Temperature>) -> ModelInvocation {
+        self.temperature = temperature;
+        self
+    }
+
+    /// Sets the maximum number of tokens to generate.
+    #[must_use]
+    pub fn with_max_tokens(mut self, max_tokens: Option<NonZeroU32>) -> ModelInvocation {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    /// Sets the thinking switch.
+    #[must_use]
+    pub fn with_thinking(mut self, thinking: Option<bool>) -> ModelInvocation {
+        self.thinking = thinking;
+        self
+    }
+}
+
 /// A prompt-local alias bound to one model and its fixed request settings.
-// No `Eq`: the frozen invocation holds an `f64` temperature.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelBinding {
     alias: String,
     description: String,
@@ -204,7 +237,7 @@ impl ModelBinding {
 /// Per-call settings merged into a chat-completions request body.
 ///
 /// Build one with [`CompletionOptions::new`] and its `with_*` setters.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CompletionOptions {
     /// The caller-facing model name sent on the wire.
@@ -216,10 +249,6 @@ pub struct CompletionOptions {
     /// When set, emits `chat_template_kwargs.enable_thinking`.
     thinking: Option<bool>,
 }
-
-// No `Eq`: `temperature` is an `Option<f64>`, so equality is not reflexive for
-// NaN. A manual `impl Eq` here would claim a total equivalence the field cannot
-// honor, breaking every `Eq`/`Hash` consumer's contract.
 
 impl CompletionOptions {
     /// Builds options for `model`, with the temperature, token cap, and
@@ -302,16 +331,14 @@ impl CompletionOptions {
 
 /// The run's model set: the prompt-level bindings produced by live H1
 /// execution plus the prompt-wide `default` alias.
-// No `Eq`: bindings hold `f64` temperatures transitively.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelSet {
     /// The bindings in declaration order.
-    pub bindings: Vec<ModelBinding>,
-    /// The prompt-wide default alias set by `models.default`, if any. No
-    /// inherent `default()` accessor: it would shadow `Default::default()`
-    /// at every construction site; readers use the field or the
-    /// [`ModelView`] trait.
-    pub default: Option<String>,
+    bindings: Vec<ModelBinding>,
+    /// The prompt-wide default alias set by `models.default`, if any; read
+    /// through [`default_alias`](ModelSet::default_alias), since an
+    /// inherent `default()` would shadow `Default::default()`.
+    default: Option<String>,
 }
 
 impl ModelSet {
@@ -332,6 +359,23 @@ impl ModelSet {
     #[must_use]
     pub fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
+    }
+
+    /// Returns the prompt-wide default alias set by `models.default`, if
+    /// any.
+    #[must_use]
+    pub fn default_alias(&self) -> Option<&str> {
+        self.default.as_deref()
+    }
+
+    /// Appends `binding` after every binding already declared.
+    pub fn push(&mut self, binding: ModelBinding) {
+        self.bindings.push(binding);
+    }
+
+    /// Sets the prompt-wide default alias, replacing any set before.
+    pub fn set_default_alias(&mut self, alias: String) {
+        self.default = Some(alias);
     }
 }
 
@@ -387,7 +431,7 @@ impl ModelView for Mutex<ModelSet> {
     }
 
     fn default(&self) -> Result<Option<String>, ModelSetError> {
-        Ok(lock_model_set(self)?.default.clone())
+        Ok(lock_model_set(self)?.default_alias().map(str::to_owned))
     }
 
     fn binding(&self, alias: &str) -> Result<Option<ModelBinding>, ModelSetError> {

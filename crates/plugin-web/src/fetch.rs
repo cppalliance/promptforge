@@ -373,11 +373,11 @@ impl WebFetch {
         );
         match (&mut task.0).await {
             Ok(result) => result,
-            Err(join) => Err(ToolError::with_source(
+            Err(join) => Err(ToolError::new(
+                ToolErrorKind::Other,
                 "web_fetch: the fetch task did not finish",
-                join,
             )
-            .with_kind(ToolErrorKind::Other)),
+            .with_source(join)),
         }
     }
 }

@@ -184,7 +184,7 @@ fn a_notice_arrives_in_the_round_after_the_task_ends() {
     );
     let round_3 = &bodies[2].messages;
     assert_eq!(round_3.len(), 6, "round 3 holds the notice: {round_3:?}");
-    assert_eq!(round_3[5].role(), "user");
+    assert_eq!(round_3[5].role(), Role::User);
     let notices = NoticeRecorder::replayed(&trace).notices();
     assert_eq!(notices.len(), 1, "one notice is reported: {notices:?}");
     assert_eq!(notices[0].0, "Only", "the notice reports under the owner");

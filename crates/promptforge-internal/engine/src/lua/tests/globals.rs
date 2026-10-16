@@ -30,13 +30,13 @@ const ROLE_LABELS: [&str; 2] = ["writer", "tools"];
 
 /// One role bound under each of [`ROLE_LABELS`].
 fn roles() -> ModelSet {
-    ModelSet {
-        bindings: ROLE_LABELS
+    ModelSet::from_parts(
+        ROLE_LABELS
             .iter()
             .map(|label| test_binding(label, "a role", "test-model"))
             .collect(),
-        default: None,
-    }
+        None,
+    )
 }
 
 /// The wire names of the tools [`offering`] offers.

@@ -25,7 +25,7 @@ use promptforge::cancel::CancelHandle;
 use promptforge::event::Event;
 use promptforge_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
-    ToolId, ToolOutput,
+    ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};
 

@@ -4,16 +4,17 @@
 //! crates reach it. Each function stands in for what would
 //! otherwise be an inherent method or a public field on a facade-visible
 //! type: building a message from pre-validated parts, reading the raw JSON
-//! a message holds, reading a tool schema's wire parts, and reading the
-//! metadata diagnostics a completion holds.
+//! a message holds, building a tool schema, and reading a tool call's raw
+//! arguments.
 
 use serde_json::Value;
 
-use crate::client::{Completion, CompletionResult, Message, ToolCall, ToolSchema, ToolSchemaError};
+use crate::client::{
+    Completion, CompletionResult, Message, Role, ToolCall, ToolSchema, ToolSchemaError,
+};
 
 /// Constructs a message from parts a caller has already validated.
 ///
-/// `role` is one of the wire roles (`system`, `user`, `assistant`, `tool`).
 /// `content` is the raw wire content value - a string for a plain message
 /// or an `OpenAI` content-parts array for a multimodal one - and serializes
 /// into the request verbatim. For each chat round the Engine sends, its Lua
@@ -21,13 +22,13 @@ use crate::client::{Completion, CompletionResult, Message, ToolCall, ToolSchema,
 /// message list added it, and hands the validated parts here.
 #[must_use]
 pub fn message_from_validated_parts(
-    role: impl Into<String>,
+    role: Role,
     content: Value,
     tool_call_id: Option<String>,
     tool_calls: Option<Vec<Value>>,
 ) -> Message {
     Message {
-        role: role.into(),
+        role,
         content,
         tool_call_id,
         tool_calls,
@@ -93,19 +94,6 @@ pub fn tool_schema_new(
     })
 }
 
-/// Returns a tool schema's wire name, which keys the executor's dispatch
-/// map.
-#[must_use]
-pub fn tool_schema_name(schema: &ToolSchema) -> &str {
-    &schema.name
-}
-
-/// Returns a tool schema's model-facing description.
-#[must_use]
-pub fn tool_schema_description(schema: &ToolSchema) -> &str {
-    &schema.description
-}
-
 /// Returns a tool call's parsed arguments as the raw wire JSON the
 /// dispatcher hands a tool.
 #[must_use]
@@ -117,12 +105,4 @@ pub fn tool_call_arguments(call: &ToolCall) -> &Value {
 #[must_use]
 pub fn completion_into_result(completion: Completion) -> CompletionResult {
     completion.result
-}
-
-/// Returns one line per response metadata section that was present but
-/// malformed and so degraded to `None` (or a body naming no string
-/// `model`), for the Engine to report as `model_metadata_degraded` events.
-#[must_use]
-pub fn completion_metadata_diagnostics(completion: &Completion) -> &[String] {
-    &completion.metadata_diagnostics
 }

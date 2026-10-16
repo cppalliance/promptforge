@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use promptforge_plugin::{
-    HostServices, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError, ToolId,
-    ToolOutput,
+    HostServices, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
+    ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};
 
@@ -30,8 +30,13 @@ pub(crate) fn construct(
     if !(config.is_null() || config == json!({})) {
         return Err(ToolError::message("user-input takes no configuration"));
     }
-    let id = ToolId::parse(&format!("{name}/{ASK}"))
-        .map_err(|e| ToolError::with_source("user-input could not name its ask tool", e))?;
+    let id = ToolId::parse(&format!("{name}/{ASK}")).map_err(|e| {
+        ToolError::new(
+            ToolErrorKind::Backend,
+            "user-input could not name its ask tool",
+        )
+        .with_source(e)
+    })?;
     let ask = ToolDescriptor::new(
         id,
         "Wait for the operator's next message and return its text.",

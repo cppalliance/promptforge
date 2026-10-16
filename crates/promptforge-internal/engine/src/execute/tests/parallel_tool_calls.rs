@@ -68,7 +68,7 @@ fn tool_messages(effect: &Effect) -> Vec<String> {
     };
     messages
         .iter()
-        .filter(|message| message.role() == "tool")
+        .filter(|message| message.role() == Role::Tool)
         .map(|message| message.content().to_owned())
         .collect()
 }

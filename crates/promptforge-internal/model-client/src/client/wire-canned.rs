@@ -2,9 +2,9 @@
 //! hands the Engine, such as a test performer playing the model from a
 //! script. The wire types are `#[non_exhaustive]` so their shape can grow
 //! without breaking readers; these constructors are the one way to build
-//! them from outside the crate, and they refuse the tool-call shapes the
-//! wire decoder refuses, so a hand-built tool call has the shape a decoded
-//! one has.
+//! them from outside the crate, and they refuse, as `InvalidParts`, the
+//! tool-call shapes a wire decoder refuses, so a hand-built tool call has
+//! the shape a decoded one has.
 
 use std::collections::HashSet;
 
@@ -32,9 +32,9 @@ impl Completion {
     ///
     /// # Errors
     /// Returns an `EmptyReply`-kind [`CompletionError`] for an empty
-    /// tool-call batch. Returns a `MalformedResponse`-kind one when two calls
-    /// in the batch share an id. A completion decoded from a model response
-    /// must pass the same checks.
+    /// tool-call batch. Returns an `InvalidParts`-kind one when two calls in
+    /// the batch share an id. Neither is retryable: the same parts fail the
+    /// same way.
     pub fn from_result(
         result: CompletionResult,
         model: impl Into<String>,
@@ -128,9 +128,9 @@ impl ToolCall {
     /// JSON text.
     ///
     /// # Errors
-    /// Returns a `MalformedResponse`-kind [`CompletionError`] when `id` or
-    /// `name` is blank or `arguments` is not a JSON object. A tool call
-    /// decoded from a model response must pass the same checks.
+    /// Returns an `InvalidParts`-kind [`CompletionError`] when `id` or
+    /// `name` is blank or `arguments` is not a JSON object. It is not
+    /// retryable: the same parts fail the same way.
     pub fn from_parts(
         id: impl Into<String>,
         name: impl Into<String>,

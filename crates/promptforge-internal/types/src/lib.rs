@@ -23,10 +23,9 @@
 //! instant a run starts from, rendered over std alone; [`seed`] is the
 //! caller's [`RunSeed`](seed::RunSeed) and the one-way derivations from
 //! it, the run id [`RunUid`](seed::RunUid) among them; and [`replay`] holds
-//! the behavior [`Flags`](replay::Flags) a run records and the
-//! [`ReplayError`](replay::ReplayError) kinds. This crate depends on no
-//! other promptforge crate, so every promptforge crate may depend on it,
-//! and it declares no async runtime.
+//! the behavior [`Flags`](replay::Flags) a run records. This crate depends
+//! on no other promptforge crate, so every promptforge crate may depend on
+//! it, and it declares no async runtime.
 //!
 //! ## Invariants
 //!
@@ -37,7 +36,6 @@
 //!   replay or tool-call wire payloads.
 
 pub mod cancel;
-pub mod detail;
 pub mod emitter;
 pub mod event;
 pub mod ids;

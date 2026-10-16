@@ -3,7 +3,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use promptforge_model_client::detail::{completion_into_result, completion_metadata_diagnostics};
+use promptforge_model_client::detail::completion_into_result;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::lifecycle;
 use promptforge_types::event::{Event, ReplyOrigin};
@@ -118,7 +118,7 @@ pub(super) fn report_model_turn(
         );
     }
     emitter.report(section, lifecycle::MODEL_TURN_COMPLETED);
-    for message in completion_metadata_diagnostics(&completion) {
+    for message in completion.metadata_diagnostics() {
         emitter.emit(section, |execution, section, provenance| {
             Event::ModelMetadataDegraded {
                 execution,

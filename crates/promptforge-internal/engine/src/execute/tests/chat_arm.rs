@@ -21,18 +21,9 @@ fn rich_text_reply(content: &str) -> ScriptedReply {
         content: content.to_owned(),
         finish_reason: Some("stop".to_owned()),
         reasoning: Some("let me think".to_owned()),
-        metrics: Some(Box::new(CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: 3,
-                completion_tokens: 2,
-                total_tokens: 5,
-                cached_tokens: None,
-                reasoning_tokens: None,
-            }),
-            llama: None,
-            vllm: None,
-            client: None,
-        })),
+        metrics: Some(Box::new(
+            CallMetrics::new().with_usage(Some(Usage::new(3, 2, 5))),
+        )),
     }
 }
 

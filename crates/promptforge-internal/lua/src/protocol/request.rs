@@ -9,6 +9,7 @@
 //! yields [`Request::LocalToolDone`] with how the handler ended, so the
 //! scheduler can report the call and answer it.
 
+use promptforge_model_client::client::Role;
 use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
@@ -308,44 +309,6 @@ pub enum VfsOp {
     },
 }
 
-/// The role of one validated message record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageRole {
-    /// System framing for the conversation.
-    System,
-    /// User input.
-    User,
-    /// Assistant output, with or without requested tool calls.
-    Assistant,
-    /// A tool result answering one assistant tool call.
-    Tool,
-}
-
-impl MessageRole {
-    /// Parses an author-facing role string; `None` for anything outside the
-    /// four accepted roles.
-    pub(super) fn parse(role: &str) -> Option<MessageRole> {
-        match role {
-            "system" => Some(MessageRole::System),
-            "user" => Some(MessageRole::User),
-            "assistant" => Some(MessageRole::Assistant),
-            "tool" => Some(MessageRole::Tool),
-            _ => None,
-        }
-    }
-
-    /// The wire role string.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            MessageRole::System => "system",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::Tool => "tool",
-        }
-    }
-}
-
 /// One content part of a multimodal message: visible text or a data-URI
 /// image reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,7 +349,7 @@ pub struct ToolCallRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageRecord {
     /// The message role.
-    pub role: MessageRole,
+    pub role: Role,
     /// The visible content.
     pub content: MessageContent,
     /// The normalized tool calls the record holds; empty unless an

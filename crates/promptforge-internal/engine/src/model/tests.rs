@@ -50,11 +50,7 @@ fn bound_role(
         label,
         description,
         gateway_id(model),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking,
-        },
+        ModelInvocation::new().with_thinking(thinking),
         ctx(window),
     )
     .with_capabilities(capabilities.iter().map(|word| (*word).to_owned()).collect())

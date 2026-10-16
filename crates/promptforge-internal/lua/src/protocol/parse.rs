@@ -338,7 +338,7 @@ fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, F
         Ok(Value::String(tag)) => tag
             .to_str()
             .ok()
-            .and_then(|tag| TaskOrigin::from_tag(&tag))
+            .and_then(|tag| tag.parse::<TaskOrigin>().ok())
             .ok_or(FieldFailure::Malformed)?,
         Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
     };

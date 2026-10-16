@@ -25,13 +25,13 @@ mod author_shapes;
 /// default, model `test-model`) and `other` (model `other-model`), so an
 /// explicit handle provably runs on its own frozen binding.
 pub(super) fn loop_models() -> ModelSet {
-    ModelSet {
-        bindings: vec![
+    ModelSet::from_parts(
+        vec![
             test_binding("writer", "A general model for tests", "test-model"),
             test_binding("other", "A second model", "other-model"),
         ],
-        default: Some("writer".to_owned()),
-    }
+        Some("writer".to_owned()),
+    )
 }
 
 /// A run of `source` over the loop models, unprepared, so the run starts
@@ -93,7 +93,7 @@ fn models_loop_appends_the_terminal_assistant_record_and_returns_nil() {
     assert_eq!(trace.text(), "ok");
     assert_eq!(gateway.call_count(), 1, "one terminal turn is one request");
     let bodies = gateway.requests();
-    assert_eq!(bodies[0].messages[0].role(), "user");
+    assert_eq!(bodies[0].messages[0].role(), Role::User);
     assert_eq!(bodies[0].messages[0].content(), "hello");
     assert!(
         bodies[0].tools.is_empty(),
@@ -136,7 +136,7 @@ fn models_loop_repeats_model_tool_rounds_and_appends_each_exchange() {
     let tool_turns: Vec<&str> = bodies[2]
         .messages
         .iter()
-        .filter(|message| message.role() == "tool")
+        .filter(|message| message.role() == Role::Tool)
         .map(crate::model::Message::content)
         .collect();
     assert_eq!(
@@ -176,7 +176,9 @@ fn replayed_tool_calls_reach_the_chat_effect_in_the_openai_shape() {
         .as_array()
         .expect("a round's messages serialize to an array")
         .iter()
-        .find(|message| message["role"] == "assistant" && message.get("tool_calls").is_some())
+        .find(|message| {
+            message["role"] == Role::Assistant.as_str() && message.get("tool_calls").is_some()
+        })
         .expect("the replayed request carries the assistant tool-call turn");
     let call = &assistant["tool_calls"][0];
     assert_eq!(call["id"], "call_1", "the call id replays unchanged");
@@ -337,7 +339,7 @@ fn the_author_list_never_shows_a_half_answered_tool_batch() {
     let tool_turns = gateway.requests()[1]
         .messages
         .iter()
-        .filter(|message| message.role() == "tool")
+        .filter(|message| message.role() == Role::Tool)
         .count();
     assert_eq!(tool_turns, 2, "both results appear in the terminal round");
 }

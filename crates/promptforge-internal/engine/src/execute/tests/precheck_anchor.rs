@@ -29,18 +29,9 @@ fn reply_with_usage(
         content: content.to_owned(),
         finish_reason: None,
         reasoning: None,
-        metrics: Some(Box::new(CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: prompt,
-                completion_tokens: completion,
-                total_tokens: prompt + completion,
-                cached_tokens: None,
-                reasoning_tokens: reasoning,
-            }),
-            llama: None,
-            vllm: None,
-            client: None,
-        })),
+        metrics: Some(Box::new(CallMetrics::new().with_usage(Some(
+            Usage::new(prompt, completion, prompt + completion).with_reasoning_tokens(reasoning),
+        )))),
     }
 }
 
@@ -190,19 +181,15 @@ fn a_merged_history_falls_back_to_the_estimate() {
 #[track_caller]
 fn run_rounds_with_twin(lua: &str, replies: Vec<ScriptedReply>) -> (String, ScriptedChat) {
     let mut models = loop_models();
-    let writer = models.bindings[0].clone();
+    let writer = models.bindings()[0].clone();
     let twin = ModelBinding::new(
         "twin",
         "The default model with other settings",
         writer.id().clone(),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: Some(false),
-        },
+        ModelInvocation::new().with_thinking(Some(false)),
         writer.context(),
     );
-    models.bindings.push(twin);
+    models.push(twin);
     run_over(models, lua, replies)
 }
 
@@ -322,14 +309,16 @@ fn a_return_to_the_first_model_uses_the_estimate() {
 /// window.
 #[track_caller]
 fn run_with_max_tokens(lua: &str, max_tokens: u32) -> (String, ScriptedChat) {
-    let mut models = loop_models();
-    for binding in &mut models.bindings {
-        *binding = binding.clone().with_invocation(ModelInvocation {
-            temperature: None,
-            max_tokens: NonZeroU32::new(max_tokens),
-            thinking: None,
-        });
-    }
+    let loop_set = loop_models();
+    let capped = ModelInvocation::new().with_max_tokens(NonZeroU32::new(max_tokens));
+    let models = ModelSet::from_parts(
+        loop_set
+            .bindings()
+            .iter()
+            .map(|binding| binding.clone().with_invocation(capped.clone()))
+            .collect(),
+        loop_set.default_alias().map(str::to_owned),
+    );
     run_over(models, lua, vec![text("ok")])
 }
 

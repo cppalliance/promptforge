@@ -3,7 +3,7 @@
 
 use super::*;
 
-const ALL_KINDS: [CompletionErrorKind; 12] = [
+const ALL_KINDS: [CompletionErrorKind; 13] = [
     CompletionErrorKind::ContextOverflow,
     CompletionErrorKind::RateLimited,
     CompletionErrorKind::QuotaExhausted,
@@ -16,6 +16,7 @@ const ALL_KINDS: [CompletionErrorKind; 12] = [
     CompletionErrorKind::MalformedResponse,
     CompletionErrorKind::EmptyReply,
     CompletionErrorKind::Unavailable,
+    CompletionErrorKind::InvalidParts,
 ];
 
 #[test]
@@ -88,6 +89,10 @@ fn each_kind_has_its_fixed_phrase() {
         (
             CompletionErrorKind::Unavailable,
             "model access is turned off or not configured",
+        ),
+        (
+            CompletionErrorKind::InvalidParts,
+            "the completion was built from invalid parts",
         ),
     ];
     assert_eq!(phrases.len(), ALL_KINDS.len());
@@ -186,7 +191,10 @@ fn a_phrased_failure_shows_only_the_fixed_phrase() {
 
 #[test]
 fn a_specific_extends_the_phrase_after_a_colon_and_never_adds_detail() {
-    let malformed = CompletionError::malformed("no choices in response");
+    let malformed = CompletionError::specific(
+        CompletionErrorKind::MalformedResponse,
+        "no choices in response",
+    );
     assert_eq!(malformed.kind(), CompletionErrorKind::MalformedResponse);
     assert_eq!(
         malformed.to_string(),

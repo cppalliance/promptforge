@@ -19,9 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_lua::{
-    LuaProgram, MessageContent, MessageRecord, MessageRole, SectionVm, ToolCallRecord, ToolSet,
-    project_messages,
+    LuaProgram, MessageContent, MessageRecord, SectionVm, ToolCallRecord, ToolSet, project_messages,
 };
+use promptforge_model_client::client::Role;
 use promptforge_model_client::model::ModelSet;
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_types::seed::RunSeed;
@@ -89,19 +89,19 @@ fn message_building(c: &mut Criterion) {
 /// Projects one conversation covering the active shapes: leading system,
 /// alternating user and assistant text, and one complete tool exchange.
 fn projection(c: &mut Criterion) {
-    let text = |role: MessageRole, body: &str| MessageRecord {
+    let text = |role: Role, body: &str| MessageRecord {
         role,
         content: MessageContent::Text(body.to_owned()),
         tool_calls: Vec::new(),
         tool_call_id: None,
     };
     let messages = vec![
-        text(MessageRole::System, "you are careful"),
-        text(MessageRole::User, "summarize this"),
-        text(MessageRole::Assistant, "a summary"),
-        text(MessageRole::User, "now with tools"),
+        text(Role::System, "you are careful"),
+        text(Role::User, "summarize this"),
+        text(Role::Assistant, "a summary"),
+        text(Role::User, "now with tools"),
         MessageRecord {
-            role: MessageRole::Assistant,
+            role: Role::Assistant,
             content: MessageContent::Text(String::new()),
             tool_calls: vec![ToolCallRecord {
                 id: "call_1".to_owned(),
@@ -111,12 +111,12 @@ fn projection(c: &mut Criterion) {
             tool_call_id: None,
         },
         MessageRecord {
-            role: MessageRole::Tool,
+            role: Role::Tool,
             content: MessageContent::Text("echoed: polish".to_owned()),
             tool_calls: Vec::new(),
             tool_call_id: Some("call_1".to_owned()),
         },
-        text(MessageRole::Assistant, "refined text"),
+        text(Role::Assistant, "refined text"),
     ];
     c.bench_function("projection", |b| {
         b.iter(|| {

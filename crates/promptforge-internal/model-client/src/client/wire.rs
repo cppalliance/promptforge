@@ -8,6 +8,8 @@ mod canned;
 use promptforge_types::metrics::CallMetrics;
 use serde_json::Value;
 
+use super::Role;
+
 /// One message in a chat-completions conversation.
 ///
 /// A message serializes to a JSON object with `role` and `content` keys.
@@ -19,8 +21,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct Message {
-    /// The role: `system`, `user`, `assistant`, or `tool`.
-    pub(crate) role: String,
+    /// Who speaks the message.
+    pub(crate) role: Role,
     /// The message content, serialized into the request verbatim: a JSON
     /// string for a plain text message (every inherent constructor), or an
     /// OpenAI content-parts array for a multimodal message built through
@@ -43,7 +45,7 @@ impl Message {
     #[must_use]
     pub fn user(content: impl Into<String>) -> Message {
         Message {
-            role: "user".into(),
+            role: Role::User,
             content: Value::String(content.into()),
             tool_call_id: None,
             tool_calls: None,
@@ -56,7 +58,7 @@ impl Message {
     #[must_use]
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Message {
         Message {
-            role: "tool".into(),
+            role: Role::Tool,
             content: Value::String(content.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
@@ -68,17 +70,17 @@ impl Message {
     #[must_use]
     pub fn assistant(content: impl Into<String>) -> Message {
         Message {
-            role: "assistant".into(),
+            role: Role::Assistant,
             content: Value::String(content.into()),
             tool_call_id: None,
             tool_calls: None,
         }
     }
 
-    /// Returns the message role (`system`, `user`, `assistant`, or `tool`).
+    /// Returns who speaks the message.
     #[must_use]
-    pub fn role(&self) -> &str {
-        &self.role
+    pub fn role(&self) -> Role {
+        self.role
     }
 
     /// Returns the message text, or `""` when the content is a multimodal
@@ -102,11 +104,9 @@ impl Message {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ToolSchema {
-    /// The tool's wire name; the Engine reads it through
-    /// [`crate::detail::tool_schema_name`].
+    /// The tool's wire name.
     pub(crate) name: String,
-    /// A one-sentence description shown to the model; the Engine reads it
-    /// through [`crate::detail::tool_schema_description`].
+    /// A one-sentence description shown to the model.
     pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
     pub(crate) parameters: Value,
@@ -145,6 +145,7 @@ impl ToolSchema {
 pub enum ToolSchemaError {
     /// The wire name was empty or held a character outside `[A-Za-z0-9_.-]`.
     #[error("invalid tool wire name {name:?}: {reason}")]
+    #[non_exhaustive]
     InvalidName {
         /// The rejected wire name.
         name: String,
@@ -153,6 +154,7 @@ pub enum ToolSchemaError {
     },
     /// The parameters JSON Schema was not a JSON object.
     #[error("tool {name:?} parameters schema must be a JSON object")]
+    #[non_exhaustive]
     NonObjectSchema {
         /// The tool whose schema was rejected.
         name: String,
@@ -239,11 +241,32 @@ impl ToolArguments<'_> {
     }
 
     /// Returns the top-level argument names of the arguments object.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.value
-            .as_object()
-            .into_iter()
-            .flat_map(|map| map.keys().map(String::as_str))
+    pub fn names(&self) -> ArgumentNames<'_> {
+        ArgumentNames {
+            keys: self.value.as_object().map(serde_json::Map::keys),
+        }
+    }
+}
+
+/// Yields the top-level argument names of one [`ToolCall`]'s arguments.
+///
+/// [`ToolArguments::names`] returns it.
+#[derive(Debug, Clone)]
+#[must_use = "an iterator does nothing until it is consumed"]
+pub struct ArgumentNames<'a> {
+    /// The object's keys, or `None` for a null payload.
+    keys: Option<serde_json::map::Keys<'a>>,
+}
+
+impl<'a> Iterator for ArgumentNames<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        self.keys.as_mut()?.next().map(String::as_str)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.keys.as_ref().map_or((0, Some(0)), Iterator::size_hint)
     }
 }
 

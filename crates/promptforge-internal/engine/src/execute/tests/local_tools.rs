@@ -88,7 +88,7 @@ fn local_tool_multiple_calls_in_one_response_all_run() {
     let tool_turns = bodies[1]
         .messages
         .iter()
-        .filter(|m| m.role() == "tool")
+        .filter(|m| m.role() == Role::Tool)
         .count();
     assert_eq!(
         tool_turns, 2,

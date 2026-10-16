@@ -370,11 +370,7 @@ fn preludes_follow_the_prompts_declaration_order_and_carry_the_installed_name() 
 /// Calls `tool` through `run` from a script and returns its result.
 async fn call(run: &dyn ToolPerformer, tool: &str) -> Result<ToolOutput, ToolError> {
     let access = VfsRef::default().acquire(Origin::new("host test")).unwrap();
-    let origin = ToolCallOrigin {
-        execution: "host-test".to_owned(),
-        section: "Only".to_owned(),
-        caller: ToolCaller::Script,
-    };
+    let origin = ToolCallOrigin::new("host-test", "Only", ToolCaller::Script);
     let tool = ToolId::parse(tool).unwrap();
     run.call(
         tool,

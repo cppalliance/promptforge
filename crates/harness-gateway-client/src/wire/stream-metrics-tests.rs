@@ -2,7 +2,7 @@
 //! backend sections and the client clock merge into one `CallMetrics`, and
 //! the request and reassembled response bodies travel as the raw exchange.
 
-use promptforge::metrics::{LlamaTimings, Usage, VllmMetrics};
+use promptforge::metrics::{CallMetrics, LlamaTimings, Usage, VllmMetrics};
 use serde_json::{Value, json};
 
 use super::*;
@@ -32,11 +32,7 @@ fn text_and_stop() -> [Value; 2] {
 }
 
 fn client_timing() -> ClientTiming {
-    ClientTiming {
-        ttft_ms: Some(9.5),
-        mean_itl_ms: None,
-        e2e_ms: 41.5,
-    }
+    ClientTiming::new(41.5).with_ttft_ms(Some(9.5))
 }
 
 #[test]
@@ -63,33 +59,19 @@ fn finish_merges_every_reported_section_and_the_client_clock_into_one_call_metri
         .expect("a complete turn finishes");
     assert_eq!(
         completion.metrics(),
-        Some(&CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: 20,
-                completion_tokens: 5,
-                total_tokens: 25,
-                cached_tokens: Some(16),
-                reasoning_tokens: Some(2),
-            }),
-            llama: Some(LlamaTimings {
-                prompt_n: 20,
-                prompt_ms: 12.5,
-                prompt_per_second: 1600.0,
-                predicted_n: 5,
-                predicted_ms: 30.5,
-                predicted_per_second: 98.5,
-                draft_n: 0,
-                draft_n_accepted: 0,
-            }),
-            vllm: Some(VllmMetrics {
-                time_to_first_token_ms: Some(8.5),
-                generation_time_ms: None,
-                queue_time_ms: None,
-                mean_itl_ms: None,
-                tokens_per_second: None,
-            }),
-            client: Some(client_timing()),
-        })
+        Some(
+            &CallMetrics::new()
+                .with_usage(Some(
+                    Usage::new(20, 5, 25)
+                        .with_cached_tokens(Some(16))
+                        .with_reasoning_tokens(Some(2))
+                ))
+                .with_llama(Some(LlamaTimings::new(20, 12.5, 1600.0, 5, 30.5, 98.5)))
+                .with_vllm(Some(
+                    VllmMetrics::new().with_time_to_first_token_ms(Some(8.5))
+                ))
+                .with_client(Some(client_timing()))
+        )
     );
 }
 

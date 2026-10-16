@@ -2,8 +2,7 @@
 //! model, and tool calls while it loads, and prompt-wide state an H1
 //! `require` sets for every later section.
 
-use promptforge_model_client::detail::tool_schema_name;
-
+use crate::model::ToolSchema;
 use crate::test_support::scripted_chat::{ScriptedChat, text};
 
 use super::super::super::echo_tool;
@@ -69,7 +68,7 @@ fn an_h1_library_sets_prompt_wide_state_every_later_section_sees() {
     let round = gateway
         .last_request()
         .expect("the round reaches the gateway");
-    let offered: Vec<&str> = round.tools.iter().map(tool_schema_name).collect();
+    let offered: Vec<&str> = round.tools.iter().map(ToolSchema::name).collect();
     assert_eq!(
         offered,
         ["tools_echo"],

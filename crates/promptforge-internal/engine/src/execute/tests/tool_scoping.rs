@@ -50,11 +50,8 @@ fn an_offered_tool_advertises_its_concrete_schema_under_its_wire_name_and_dispat
     let effective = current_tool_bindings(&tools, &runtime).expect("the offered scope snapshots");
     let (schemas, _) = prepare_scoped_tools(&effective, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
-    assert_eq!(tool_schema_name(&schemas[0]), "tools_concrete");
-    assert_eq!(
-        tool_schema_description(&schemas[0]),
-        "Concrete description."
-    );
+    assert_eq!(schemas[0].name(), "tools_concrete");
+    assert_eq!(schemas[0].description(), "Concrete description.");
 
     let source = one_section(&format!("tools.offer('tools/concrete')\n{LOOP_TO_TEXT}"));
     let trace = loop_scenario(source)
@@ -114,7 +111,7 @@ fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
-    assert_eq!(tool_schema_name(&schemas[0]), "tools_section");
+    assert_eq!(schemas[0].name(), "tools_section");
     vm.teardown(&null_emitter(), "Only");
 
     // The same `tools.offer` inside a section scopes the tool for the

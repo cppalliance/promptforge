@@ -117,7 +117,7 @@ pub(super) fn parse_pending(table: &mlua::Table) -> std::result::Result<Request,
                     "pending filter origin must be a valid UTF-8 string".to_owned(),
                 ))
             })?;
-            Some(TaskOrigin::from_tag(&tag).ok_or_else(|| {
+            Some(tag.parse::<TaskOrigin>().map_err(|_| {
                 FieldFailure::Call(Error::Lua(format!(
                     "pending filter origin must be `author` or `model`, got `{}`",
                     &*tag

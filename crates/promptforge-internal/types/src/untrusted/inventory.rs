@@ -18,7 +18,10 @@
 #[path = "inventory-table.rs"]
 mod table;
 
+#[cfg(test)]
 pub(super) use table::{CONTROL_MARKUP, Shape};
+#[cfg(not(test))]
+use table::{CONTROL_MARKUP, Shape};
 
 /// The fullwidth vertical bar (U+FF5C) framing DeepSeek's open marker class.
 const FULLWIDTH_BAR: char = '\u{ff5c}';

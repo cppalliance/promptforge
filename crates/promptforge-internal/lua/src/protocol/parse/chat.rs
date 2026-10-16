@@ -3,13 +3,12 @@
 //! list's builders run as they add a record.
 
 use mlua::Value;
+use promptforge_model_client::client::Role;
 
 use crate::Error;
 use crate::messages::MessageList;
 
-use super::super::request::{
-    ContentPart, MessageContent, MessageRecord, MessageRole, Request, ToolCallRecord,
-};
+use super::super::request::{ContentPart, MessageContent, MessageRecord, Request, ToolCallRecord};
 use super::{FieldFailure, call_handle};
 
 /// The refusal for a `messages` value that is not a `messages.new()`
@@ -17,8 +16,14 @@ use super::{FieldFailure, call_handle};
 pub(crate) const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
                                      messages.new() and :user, :append, or :replace";
 
-/// The message roles the chat protocol accepts.
-const CHAT_ROLES: [&str; 4] = ["system", "user", "assistant", "tool"];
+/// The message roles the chat protocol accepts, comma-separated.
+fn chat_roles() -> String {
+    Role::ALL
+        .iter()
+        .map(|role| role.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// The content-part types the chat protocol accepts (the Multimodal
 /// contract: text parts and data-URI image parts).
@@ -82,19 +87,19 @@ fn parse_message(
         return Err(format!("messages[{index}] must be a message table"));
     };
     let role = match entry.get("role") {
-        Some(serde_json::Value::String(role)) => match MessageRole::parse(role) {
-            Some(role) => role,
-            None => {
+        Some(serde_json::Value::String(role)) => match role.parse::<Role>() {
+            Ok(role) => role,
+            Err(_) => {
                 return Err(format!(
                     "messages[{index}] role {role:?} is unknown; known roles: {}",
-                    CHAT_ROLES.join(", ")
+                    chat_roles()
                 ));
             }
         },
         _ => {
             return Err(format!(
                 "messages[{index}] role must be a string, one of: {}",
-                CHAT_ROLES.join(", ")
+                chat_roles()
             ));
         }
     };
@@ -117,7 +122,7 @@ fn parse_message(
             return Err(format!("messages[{index}] tool_call_id must be a string"));
         }
     };
-    if role == MessageRole::Tool && tool_call_id.is_none() {
+    if role == Role::Tool && tool_call_id.is_none() {
         return Err(format!(
             "messages[{index}] is a tool message and must set a string tool_call_id"
         ));

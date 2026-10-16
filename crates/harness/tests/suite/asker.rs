@@ -8,7 +8,7 @@ use std::sync::Arc;
 use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use promptforge_plugin::{
     Package, Plugin, PluginFuture, PluginId, ServiceId, ServiceKey, ToolContext, ToolDescriptor,
-    ToolError, ToolId, ToolOutput,
+    ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};
 
@@ -69,8 +69,13 @@ fn construct(
     _config: Value,
     _services: &HostServices,
 ) -> Result<Arc<dyn Plugin>, ToolError> {
-    let id = ToolId::parse(&format!("{name}/ask"))
-        .map_err(|e| ToolError::with_source("the fixture could not name its ask tool", e))?;
+    let id = ToolId::parse(&format!("{name}/ask")).map_err(|e| {
+        ToolError::new(
+            ToolErrorKind::Backend,
+            "the fixture could not name its ask tool",
+        )
+        .with_source(e)
+    })?;
     let ask = ToolDescriptor::new(
         id,
         "Wait for the operator's next message.",

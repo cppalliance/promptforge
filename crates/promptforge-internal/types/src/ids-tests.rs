@@ -68,12 +68,15 @@ fn a_task_origin_round_trips_through_its_tag() {
     assert_eq!(TaskOrigin::Author.tag(), "author");
     assert_eq!(TaskOrigin::Model.tag(), "model");
     for origin in [TaskOrigin::Author, TaskOrigin::Model] {
-        assert_eq!(TaskOrigin::from_tag(origin.tag()), Some(origin));
+        assert_eq!(origin.tag().parse::<TaskOrigin>(), Ok(origin));
     }
+    let error = "Author"
+        .parse::<TaskOrigin>()
+        .expect_err("the tag vocabulary is exact, never case-folded");
+    assert_eq!(error.input(), "Author");
     assert_eq!(
-        TaskOrigin::from_tag("Author"),
-        None,
-        "the tag vocabulary is exact, never case-folded"
+        error.to_string(),
+        "invalid task origin `Author`: required `author` or `model`"
     );
     assert_wire(&TaskOrigin::Model, "\"model\"");
 }
@@ -81,15 +84,9 @@ fn a_task_origin_round_trips_through_its_tag() {
 #[test]
 fn provenance_orders_by_task_then_sequence_and_round_trips() {
     let task: TaskId = "0.2".parse().expect("a task id parses");
-    let first = Provenance {
-        task: task.clone(),
-        seq: 0,
-    };
-    let later = Provenance { task, seq: 7 };
-    let other_task = Provenance {
-        task: "0.3".parse().expect("a task id parses"),
-        seq: 0,
-    };
+    let first = Provenance::new(task.clone(), 0);
+    let later = Provenance::new(task, 7);
+    let other_task = Provenance::new("0.3".parse().expect("a task id parses"), 0);
     assert!(first < later, "within one task the sequence orders");
     assert!(
         later < other_task,

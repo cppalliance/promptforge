@@ -14,8 +14,7 @@ pub enum OutputTrust {
     Untrusted,
 }
 
-/// The text a tool returns from a successful call, together with its trust
-/// level.
+/// Holds the text a successful tool call returns, with its trust level.
 ///
 /// Build one with [`ToolOutput::trusted`] or [`ToolOutput::untrusted`]. The
 /// trust level travels with the text, so code that handles the output reads
@@ -91,31 +90,33 @@ pub struct ToolError {
 }
 
 impl ToolError {
-    /// Builds an error from a message alone, with the kind `Other`.
+    /// Builds an error of `kind` with `text` as its model-safe message.
     #[must_use]
-    pub fn message(text: impl Into<String>) -> ToolError {
+    pub fn new(kind: ToolErrorKind, text: impl Into<String>) -> ToolError {
         ToolError {
-            kind: ToolErrorKind::Other,
+            kind,
             message: text.into(),
             source: None,
         }
     }
 
-    /// Builds a backend error that records `src` as its underlying cause.
+    /// Builds an error from a message alone, with the kind `Other`.
+    #[must_use]
+    pub fn message(text: impl Into<String>) -> ToolError {
+        ToolError::new(ToolErrorKind::Other, text)
+    }
+
+    /// Keeps `source` as the underlying cause, returning the updated error.
     ///
     /// The cause is not part of the message. It is available only through
-    /// `Error::source`. The kind starts as [`ToolErrorKind::Backend`]. Call
-    /// [`ToolError::with_kind`] when the cause belongs to another kind.
+    /// `Error::source`. The kind stays as it was built.
     #[must_use]
     pub fn with_source(
-        text: impl Into<String>,
-        src: impl std::error::Error + Send + Sync + 'static,
+        mut self,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> ToolError {
-        ToolError {
-            kind: ToolErrorKind::Backend,
-            message: text.into(),
-            source: Some(Box::new(src)),
-        }
+        self.source = Some(source.into());
+        self
     }
 
     /// Sets the classification, returning the updated error.

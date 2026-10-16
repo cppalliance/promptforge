@@ -1,8 +1,6 @@
 //! Tests for the strict turn parse: tool calls, empty replies, and the
 //! reasoning side channel.
 
-use promptforge::model::Completion;
-
 use super::*;
 
 const EMPTY_REPLY_PHRASE: &str = "the model replied with no text and no tool calls";
@@ -173,26 +171,6 @@ fn blank_tool_call_id_is_rejected() {
         "function": { "name": "ping", "arguments": "{}" }
     }));
     assert!(is_malformed(normalize(&body)));
-}
-
-#[test]
-fn duplicate_tool_call_ids_are_rejected() {
-    // The body walk builds each call alone; the duplicate check runs when
-    // the batch becomes a completion, as the read loop's `finish` does.
-    let body = serde_json::json!({
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [
-                    { "id": "dup", "type": "function", "function": { "name": "a", "arguments": "{}" } },
-                    { "id": "dup", "type": "function", "function": { "name": "b", "arguments": "{}" } }
-                ]
-            }
-        }]
-    });
-    let turn = normalize(&body).expect("each call alone is well-formed");
-    assert!(is_malformed(Completion::from_result(turn.outcome, "m")));
 }
 
 #[test]

@@ -69,10 +69,7 @@ fn delta_frames_map_conversation_channels_to_wire_shapes() {
 
 /// The root task's zeroth sequence: the wire does not expose it.
 fn provenance() -> Provenance {
-    Provenance {
-        task: TaskId::from(ChainId::root()),
-        seq: 0,
-    }
+    Provenance::new(TaskId::from(ChainId::root()), 0)
 }
 
 /// The ask tool's id under the name Workshop installs user-input as.

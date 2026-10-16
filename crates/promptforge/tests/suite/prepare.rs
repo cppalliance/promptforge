@@ -112,7 +112,7 @@ fn a_hard_keyword_the_current_model_fails_is_reported() -> TestResult {
 }
 
 fn prepared_over(descriptor: &ToolDescriptor) -> TestResult<Prepared> {
-    let catalog = ToolCatalog::new(std::slice::from_ref(descriptor))?;
+    let catalog = ToolCatalog::new([descriptor.clone()])?;
     Scenario::default()
         .context(move |ctx| ctx.tools(catalog.clone()))
         .prepare(&declaring("plugins: [web]"))

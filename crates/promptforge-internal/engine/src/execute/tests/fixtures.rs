@@ -81,8 +81,8 @@ pub(super) fn failing_tool() -> FnTool {
         // preservation (item 4): the tool error must not be flattened to a string.
         let cause = std::io::Error::other("upstream socket reset");
         Err(
-            ToolError::with_source("the tool's own backend failed", cause)
-                .with_kind(ToolErrorKind::Backend),
+            ToolError::new(ToolErrorKind::Backend, "the tool's own backend failed")
+                .with_source(cause),
         )
     })
     .description("Always fail.")

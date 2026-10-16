@@ -40,10 +40,10 @@ use crate::untrusted::GuardNonce;
 use promptforge_types::tools::ToolDescriptor;
 
 fn test_models() -> ModelSet {
-    ModelSet {
-        bindings: vec![test_binding("fast", "a fast model", "test-model")],
-        default: None,
-    }
+    ModelSet::from_parts(
+        vec![test_binding("fast", "a fast model", "test-model")],
+        None,
+    )
 }
 
 /// A minimal tool descriptor behind a bound alias, for handle-form

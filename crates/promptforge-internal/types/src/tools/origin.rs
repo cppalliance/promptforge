@@ -2,13 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Who made one tool call and where: the run's execution, the section
-/// whose Lua was running, and whether the section's script or a model
-/// round asked for the call.
+/// Records who made one tool call and where.
 ///
-/// A log uses it to attribute the call. The application can use it to
+/// It names the run's execution, the section whose Lua was running, and
+/// whether the section's script or a model round asked for the call. A log
+/// uses it to attribute the call. The application can use it to
 /// apply different policy to the same tool depending on who called it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ToolCallOrigin {
     /// The run's execution identifier.
     pub execution: String,
@@ -16,6 +17,23 @@ pub struct ToolCallOrigin {
     pub section: String,
     /// Which kind of code asked for the call.
     pub caller: ToolCaller,
+}
+
+impl ToolCallOrigin {
+    /// Builds the origin of a call `caller` made from `section` in the run
+    /// `execution`.
+    #[must_use]
+    pub fn new(
+        execution: impl Into<String>,
+        section: impl Into<String>,
+        caller: ToolCaller,
+    ) -> ToolCallOrigin {
+        ToolCallOrigin {
+            execution: execution.into(),
+            section: section.into(),
+            caller,
+        }
+    }
 }
 
 /// Which kind of code asked for one tool call.

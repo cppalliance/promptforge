@@ -22,7 +22,7 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
     )
     .expect("a bound label becomes the default");
     assert_eq!(
-        models.lock().expect("set lock").default.as_deref(),
+        models.lock().expect("set lock").default_alias(),
         Some("writer")
     );
     vm.teardown(&null_emitter(), "Section");

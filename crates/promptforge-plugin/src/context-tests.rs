@@ -22,11 +22,7 @@ fn fresh_access() -> Access {
 }
 
 fn model_origin() -> ToolCallOrigin {
-    ToolCallOrigin {
-        execution: "context-test".to_owned(),
-        section: "Fetch".to_owned(),
-        caller: ToolCaller::Model,
-    }
+    ToolCallOrigin::new("context-test", "Fetch", ToolCaller::Model)
 }
 
 #[test]

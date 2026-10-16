@@ -46,8 +46,11 @@ impl SearchRequest {
     /// Deserializes and validates the raw call arguments.
     pub(super) fn from_args(args: serde_json::Value) -> Result<SearchRequest, ToolError> {
         let request: SearchRequest = serde_json::from_value(args).map_err(|error| {
-            ToolError::with_source("web_search: invalid arguments", error)
-                .with_kind(ToolErrorKind::InvalidArguments)
+            ToolError::new(
+                ToolErrorKind::InvalidArguments,
+                "web_search: invalid arguments",
+            )
+            .with_source(error)
         })?;
         request.validate()?;
         Ok(request)

@@ -9,7 +9,7 @@ use super::*;
 fn round_section(messages: &[Value]) -> String {
     messages
         .iter()
-        .find(|message| message["role"] == "user")
+        .find(|message| message["role"] == Role::User.as_str())
         .and_then(|message| message["content"].as_str())
         .expect("each round's list starts with its section's name")
         .to_owned()

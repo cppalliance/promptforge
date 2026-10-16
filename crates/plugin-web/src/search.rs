@@ -132,7 +132,7 @@ impl WebSearch {
                 SearchErrorKind::Transport => ToolErrorKind::Transport,
                 SearchErrorKind::Backend => ToolErrorKind::Backend,
             };
-            ToolError::with_source(format!("web_search: {error}"), error).with_kind(kind)
+            ToolError::new(kind, format!("web_search: {error}")).with_source(error)
         })?;
         if let Some(index) = results.results.iter().position(|r| r.url.trim().is_empty()) {
             return Err(ToolError::message(format!(
@@ -141,8 +141,11 @@ impl WebSearch {
             .with_kind(ToolErrorKind::Backend));
         }
         let body = serde_json::to_string(&results).map_err(|source| {
-            ToolError::with_source("web_search: the results could not be rendered", source)
-                .with_kind(ToolErrorKind::Other)
+            ToolError::new(
+                ToolErrorKind::Other,
+                "web_search: the results could not be rendered",
+            )
+            .with_source(source)
         })?;
 
         // The results embed third-party titles, URLs, and descriptions, so

@@ -33,13 +33,13 @@
 
 use std::collections::BTreeSet;
 
-use promptforge_model_client::client::Message;
+use promptforge_model_client::client::{Message, Role};
 use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::Value;
 
 use crate::Error;
 use crate::Result;
-use crate::protocol::{ContentPart, MessageContent, MessageRecord, MessageRole};
+use crate::protocol::{ContentPart, MessageContent, MessageRecord};
 
 /// Validates and projects one author-built message list into the wire
 /// messages for one model dispatch.
@@ -79,23 +79,23 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
     let mut pending: Option<(usize, Vec<&str>)> = None;
     for (position, record) in messages.iter().enumerate() {
         let index = position + 1;
-        if record.role != MessageRole::Assistant && !record.tool_calls.is_empty() {
+        if record.role != Role::Assistant && !record.tool_calls.is_empty() {
             return Err(Error::Lua(format!(
                 "messages[{index}] sets tool_calls but is not an assistant message"
             )));
         }
-        if record.role != MessageRole::Tool && record.tool_call_id.is_some() {
+        if record.role != Role::Tool && record.tool_call_id.is_some() {
             return Err(Error::Lua(format!(
                 "messages[{index}] sets a tool_call_id but is not a tool message"
             )));
         }
         match record.role {
-            MessageRole::System if position >= system_len => {
+            Role::System if position >= system_len => {
                 return Err(Error::Lua(format!(
                     "messages[{index}] is a system message outside the leading system block"
                 )));
             }
-            MessageRole::Assistant if !record.tool_calls.is_empty() => {
+            Role::Assistant if !record.tool_calls.is_empty() => {
                 reject_unanswered(pending.as_ref())?;
                 for call in &record.tool_calls {
                     if !seen.insert(call.id.as_str()) {
@@ -115,7 +115,7 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
                         .collect(),
                 ));
             }
-            MessageRole::Tool => {
+            Role::Tool => {
                 // The protocol parse requires a string tool_call_id on every
                 // tool record, so the option is always some here.
                 let id = record.tool_call_id.as_deref().unwrap_or_default();
@@ -158,7 +158,7 @@ fn reject_unanswered(pending: Option<&(usize, Vec<&str>)>) -> Result<()> {
 fn leading_system_len(messages: &[MessageRecord]) -> usize {
     messages
         .iter()
-        .take_while(|record| record.role == MessageRole::System)
+        .take_while(|record| record.role == Role::System)
         .count()
 }
 
@@ -175,7 +175,7 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
         // Composition is textual; validation refused parts in a composed
         // block, so the visible text is the whole content.
         _ => projected.push(MessageRecord {
-            role: MessageRole::System,
+            role: Role::System,
             content: MessageContent::Text(
                 messages[..system_len]
                     .iter()
@@ -195,10 +195,10 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
                 if last.role == record.role
                     && last.tool_calls.is_empty()
                     && record.tool_calls.is_empty()
-                    && matches!(last.role, MessageRole::User | MessageRole::Assistant) =>
+                    && matches!(last.role, Role::User | Role::Assistant) =>
             {
                 let separator = match last.role {
-                    MessageRole::User => "\n\n",
+                    Role::User => "\n\n",
                     _ => "",
                 };
                 last.content = merge_content(&last.content, &record.content, separator);
@@ -206,9 +206,9 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
             // Visible text merges into the tool-call turn it precedes rather
             // than breaking provider alternation as a lone assistant message.
             Some(last)
-                if last.role == MessageRole::Assistant
+                if last.role == Role::Assistant
                     && last.tool_calls.is_empty()
-                    && record.role == MessageRole::Assistant =>
+                    && record.role == Role::Assistant =>
             {
                 last.content = merge_content(&last.content, &record.content, "");
                 last.tool_calls.clone_from(&record.tool_calls);
@@ -316,7 +316,7 @@ fn wire_message(record: &MessageRecord) -> Message {
         )
     };
     message_from_validated_parts(
-        record.role.as_str(),
+        record.role,
         content,
         record.tool_call_id.clone(),
         tool_calls,

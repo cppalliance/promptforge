@@ -95,7 +95,7 @@ pub fn greet() -> Result<String, Box<dyn Error>> {
         "Returns the text in capital letters.",
         serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
     );
-    let catalog = ToolCatalog::new(&[shout])?;
+    let catalog = ToolCatalog::new([shout])?;
     let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     if let Some(refusal) = requirements.refusal() {
         return Err(refusal.into());

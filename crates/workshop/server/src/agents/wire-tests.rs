@@ -27,10 +27,7 @@ fn agent_fixture() -> serde_json::Value {
 /// The root task's zeroth sequence: the provenance every test event
 /// holds, since the wire does not expose it.
 fn provenance() -> Provenance {
-    Provenance {
-        task: TaskId::from(ChainId::root()),
-        seq: 0,
-    }
+    Provenance::new(TaskId::from(ChainId::root()), 0)
 }
 
 /// The ask tool's id under the name Workshop installs user-input as.
@@ -61,37 +58,32 @@ fn stamped_fixture_event() -> Event {
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
         origin: ReplyOrigin::Chat,
-        metrics: Some(CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: 7,
-                completion_tokens: 3,
-                total_tokens: 10,
-                cached_tokens: Some(2),
-                reasoning_tokens: Some(1),
-            }),
-            llama: Some(LlamaTimings {
-                prompt_n: 7,
-                prompt_ms: 12.5,
-                prompt_per_second: 560.0,
-                predicted_n: 3,
-                predicted_ms: 30.5,
-                predicted_per_second: 98.5,
-                draft_n: 4,
-                draft_n_accepted: 2,
-            }),
-            vllm: Some(VllmMetrics {
-                time_to_first_token_ms: Some(8.5),
-                generation_time_ms: Some(22.5),
-                queue_time_ms: Some(1.5),
-                mean_itl_ms: Some(7.5),
-                tokens_per_second: Some(133.5),
-            }),
-            client: Some(ClientTiming {
-                ttft_ms: Some(9.5),
-                mean_itl_ms: Some(8.25),
-                e2e_ms: 41.5,
-            }),
-        }),
+        metrics: Some(
+            CallMetrics::new()
+                .with_usage(Some(
+                    Usage::new(7, 3, 10)
+                        .with_cached_tokens(Some(2))
+                        .with_reasoning_tokens(Some(1)),
+                ))
+                .with_llama(Some(
+                    LlamaTimings::new(7, 12.5, 560.0, 3, 30.5, 98.5)
+                        .with_draft_n(4)
+                        .with_draft_n_accepted(2),
+                ))
+                .with_vllm(Some(
+                    VllmMetrics::new()
+                        .with_time_to_first_token_ms(Some(8.5))
+                        .with_generation_time_ms(Some(22.5))
+                        .with_queue_time_ms(Some(1.5))
+                        .with_mean_itl_ms(Some(7.5))
+                        .with_tokens_per_second(Some(133.5)),
+                ))
+                .with_client(Some(
+                    ClientTiming::new(41.5)
+                        .with_ttft_ms(Some(9.5))
+                        .with_mean_itl_ms(Some(8.25)),
+                )),
+        ),
     }
 }
 
@@ -161,12 +153,11 @@ fn an_agent_event_frame_renders_tool_call_batches_and_skips_lifecycle_events() {
         turn: 1,
         round: RoundId::new(0),
         model: "llama-3".to_owned(),
-        calls: vec![ToolCallEvent {
-            id: "call_1".to_owned(),
-            name: "read_file".to_owned(),
-            arguments: serde_json::json!({ "path": "notes.txt" }),
-            tool: None,
-        }],
+        calls: vec![ToolCallEvent::new(
+            "call_1",
+            "read_file",
+            serde_json::json!({ "path": "notes.txt" }),
+        )],
     };
     let frame =
         wire(&AgentEventFrame::new(0, Some(0), &batch, None).expect("a tool-call batch frames"));

@@ -35,10 +35,7 @@ fn meta() -> RunMeta {
 
 /// The replay key every fidelity event carries.
 fn provenance() -> Result<Provenance, ParseIdError> {
-    Ok(Provenance {
-        task: "0".parse::<TaskId>()?,
-        seq: 0,
-    })
+    Ok(Provenance::new("0".parse::<TaskId>()?, 0))
 }
 
 /// Appends `payload` as the one event of a fresh run and asserts the log
@@ -135,37 +132,32 @@ async fn a_real_assistant_reply_with_metrics_round_trips_through_the_log() {
         finish_reason: Some("stop".to_owned()),
         model: "llama-3".to_owned(),
         origin: ReplyOrigin::Chat,
-        metrics: Some(CallMetrics {
-            usage: Some(Usage {
-                prompt_tokens: 7,
-                completion_tokens: 3,
-                total_tokens: 10,
-                cached_tokens: Some(2),
-                reasoning_tokens: Some(1),
-            }),
-            llama: Some(LlamaTimings {
-                prompt_n: 7,
-                prompt_ms: AWKWARD,
-                prompt_per_second: 560.0,
-                predicted_n: 3,
-                predicted_ms: 30.5,
-                predicted_per_second: 98.5,
-                draft_n: 4,
-                draft_n_accepted: 2,
-            }),
-            vllm: Some(VllmMetrics {
-                time_to_first_token_ms: Some(8.5),
-                generation_time_ms: Some(22.5),
-                queue_time_ms: Some(1.5),
-                mean_itl_ms: Some(7.5),
-                tokens_per_second: Some(133.5),
-            }),
-            client: Some(ClientTiming {
-                ttft_ms: Some(3.907_800_000_000_000_4),
-                mean_itl_ms: Some(8.25),
-                e2e_ms: 0.1 + 0.2,
-            }),
-        }),
+        metrics: Some(
+            CallMetrics::new()
+                .with_usage(Some(
+                    Usage::new(7, 3, 10)
+                        .with_cached_tokens(Some(2))
+                        .with_reasoning_tokens(Some(1)),
+                ))
+                .with_llama(Some(
+                    LlamaTimings::new(7, AWKWARD, 560.0, 3, 30.5, 98.5)
+                        .with_draft_n(4)
+                        .with_draft_n_accepted(2),
+                ))
+                .with_vllm(Some(
+                    VllmMetrics::new()
+                        .with_time_to_first_token_ms(Some(8.5))
+                        .with_generation_time_ms(Some(22.5))
+                        .with_queue_time_ms(Some(1.5))
+                        .with_mean_itl_ms(Some(7.5))
+                        .with_tokens_per_second(Some(133.5)),
+                ))
+                .with_client(Some(
+                    ClientTiming::new(0.1 + 0.2)
+                        .with_ttft_ms(Some(3.907_800_000_000_000_4))
+                        .with_mean_itl_ms(Some(8.25)),
+                )),
+        ),
     };
     round_trips(serde_json::to_value(&event).unwrap())
         .await

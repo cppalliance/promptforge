@@ -12,10 +12,7 @@ fn at() -> (String, String, Provenance) {
     (
         "conversation-1".to_owned(),
         "Conversation".to_owned(),
-        Provenance {
-            task: "0".parse().unwrap(),
-            seq: 0,
-        },
+        Provenance::new("0".parse().unwrap(), 0),
     )
 }
 

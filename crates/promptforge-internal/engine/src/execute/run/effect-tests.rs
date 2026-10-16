@@ -8,6 +8,7 @@
 
 use promptforge_model_client::client::{RawExchange, ToolCall};
 use promptforge_model_client::model::CompletionErrorKind;
+use promptforge_types::tools::ToolErrorKind;
 use serde_json::json;
 
 use super::*;
@@ -247,7 +248,8 @@ fn a_tool_call_answer_records_the_outputs_text_and_trust() {
 
 #[test]
 fn a_failed_tool_call_answer_records_the_errors_display_text_and_hides_its_source() {
-    let error = ToolError::with_source("backend failed", std::io::Error::other("boom"));
+    let error = ToolError::new(ToolErrorKind::Backend, "backend failed")
+        .with_source(std::io::Error::other("boom"));
     let record = EffectAnswer::ToolCall(Err(error)).record();
     assert_eq!(
         record,

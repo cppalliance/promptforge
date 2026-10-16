@@ -119,7 +119,7 @@ impl Scenario {
             .model(model);
         if let Some(tool) = &self.tool {
             let descriptor = descriptor(tool.id, json!({ "type": "object" }))?;
-            ctx = ctx.tools(ToolCatalog::new(&[descriptor])?);
+            ctx = ctx.tools(ToolCatalog::new([descriptor])?);
         }
         if let Some(edit) = &self.context {
             ctx = edit(ctx);

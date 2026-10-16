@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use promptforge_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ServiceKey, ToolContext, ToolDescriptor,
-    ToolError, ToolId, ToolOutput,
+    ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};
 use tokio::runtime::Handle;
@@ -81,8 +81,10 @@ impl Web {
     /// The Plugin over `fetch` and `search`, its tools named under `name`.
     fn new(name: &PluginId, fetch: WebFetch, search: WebSearch) -> Result<Web, ToolError> {
         let id = |tool: &str| {
-            ToolId::parse(&format!("{name}/{tool}"))
-                .map_err(|e| ToolError::with_source("web could not name its tools", e))
+            ToolId::parse(&format!("{name}/{tool}")).map_err(|e| {
+                ToolError::new(ToolErrorKind::Backend, "web could not name its tools")
+                    .with_source(e)
+            })
         };
         let tools = vec![
             ToolDescriptor::new(id("fetch")?, fetch.description(), fetch.parameters_schema()),

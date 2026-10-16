@@ -13,6 +13,8 @@
 //! `promptforge-plugin`, and installing Plugins is the caller's; the
 //! Engine never builds a Plugin.
 
+use std::str::FromStr;
+
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::tools::ToolId;
 
@@ -36,9 +38,10 @@ impl PluginId {
     /// # Errors
     /// Returns [`PluginIdError`] when the id has more than one segment
     /// ([`PluginIdErrorKind::SegmentCount`]), is empty or has an empty
-    /// segment ([`PluginIdErrorKind::Empty`]), or a segment contains a
-    /// character other than a lowercase ASCII letter, a digit, `-`, `_`,
-    /// or `.` ([`PluginIdErrorKind::Control`]).
+    /// segment ([`PluginIdErrorKind::Empty`]), a segment contains a control
+    /// byte ([`PluginIdErrorKind::Control`]), or a segment contains any
+    /// other character than a lowercase ASCII letter, a digit, `-`, `_`,
+    /// or `.` ([`PluginIdErrorKind::Charset`]).
     pub fn parse(name: &str) -> Result<PluginId, PluginIdError> {
         let name =
             GlobalName::parse(name).map_err(|e| PluginIdError::from_global_name_kind(e.kind()))?;
@@ -56,12 +59,8 @@ impl PluginId {
     /// Crate-internal: backs [`crate::tools::ToolId::plugin`]. The source
     /// tool id was validated at parse, so its first segment is already a
     /// valid Plugin id.
-    pub(crate) fn from_segment(segment: GlobalName) -> PluginId {
-        debug_assert!(
-            segment.segments().len() == 1,
-            "a tool id's Plugin is exactly its first segment"
-        );
-        PluginId(segment)
+    pub(crate) fn from_segment(segment: &str) -> PluginId {
+        PluginId(GlobalName::from_validated_segment(segment))
     }
 
     /// Returns whether `tool` belongs to this Plugin.
@@ -72,7 +71,15 @@ impl PluginId {
     /// assembles the run's catalog.
     #[must_use]
     pub fn contains(&self, tool: &ToolId) -> bool {
-        tool.plugin() == *self
+        tool.plugin_segment() == self.0.first()
+    }
+}
+
+impl FromStr for PluginId {
+    type Err = PluginIdError;
+
+    fn from_str(name: &str) -> Result<PluginId, PluginIdError> {
+        PluginId::parse(name)
     }
 }
 
@@ -86,7 +93,7 @@ impl std::fmt::Display for PluginId {
 impl serde::Serialize for PluginId {
     /// Serializes the id as its one-segment string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0.to_string())
+        serializer.collect_str(&self.0)
     }
 }
 
@@ -118,8 +125,7 @@ impl serde::de::Visitor<'_> for PluginIdVisitor {
     }
 }
 
-/// A stable classification of a [`PluginIdError`] that callers can match
-/// on to handle each kind of failure.
+/// Classifies a [`PluginIdError`] so callers can handle each kind of failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PluginIdErrorKind {
@@ -127,14 +133,16 @@ pub enum PluginIdErrorKind {
     SegmentCount,
     /// A segment was empty.
     Empty,
-    /// A segment contained a character other than a lowercase ASCII letter,
-    /// a digit, `-`, `_`, or `.`.
+    /// A segment contained a control byte.
     Control,
+    /// A segment contained a character other than a lowercase ASCII letter,
+    /// a digit, `-`, `_`, or `.` that is not a control byte, such as an
+    /// uppercase letter, `@`, or a non-ASCII character.
+    Charset,
 }
 
 /// The reason a [`PluginId`] failed to parse.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid Plugin id: {reason}")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PluginIdError {
     /// A stable classification of why the id was rejected.
@@ -156,6 +164,10 @@ impl PluginIdError {
             GlobalNameErrorKind::Empty => (PluginIdErrorKind::Empty, "segments must not be empty"),
             GlobalNameErrorKind::Control => (
                 PluginIdErrorKind::Control,
+                "segments must not contain a control character",
+            ),
+            GlobalNameErrorKind::Charset => (
+                PluginIdErrorKind::Charset,
                 "segments may contain only lowercase ASCII letters, digits, '-', '_', '.'",
             ),
         };
@@ -163,8 +175,15 @@ impl PluginIdError {
     }
 }
 
-/// Lua source that a declared Plugin adds to the Lua VM of every
-/// section in a run.
+impl std::fmt::Display for PluginIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid Plugin id: {}", self.reason)
+    }
+}
+
+impl std::error::Error for PluginIdError {}
+
+/// Holds the Lua source a declared Plugin adds to every section's VM.
 ///
 /// A prelude defines tables and functions, such as `sh.run(script)`, that
 /// call the Plugin's own tools through `tools.call`. The Engine runs

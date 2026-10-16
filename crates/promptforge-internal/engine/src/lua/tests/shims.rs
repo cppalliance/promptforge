@@ -264,12 +264,7 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
         "local msgs = messages.new()\nmsgs:user('hi')\nmodels.loop(msgs)\nreturn #msgs",
     );
     assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
-    let call = |id: &str| ToolCallEvent {
-        id: id.to_owned(),
-        name: "tools_echo".to_owned(),
-        arguments: json!({ "value": id }),
-        tool: None,
-    };
+    let call = |id: &str| ToolCallEvent::new(id, "tools_echo", json!({ "value": id }));
     let round = ChatResult {
         overflow: false,
         overflow_reason: None,

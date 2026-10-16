@@ -148,8 +148,8 @@ impl ScriptedReply {
     ///
     /// # Errors
     /// Returns the scripted failure, the `EmptyReply` failure for an empty
-    /// text reply, and the `MalformedResponse` failure for a tool call the
-    /// wire decoder would refuse.
+    /// text reply, and the `InvalidParts` failure for a tool call the
+    /// validating constructors refuse.
     pub fn answer(&self) -> Result<Completion, CompletionError> {
         match self {
             ScriptedReply::Text {
@@ -318,7 +318,7 @@ impl ScriptedChat {
     /// # Errors
     /// Returns the scripted failure, the `Timeout` failure for a delay past
     /// `timeout`, the `EmptyReply` failure for an empty text reply, and the
-    /// `MalformedResponse` failure for a tool call the wire decoder would
+    /// `InvalidParts` failure for a tool call the validating constructors
     /// refuse.
     pub fn complete_now(
         &self,

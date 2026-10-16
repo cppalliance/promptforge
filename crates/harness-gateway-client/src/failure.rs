@@ -46,6 +46,23 @@ pub(crate) fn malformed(specific: impl Display) -> CompletionError {
     CompletionError::new(kind, format!("{}: {specific}", kind.phrase()))
 }
 
+/// A validating constructor's refusal of parts this crate decoded from a
+/// reply: an `InvalidParts` refusal becomes the `MalformedResponse` the
+/// backend's reply earned, keeping its specific, since another reply may
+/// hold whole parts. Any other failure passes through.
+pub(crate) fn decoded(error: CompletionError) -> CompletionError {
+    let kind = CompletionErrorKind::InvalidParts;
+    if error.kind() != kind {
+        return error;
+    }
+    let message = error.message();
+    let specific = message
+        .strip_prefix(kind.phrase())
+        .and_then(|rest| rest.strip_prefix(": "))
+        .unwrap_or(message);
+    malformed(specific)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +98,23 @@ mod tests {
              model list body exceeds the 8-byte limit"
         );
         assert_eq!(unreadable.detail(), None);
+    }
+
+    #[test]
+    fn a_decoded_parts_refusal_is_a_retryable_malformed_reply_with_its_specific() {
+        use promptforge::model::ToolCall;
+        let refusal = ToolCall::from_parts(" ", "fetch", serde_json::json!({}))
+            .expect_err("a blank id is refused");
+        assert_eq!(refusal.kind(), CompletionErrorKind::InvalidParts);
+        let reply = decoded(refusal);
+        assert_eq!(reply.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(reply.is_retryable());
+        assert_eq!(
+            reply.to_string(),
+            "the model backend sent a reply that could not be understood: tool call id was blank"
+        );
+
+        let passed = decoded(unavailable());
+        assert_eq!(passed.kind(), CompletionErrorKind::Unavailable);
     }
 }

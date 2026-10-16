@@ -25,12 +25,12 @@ use mlua::{
     AnyUserData, Function, LuaSerdeExt, MetaMethod, Table, UserData, UserDataMethods, Value,
     Variadic,
 };
-use promptforge_model_client::client::Message;
+use promptforge_model_client::client::{Message, Role};
 use promptforge_types::ids::RoundId;
 use serde_json::{Map, Value as Json};
 
 use super::{Error, Lua, Result};
-use crate::protocol::{MessageRecord, MessageRole, parse_record};
+use crate::protocol::{MessageRecord, parse_record};
 
 #[path = "messages-view.rs"]
 mod view;
@@ -103,11 +103,7 @@ impl MessageList {
     /// Returns the refusal's message for a late system record.
     pub fn push(&self, record: MessageRecord) -> std::result::Result<(), String> {
         let mut state = self.state();
-        if record.role == MessageRole::System
-            && state
-                .records
-                .iter()
-                .any(|held| held.role != MessageRole::System)
+        if record.role == Role::System && state.records.iter().any(|held| held.role != Role::System)
         {
             return Err(late_system(state.records.len() + 1));
         }
@@ -177,11 +173,11 @@ fn out_of_bounds(first: impl Display, last: impl Display, len: usize) -> String 
 fn check_leading_system(records: &[Arc<MessageRecord>]) -> std::result::Result<(), String> {
     let lead = records
         .iter()
-        .take_while(|record| record.role == MessageRole::System)
+        .take_while(|record| record.role == Role::System)
         .count();
     match records[lead..]
         .iter()
-        .position(|record| record.role == MessageRole::System)
+        .position(|record| record.role == Role::System)
     {
         Some(offset) => Err(late_system(lead + offset + 1)),
         None => Ok(()),
@@ -238,13 +234,13 @@ fn add(list: &MessageList, index: usize, entry: &Json) -> mlua::Result<()> {
 fn build<const N: usize>(
     lua: &Lua,
     this: AnyUserData,
-    role: &str,
+    role: Role,
     fields: [(&str, Value); N],
 ) -> mlua::Result<AnyUserData> {
     let list = handle(&this)?;
     let index = list.len() + 1;
     let mut entry = Map::new();
-    entry.insert("role".to_owned(), Json::from(role));
+    entry.insert("role".to_owned(), Json::from(role.as_str()));
     for (name, value) in fields {
         if !value.is_nil() {
             let value = json(lua, value).map_err(|reason| {
@@ -320,10 +316,10 @@ fn next_record(
 impl UserData for MessageList {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_function("system", |lua, (this, content): (AnyUserData, Value)| {
-            build(lua, this, "system", [("content", content)])
+            build(lua, this, Role::System, [("content", content)])
         });
         methods.add_function("user", |lua, (this, content): (AnyUserData, Value)| {
-            build(lua, this, "user", [("content", content)])
+            build(lua, this, Role::User, [("content", content)])
         });
         methods.add_function(
             "assistant",
@@ -332,7 +328,7 @@ impl UserData for MessageList {
                 build(
                     lua,
                     this,
-                    "assistant",
+                    Role::Assistant,
                     [("content", content), ("tool_calls", tool_calls)],
                 )
             },
@@ -343,7 +339,7 @@ impl UserData for MessageList {
                 build(
                     lua,
                     this,
-                    "tool",
+                    Role::Tool,
                     [("content", content), ("tool_call_id", tool_call_id)],
                 )
             },

@@ -60,6 +60,7 @@ pub mod ids {
     pub use promptforge_types::ids::AbandonReason;
     pub use promptforge_types::ids::ChainId;
     pub use promptforge_types::ids::ParseIdError;
+    pub use promptforge_types::ids::ParseTaskOriginError;
     pub use promptforge_types::ids::Provenance;
     pub use promptforge_types::ids::RoundId;
     pub use promptforge_types::ids::TaskId;
@@ -71,10 +72,13 @@ pub mod model {
     //! bound to, and the chat vocabulary of a model round.
 
     pub use promptforge_engine::ModelBindings;
+    pub use promptforge_model_client::client::ArgumentNames;
     pub use promptforge_model_client::client::Completion;
     pub use promptforge_model_client::client::CompletionResult;
     pub use promptforge_model_client::client::Message;
+    pub use promptforge_model_client::client::ParseRoleError;
     pub use promptforge_model_client::client::RawExchange;
+    pub use promptforge_model_client::client::Role;
     pub use promptforge_model_client::client::ToolArguments;
     pub use promptforge_model_client::client::ToolCall;
     pub use promptforge_model_client::client::ToolSchema;

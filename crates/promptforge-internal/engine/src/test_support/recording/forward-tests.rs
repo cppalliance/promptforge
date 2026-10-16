@@ -15,10 +15,7 @@ use super::*;
 mod variants;
 
 fn provenance() -> Provenance {
-    Provenance {
-        task: TaskId::from(ChainId::root()),
-        seq: 0,
-    }
+    Provenance::new(TaskId::from(ChainId::root()), 0)
 }
 
 #[derive(Default)]

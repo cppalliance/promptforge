@@ -1,5 +1,4 @@
-//! Replay vocabulary: the behavior flags a run records and the two ways a
-//! replay can fail.
+//! Holds the replay vocabulary: recorded behavior flags and replay failures.
 //!
 //! A run is meant to be reproducible from its log: the same run inputs
 //! (seed, `started_at`, flags) and the same answers replayed in order
@@ -9,9 +8,11 @@
 //! [`Flags`] is how an Engine change that alters a recorded run's
 //! behavior stays replayable: it runs the new behavior live and sets its
 //! flag, and a later replay honors the flag only if the original run
-//! recorded it. [`ReplayError`] keeps "the code under replay diverged" apart
-//! from "the record is broken", because each demands a different remedy.
+//! recorded it. The crate-private `ReplayError` keeps "the code under
+//! replay diverged" apart from "the record is broken", because each
+//! demands a different remedy.
 
+use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
 
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ use serde::{Deserialize, Serialize};
 #[path = "replay-tests.rs"]
 mod tests;
 
-/// The set of behavior flags recorded with a run.
+/// Holds the behavior flags recorded with a run.
 ///
 /// The set is a bitset stored as a single `u32`, both when serialized and
 /// in the run record.
@@ -40,14 +41,15 @@ impl Flags {
     /// The empty set, with every bit clear.
     pub const EMPTY: Flags = Flags(0);
 
-    /// Returns the set whose bits are exactly `bits`, including bits for
-    /// flags added in a newer build.
+    /// Returns the set whose bits are exactly `bits`.
+    ///
+    /// It keeps the bits of flags added in a newer build.
     #[must_use]
     pub const fn from_bits(bits: u32) -> Self {
         Self(bits)
     }
 
-    /// The set as its `u32` bits.
+    /// Returns the set as its `u32` bits.
     #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
@@ -80,7 +82,7 @@ impl BitOrAssign for Flags {
     }
 }
 
-/// Why a replay failed.
+/// Classifies why a replay failed.
 ///
 /// The two kinds are properties of different things. `Nondeterminism` is a
 /// property of the code under replay: re-executed against its record, a run
@@ -90,19 +92,39 @@ impl BitOrAssign for Flags {
 /// of the record: the log is malformed or internally inconsistent (an
 /// effect with two answers, a sequence gap, an unparseable payload), so
 /// there is nothing sound to replay against.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ReplayError {
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "no replay reader exists yet; the vocabulary is fixed ahead of it"
+    )
+)]
+pub(crate) enum ReplayError {
     /// The re-executed run or task disagreed with its record.
-    #[error("replay diverged from its record: {detail}")]
+    #[non_exhaustive]
     Nondeterminism {
         /// Where and how the re-execution disagreed.
         detail: String,
     },
     /// The record itself is malformed or internally inconsistent.
-    #[error("replay record is malformed: {detail}")]
+    #[non_exhaustive]
     Fatal {
         /// What is wrong with the record.
         detail: String,
     },
 }
+
+impl fmt::Display for ReplayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReplayError::Nondeterminism { detail } => {
+                write!(f, "replay diverged from its record: {detail}")
+            }
+            ReplayError::Fatal { detail } => write!(f, "replay record is malformed: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for ReplayError {}

@@ -270,12 +270,11 @@ fn one_of_every_event_variant() -> Vec<(Event, Seam)> {
                 turn: 1,
                 round: RoundId::new(0),
                 model: "m".to_owned(),
-                calls: vec![ToolCallEvent {
-                    id: "call_1".to_owned(),
-                    name: "search".to_owned(),
-                    arguments: serde_json::json!({}),
-                    tool: None,
-                }],
+                calls: vec![ToolCallEvent::new(
+                    "call_1",
+                    "search",
+                    serde_json::json!({}),
+                )],
             },
             Seam::Content,
         ),

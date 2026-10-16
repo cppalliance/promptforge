@@ -28,6 +28,5 @@ pub use answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, 
 pub use parse::YieldParse;
 pub(crate) use parse::{NOT_A_LIST, parse_record};
 pub use request::{
-    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole, Request,
-    ToolCallRecord, VfsOp,
+    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request, ToolCallRecord, VfsOp,
 };

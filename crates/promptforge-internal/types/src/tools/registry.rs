@@ -38,25 +38,25 @@ impl std::fmt::Debug for ToolCatalog {
 }
 
 impl ToolCatalog {
-    /// Builds a catalog from tool descriptors.
+    /// Builds a catalog from tool descriptors, keeping the order they are
+    /// given in.
     ///
     /// This is the only place the catalog checks identities.
     ///
     /// # Errors
     /// Returns [`ToolCatalogError::DuplicateId`] if two descriptors share a
     /// [`ToolId`].
-    pub fn new(tools: &[ToolDescriptor]) -> Result<Self, ToolCatalogError> {
+    pub fn new(tools: impl IntoIterator<Item = ToolDescriptor>) -> Result<Self, ToolCatalogError> {
+        let tools: Vec<ToolDescriptor> = tools.into_iter().collect();
         let mut seen = std::collections::BTreeSet::new();
-        for tool in tools {
-            if !seen.insert(tool.id.clone()) {
+        for tool in &tools {
+            if !seen.insert(&tool.id) {
                 return Err(ToolCatalogError::DuplicateId {
                     id: tool.id.clone(),
                 });
             }
         }
         Ok(Self {
-            // `Arc::<[T]>::from(&[T])` clones each element straight into the
-            // ref-counted slice; no intermediate owned `Vec` is allocated first.
             tools: Arc::from(tools),
         })
     }
@@ -84,16 +84,14 @@ pub enum ToolCatalogErrorKind {
     DuplicateId,
 }
 
-/// The error returned when building a [`ToolCatalog`] from the supplied
-/// tools fails.
+/// Reports why building a [`ToolCatalog`] failed.
 ///
 /// Building fails when two tools share an identity. Call
 /// [`kind`](Self::kind) to get a stable classification you can match on.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ToolCatalogError {
     /// The same stable identity was supplied by more than one tool.
-    #[error("duplicate tool identity {id:?} in the tool catalog")]
     #[non_exhaustive]
     DuplicateId {
         /// The stable identity supplied more than once.
@@ -118,3 +116,15 @@ impl ToolCatalogError {
         }
     }
 }
+
+impl std::fmt::Display for ToolCatalogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolCatalogError::DuplicateId { id } => {
+                write!(f, "duplicate tool identity `{id}` in the tool catalog")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ToolCatalogError {}

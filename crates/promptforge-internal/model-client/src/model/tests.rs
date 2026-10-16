@@ -12,6 +12,16 @@ fn gateway_id(name: &str) -> ModelId {
     ModelId::gateway(name).expect("test model alias is valid")
 }
 
+fn binding(alias: &str) -> ModelBinding {
+    ModelBinding::new(
+        alias,
+        "a model",
+        gateway_id(alias),
+        ModelInvocation::new(),
+        ctx(8_192),
+    )
+}
+
 #[test]
 fn same_weights_different_invocation_compare_unequal() {
     let id = gateway_id("analyst");
@@ -19,26 +29,40 @@ fn same_weights_different_invocation_compare_unequal() {
         "cool",
         "careful analysis",
         id.clone(),
-        ModelInvocation {
-            temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
-            max_tokens: None,
-            thinking: Some(false),
-        },
+        ModelInvocation::new()
+            .with_temperature(Some(Temperature::new(0.0).expect("0.0 is valid")))
+            .with_thinking(Some(false)),
         ctx(131_072),
     );
     let b = ModelBinding::new(
         "warm",
         "careful analysis",
         id,
-        ModelInvocation {
-            temperature: Some(Temperature::new(0.7).expect("0.7 is valid")),
-            max_tokens: None,
-            thinking: Some(false),
-        },
+        ModelInvocation::new()
+            .with_temperature(Some(Temperature::new(0.7).expect("0.7 is valid")))
+            .with_thinking(Some(false)),
         ctx(131_072),
     );
     assert_eq!(a.id(), b.id());
     assert_ne!(a.invocation(), b.invocation());
+}
+
+#[test]
+fn a_new_invocation_sets_nothing_and_each_setter_sets_its_field() {
+    let bare = ModelInvocation::new();
+    assert_eq!(bare, ModelInvocation::default());
+    assert_eq!(
+        (bare.temperature, bare.max_tokens, bare.thinking),
+        (None, None, None)
+    );
+    let cap = NonZeroU32::new(256).expect("256 is non-zero");
+    let set = ModelInvocation::new()
+        .with_temperature(Some(Temperature::new(0.2).expect("0.2 is valid")))
+        .with_max_tokens(Some(cap))
+        .with_thinking(Some(true));
+    assert_eq!(set.temperature.map(Temperature::get), Some(0.2));
+    assert_eq!(set.max_tokens, Some(cap));
+    assert_eq!(set.thinking, Some(true));
 }
 
 #[test]
@@ -47,16 +71,38 @@ fn binding_construction_is_atomic_with_context() {
         "remote",
         "a remote model",
         gateway_id("remote"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelInvocation::new(),
         ctx(64_000),
     );
     let opts = binding.completion_options();
     assert_eq!(opts.model, "remote");
     assert_eq!(binding.context().get(), 64_000);
+}
+
+#[test]
+fn a_model_set_grows_by_push_and_takes_its_default_alias_by_setter() {
+    let mut set = ModelSet::default();
+    assert!(set.bindings().is_empty());
+    assert_eq!(set.default_alias(), None);
+    set.push(binding("writer"));
+    set.push(binding("critic"));
+    set.set_default_alias("writer".to_owned());
+    assert_eq!(
+        set.bindings()
+            .iter()
+            .map(ModelBinding::alias)
+            .collect::<Vec<_>>(),
+        ["writer", "critic"],
+        "push keeps declaration order"
+    );
+    assert_eq!(set.default_alias(), Some("writer"));
+    assert_eq!(
+        set,
+        ModelSet::from_parts(
+            vec![binding("writer"), binding("critic")],
+            Some("writer".to_owned())
+        )
+    );
 }
 
 #[test]

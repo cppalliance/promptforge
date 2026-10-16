@@ -3,8 +3,7 @@
 //! userdata, and each step's action.
 
 use mlua::{Function, Lua, MultiValue, Value};
-use promptforge_model_client::model::{ModelBinding, ModelInvocation};
-use promptforge_types::detail::model_id_from_validated;
+use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
 use promptforge_types::metrics::ToolCallEvent;
 use promptforge_types::tools::ToolId;
 use serde_json::json;
@@ -21,12 +20,7 @@ use crate::protocol::{Answer, ChatResult, LocalToolOutcome, Request, YieldParse}
 
 /// A requested call named `echo`, its arguments naming its id.
 pub(super) fn echo_call(id: &str) -> ToolCallEvent {
-    ToolCallEvent {
-        id: id.to_owned(),
-        name: "echo".to_owned(),
-        arguments: json!({ "id": id }),
-        tool: None,
-    }
+    ToolCallEvent::new(id, "echo", json!({ "id": id }))
 }
 
 /// A served round with no product, under turn 7.
@@ -47,12 +41,8 @@ fn handle(lua: &Lua) -> Value {
     let binding = ModelBinding::new(
         "fast",
         "a test model",
-        model_id_from_validated("gateway", "m1"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelId::gateway("m1").expect("a static model id is valid"),
+        ModelInvocation::new(),
         std::num::NonZeroU32::MIN,
     );
     Value::UserData(
@@ -154,10 +144,9 @@ fn envelope_failure_keeps_an_error_table_and_wraps_anything_else() {
 fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
     let lua = Lua::new();
     let served = ChatResult {
-        tool_calls: Some(vec![ToolCallEvent {
-            tool: Some(ToolId::parse("web/fetch").unwrap()),
-            ..echo_call("c1")
-        }]),
+        tool_calls: Some(vec![
+            echo_call("c1").with_tool(Some(ToolId::parse("web/fetch").unwrap())),
+        ]),
         finish_reason: Some("tool_calls".to_owned()),
         ..round()
     };

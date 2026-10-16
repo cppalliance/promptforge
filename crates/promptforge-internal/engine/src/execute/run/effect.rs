@@ -21,7 +21,6 @@
 
 use std::sync::Arc;
 
-use promptforge_model_client::detail::tool_schema_name;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
@@ -193,7 +192,7 @@ impl Effect {
                     messages: messages.iter().skip(kept).map(wire_value).collect(),
                     tools: tools
                         .iter()
-                        .map(|schema| tool_schema_name(schema).to_owned())
+                        .map(|schema| schema.name().to_owned())
                         .collect(),
                     temperature: invocation.temperature.map(Temperature::get),
                     max_tokens: invocation.max_tokens.map(std::num::NonZeroU32::get),

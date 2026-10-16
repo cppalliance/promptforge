@@ -12,8 +12,7 @@ use std::num::NonZeroU32;
 use mlua::{AnyUserData, Function, Lua, MultiValue, Value};
 use serde_json::json;
 
-use promptforge_model_client::model::{ModelBinding, ModelInvocation};
-use promptforge_types::detail::model_id_from_validated;
+use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
 use crate::{Error, LuaModelHandle};
@@ -30,12 +29,8 @@ fn test_binding() -> ModelBinding {
     ModelBinding::new(
         "fast",
         "a fast model",
-        model_id_from_validated("gateway", "test-model"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelId::gateway("test-model").expect("a static model id is valid"),
+        ModelInvocation::new(),
         NonZeroU32::new(4096).expect("4096 is non-zero"),
     )
 }

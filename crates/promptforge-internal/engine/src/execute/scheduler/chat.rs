@@ -25,10 +25,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use promptforge_model_client::client::Role;
 use promptforge_model_client::detail::tool_call_arguments;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult, MessageContent, MessageRecord, MessageRole};
+use crate::execute::protocol::{Answer, ChatResult, MessageContent, MessageRecord};
 use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
@@ -65,7 +66,7 @@ fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
 /// A model-task notice as the user record the round carries it in.
 fn notice_record(notice: String) -> MessageRecord {
     MessageRecord {
-        role: MessageRole::User,
+        role: Role::User,
         content: MessageContent::Text(notice),
         tool_calls: Vec::new(),
         tool_call_id: None,
@@ -378,14 +379,12 @@ impl ArrivedRound {
     ) -> Result<ChatResult> {
         let events: Vec<ToolCallEvent> = calls
             .iter()
-            .map(|call| ToolCallEvent {
-                id: call.id().to_owned(),
-                name: call.name().to_owned(),
-                arguments: tool_call_arguments(call).clone(),
-                tool: match advertised.get(call.name()) {
-                    Some(DispatchTarget::Bound(tool)) => Some(tool.clone()),
-                    _ => None,
-                },
+            .map(|call| {
+                ToolCallEvent::new(call.id(), call.name(), tool_call_arguments(call).clone())
+                    .with_tool(match advertised.get(call.name()) {
+                        Some(DispatchTarget::Bound(tool)) => Some(tool.clone()),
+                        _ => None,
+                    })
             })
             .collect();
         self.emitter

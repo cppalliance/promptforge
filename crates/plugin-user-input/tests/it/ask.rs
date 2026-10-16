@@ -31,10 +31,10 @@ struct Failing;
 #[async_trait::async_trait]
 impl InputBroker for Failing {
     async fn wait(&self) -> Result<String, ToolError> {
-        Err(ToolError::with_source(
-            "the operator's window closed",
-            std::io::Error::other("socket reset"),
-        ))
+        Err(
+            ToolError::new(ToolErrorKind::Backend, "the operator's window closed")
+                .with_source(std::io::Error::other("socket reset")),
+        )
     }
 }
 

@@ -173,16 +173,14 @@ pub async fn read_completion_stream<S: ChunkSource>(
             "completion stream ended without the [DONE] sentinel",
         ));
     }
-    let client_timing = ClientTiming {
-        ttft_ms: first_delta.map(|at| duration_ms(at.duration_since(started))),
-        mean_itl_ms: match (first_delta, last_delta) {
+    let client_timing = ClientTiming::new(duration_ms(now().duration_since(started)))
+        .with_ttft_ms(first_delta.map(|at| duration_ms(at.duration_since(started))))
+        .with_mean_itl_ms(match (first_delta, last_delta) {
             (Some(first), Some(last)) if delta_chunks >= 2 => Some(round_to_microsecond(
                 duration_ms(last.duration_since(first)) / f64::from(delta_chunks - 1),
             )),
             _ => None,
-        },
-        e2e_ms: duration_ms(now().duration_since(started)),
-    };
+        });
     // The truncation rule, the strict turn normalizer, and the lenient
     // metadata parser all run inside `finish`: one rule set for every
     // transport.

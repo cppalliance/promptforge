@@ -39,6 +39,9 @@ pub enum CompletionErrorKind {
     EmptyReply,
     /// Model access is turned off or lacks a configuration. Permanent.
     Unavailable,
+    /// A caller built a tool call or completion from parts the validating
+    /// constructors refuse. Permanent.
+    InvalidParts,
 }
 
 impl CompletionErrorKind {
@@ -49,8 +52,9 @@ impl CompletionErrorKind {
     /// a failure that came from an HTTP status, it appends ` (status N)`. A
     /// 401 or 403 is `Unavailable`, and its message uses the phrase
     /// `the model backend did not accept the credentials`. Only
-    /// `MalformedResponse`, `EmptyReply`, and `Unavailable` may extend the
-    /// phrase with `: ` and specific text that the caller's own code wrote.
+    /// `MalformedResponse`, `EmptyReply`, `Unavailable`, and `InvalidParts`
+    /// may extend the phrase with `: ` and specific text that the caller's
+    /// own code wrote.
     /// Provider text never enters the message. It goes in the
     /// [`detail`](CompletionError::detail).
     #[must_use]
@@ -76,6 +80,7 @@ impl CompletionErrorKind {
             }
             CompletionErrorKind::EmptyReply => "the model replied with no text and no tool calls",
             CompletionErrorKind::Unavailable => "model access is turned off or not configured",
+            CompletionErrorKind::InvalidParts => "the completion was built from invalid parts",
         }
     }
 
@@ -114,9 +119,9 @@ impl CompletionErrorKind {
 /// HTTP status, the caller appends ` (status N)`. A 401 or 403 is
 /// `Unavailable`, and its message uses the phrase
 /// `the model backend did not accept the credentials`. `MalformedResponse`,
-/// `EmptyReply`, and `Unavailable` may extend the message with `: ` and
-/// specific text that the caller's own code wrote, such as the byte limit
-/// that was hit. Provider text never enters the message. It goes in the
+/// `EmptyReply`, `Unavailable`, and `InvalidParts` may extend the message
+/// with `: ` and specific text that the caller's own code wrote, such as
+/// the byte limit that was hit. Provider text never enters the message. It goes in the
 /// [`detail`](CompletionError::detail).
 #[derive(Debug)]
 #[non_exhaustive]
@@ -138,8 +143,9 @@ impl CompletionError {
     /// that came from an HTTP status, it appends ` (status N)`. A 401 or 403
     /// is `Unavailable`, and its message uses the phrase
     /// `the model backend did not accept the credentials`. For
-    /// `MalformedResponse`, `EmptyReply`, and `Unavailable`, the caller may
-    /// extend the phrase with `: ` and specific text that its own code wrote.
+    /// `MalformedResponse`, `EmptyReply`, `Unavailable`, and `InvalidParts`,
+    /// the caller may extend the phrase with `: ` and specific text that its
+    /// own code wrote.
     /// Provider text never enters the message. The caller passes it to
     /// [`with_detail`](CompletionError::with_detail).
     #[must_use]
@@ -210,10 +216,9 @@ impl CompletionError {
         CompletionError::new(kind, format!("{}: {specific}", kind.phrase()))
     }
 
-    /// Builds a `MalformedResponse` failure naming what was wrong with the
-    /// reply.
-    pub(crate) fn malformed(specific: impl std::fmt::Display) -> CompletionError {
-        CompletionError::specific(CompletionErrorKind::MalformedResponse, specific)
+    /// Builds an `InvalidParts` failure naming which part was refused.
+    pub(crate) fn invalid_parts(specific: impl std::fmt::Display) -> CompletionError {
+        CompletionError::specific(CompletionErrorKind::InvalidParts, specific)
     }
 
     /// Returns the kind of this failure.

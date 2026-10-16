@@ -167,11 +167,7 @@ fn a_script_offers_the_extras_and_the_model_calls_an_offered_tool_by_its_wire_na
             tool: ToolId::parse("tools/echo").expect("valid id"),
             alias: "tools_echo".to_owned(),
             args: json!({ "value": "hi" }),
-            origin: ToolCallOrigin {
-                execution: EXECUTION.to_owned(),
-                section: "Only".to_owned(),
-                caller: ToolCaller::Model,
-            },
+            origin: ToolCallOrigin::new(EXECUTION, "Only", ToolCaller::Model),
         }]
     );
 }
@@ -189,11 +185,7 @@ fn a_script_calls_an_offered_tool_by_its_object_and_by_its_id_without_offering_i
         tool: ToolId::parse("tools/echo").expect("valid id"),
         alias: "tools_echo".to_owned(),
         args: json!({ "value": value }),
-        origin: ToolCallOrigin {
-            execution: EXECUTION.to_owned(),
-            section: "Only".to_owned(),
-            caller: ToolCaller::Script,
-        },
+        origin: ToolCallOrigin::new(EXECUTION, "Only", ToolCaller::Script),
     };
     assert_eq!(rig.issued(), vec![call("a"), call("b")]);
 }
@@ -222,11 +214,7 @@ fn model_call(id: &str, alias: &str, value: &str) -> EffectRecord {
         tool: ToolId::parse(id).expect("valid id"),
         alias: alias.to_owned(),
         args: json!({ "value": value }),
-        origin: ToolCallOrigin {
-            execution: EXECUTION.to_owned(),
-            section: "Only".to_owned(),
-            caller: ToolCaller::Model,
-        },
+        origin: ToolCallOrigin::new(EXECUTION, "Only", ToolCaller::Model),
     }
 }
 
@@ -323,7 +311,7 @@ fn a_round_leaves_out_an_offered_binding_a_local_tool_shares_a_name_with() {
     let (schemas, dispatch) =
         prepare_scoped_tools(&[offered], &[local]).expect("the round's scope builds");
     assert_eq!(schemas.len(), 1, "the model sees one tool under the name");
-    assert_eq!(tool_schema_description(&schemas[0]), "the local echo");
+    assert_eq!(schemas[0].description(), "the local echo");
     assert!(
         matches!(dispatch.get("tools_echo"), Some(DispatchTarget::Local)),
         "the local tool answers the name: {dispatch:?}"

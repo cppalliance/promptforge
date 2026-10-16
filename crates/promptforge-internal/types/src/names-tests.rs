@@ -41,12 +41,9 @@ fn display_round_trips_a_multi_segment_name() {
 }
 
 #[test]
-fn the_first_segment_is_a_one_segment_name() {
+fn the_first_segment_is_borrowed_from_the_name() {
     let name = GlobalName::parse("web/fetch/deep").expect("a valid name");
-    assert_eq!(
-        name.first(),
-        GlobalName::parse("web").expect("a valid name")
-    );
+    assert_eq!(name.first(), "web");
 }
 
 #[test]
@@ -75,22 +72,36 @@ fn a_trailing_separator_is_rejected_as_an_empty_error() {
 }
 
 #[test]
-fn uppercase_is_rejected_because_comparison_is_case_sensitive() {
-    assert_eq!(kind_of("Web"), GlobalNameErrorKind::Control);
-    assert_eq!(kind_of("web/Fetch"), GlobalNameErrorKind::Control);
+fn uppercase_is_rejected_as_a_charset_error_because_comparison_is_case_sensitive() {
+    assert_eq!(kind_of("Web"), GlobalNameErrorKind::Charset);
+    assert_eq!(kind_of("web/Fetch"), GlobalNameErrorKind::Charset);
 }
 
 #[test]
-fn an_at_sign_is_rejected_because_v1_is_unversioned() {
-    assert_eq!(kind_of("web@2"), GlobalNameErrorKind::Control);
+fn an_at_sign_is_rejected_as_a_charset_error_because_v1_is_unversioned() {
+    assert_eq!(kind_of("web@2"), GlobalNameErrorKind::Charset);
 }
 
 #[test]
 fn a_control_character_is_rejected_as_a_control_error() {
     assert_eq!(kind_of("we\tb"), GlobalNameErrorKind::Control);
+    assert_eq!(kind_of("web\u{7f}"), GlobalNameErrorKind::Control);
 }
 
 #[test]
-fn non_ascii_is_rejected_as_a_control_error() {
-    assert_eq!(kind_of("w\u{e9}b"), GlobalNameErrorKind::Control);
+fn non_ascii_is_rejected_as_a_charset_error() {
+    assert_eq!(kind_of("w\u{e9}b"), GlobalNameErrorKind::Charset);
+}
+
+#[test]
+fn from_str_parses_like_parse() {
+    let parsed: GlobalName = "web/fetch".parse().expect("a valid name parses");
+    assert_eq!(
+        parsed,
+        GlobalName::parse("web/fetch").expect("a valid name")
+    );
+    let error = "Web"
+        .parse::<GlobalName>()
+        .expect_err("uppercase is rejected");
+    assert_eq!(error.kind(), GlobalNameErrorKind::Charset);
 }

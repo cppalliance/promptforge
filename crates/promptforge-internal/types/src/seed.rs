@@ -20,23 +20,23 @@ const RUN_UID_DOMAIN: &[u8] = b"promptforge.run-uid.v1";
 /// What a run seed's text form must be, for a refusal to name.
 const REQUIRED: &str = "a run seed is 64 lowercase hex characters";
 
-/// A run's seed: 32 bytes the caller supplies, the source of every value
-/// derived for the run.
+/// Holds the 32 bytes the caller supplies to seed a run.
 ///
-/// `Display` and serde use 64 lowercase hex characters. `Debug` prints
-/// `RunSeed(..)` with no bytes, so a trace, panic, or test failure never
-/// shows the seed, from which anyone could compute the run's nonce.
+/// Every value derived for the run comes from the seed. `Display` and serde
+/// use 64 lowercase hex characters. `Debug` prints `RunSeed(..)` with no
+/// bytes, so a trace, panic, or test failure never shows the seed, from
+/// which anyone could compute the run's nonce.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RunSeed([u8; 32]);
 
 impl RunSeed {
-    /// The seed whose bytes are `bytes`.
+    /// Returns the seed whose bytes are `bytes`.
     #[must_use]
     pub const fn from_bytes(bytes: [u8; 32]) -> RunSeed {
         RunSeed(bytes)
     }
 
-    /// The seed's 32 bytes.
+    /// Returns the seed's 32 bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
@@ -87,13 +87,12 @@ pub fn derive(domain: &[u8], seed: &RunSeed) -> [u8; 32] {
     out
 }
 
-/// A run's id: 32 bytes derived from its seed under
-/// `promptforge.run-uid.v1`.
+/// Identifies a run by 32 bytes derived from its seed.
 ///
-/// The id is never the seed itself, so it can appear in logs, records, and
-/// views without revealing the seed or the nonce. A replay passes back the
-/// recorded seed, so it reproduces the id. `Display` renders 64 lowercase
-/// hex characters.
+/// The derivation is tagged `promptforge.run-uid.v1`. The id is never the
+/// seed itself, so it can appear in logs, records, and views without
+/// revealing the seed or the nonce. A replay passes back the recorded seed,
+/// so it reproduces the id. `Display` renders 64 lowercase hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RunUid([u8; 32]);
 

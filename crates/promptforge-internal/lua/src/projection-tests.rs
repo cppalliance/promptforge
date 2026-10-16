@@ -1,18 +1,19 @@
 //! Tests for projecting Lua message records onto the wire conversation shape.
 
 use mlua::{Lua, Value};
+use promptforge_model_client::client::Role;
 use serde_json::json;
 
 use super::project_messages;
 use crate::Error;
 use crate::protocol::{
-    ContentPart, MessageContent, MessageRecord, MessageRole, Request, ToolCallRecord, YieldParse,
+    ContentPart, MessageContent, MessageRecord, Request, ToolCallRecord, YieldParse,
 };
 use crate::tests::{assistant, system, user};
 
 fn tool(id: &str, text: &str) -> MessageRecord {
     MessageRecord {
-        role: MessageRole::Tool,
+        role: Role::Tool,
         content: MessageContent::Text(text.to_owned()),
         tool_calls: Vec::new(),
         tool_call_id: Some(id.to_owned()),
@@ -29,7 +30,7 @@ fn call(id: &str, name: &str) -> ToolCallRecord {
 
 fn assistant_calls(text: &str, calls: Vec<ToolCallRecord>) -> MessageRecord {
     MessageRecord {
-        role: MessageRole::Assistant,
+        role: Role::Assistant,
         content: MessageContent::Text(text.to_owned()),
         tool_calls: calls,
         tool_call_id: None,
@@ -110,7 +111,7 @@ fn multiple_leading_system_messages_compose_into_one_without_mutating_the_source
 #[test]
 fn a_single_leading_system_message_passes_through_verbatim() {
     let parts = MessageRecord {
-        role: MessageRole::System,
+        role: Role::System,
         content: MessageContent::Parts(vec![
             ContentPart::Text("look".to_owned()),
             ContentPart::ImageUrl("data:image/png;base64,AA".to_owned()),
@@ -168,7 +169,7 @@ fn streaming_fragments_coalesce_into_one_assistant_result() {
     let mixed = vec![
         assistant(""),
         MessageRecord {
-            role: MessageRole::Assistant,
+            role: Role::Assistant,
             content: MessageContent::Parts(vec![ContentPart::Text("a".to_owned())]),
             tool_calls: Vec::new(),
             tool_call_id: None,
@@ -367,7 +368,7 @@ fn malformed_records_fail_at_projection_naming_the_index() {
         "messages[2] is a system message outside the leading system block"
     );
     let parts_system = MessageRecord {
-        role: MessageRole::System,
+        role: Role::System,
         content: MessageContent::Parts(vec![ContentPart::Text("look".to_owned())]),
         tool_calls: Vec::new(),
         tool_call_id: None,

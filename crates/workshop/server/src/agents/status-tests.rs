@@ -37,10 +37,7 @@ fn reply_event() -> Event {
     Event::AssistantReply {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
-        provenance: Provenance {
-            task: TaskId::from(ChainId::root()),
-            seq: 0,
-        },
+        provenance: Provenance::new(TaskId::from(ChainId::root()), 0),
         turn: 1,
         round: RoundId::new(0),
         text: "hello".to_owned(),
@@ -178,10 +175,7 @@ fn a_lifecycle_event_pushes_nothing() {
     let started = Event::SectionStarted {
         execution: "run".to_owned(),
         section: "chat".to_owned(),
-        provenance: Provenance {
-            task: TaskId::from(ChainId::root()),
-            seq: 0,
-        },
+        provenance: Provenance::new(TaskId::from(ChainId::root()), 0),
     };
 
     on_event(&session_event(&started), &push, &backoff);

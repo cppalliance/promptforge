@@ -89,20 +89,31 @@ impl fmt::Display for ChainId {
 ///
 /// A valid path is one or more components joined by dots, such as `0.2.0`.
 /// Each component is plain decimal digits that fit in a `u32`.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid chain id `{input}`: required a dot-separated path of decimal components")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseIdError {
     /// The rejected text.
     input: String,
 }
 
 impl ParseIdError {
-    /// The rejected text.
+    /// Returns the rejected text.
     #[must_use]
     pub fn input(&self) -> &str {
         &self.input
     }
 }
+
+impl fmt::Display for ParseIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid chain id `{}`: required a dot-separated path of decimal components",
+            self.input
+        )
+    }
+}
+
+impl std::error::Error for ParseIdError {}
 
 impl FromStr for ChainId {
     type Err = ParseIdError;
@@ -202,6 +213,7 @@ impl<'de> Deserialize<'de> for TaskId {
 ///
 /// Orders by task path, then by sequence.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Provenance {
     /// The nearest enclosing task.
     pub task: TaskId,
@@ -209,29 +221,36 @@ pub struct Provenance {
     pub seq: u32,
 }
 
-/// The id of one model round: its position in the run's dispatch order,
-/// counting from 0.
+impl Provenance {
+    /// Builds the replay key of the item at position `seq` in `task`.
+    #[must_use]
+    pub fn new(task: TaskId, seq: u32) -> Provenance {
+        Provenance { task, seq }
+    }
+}
+
+/// Numbers one model round by its position in the run's dispatch order.
 ///
-/// One counter for the whole run numbers every round, both a section's chat
-/// rounds and its nested `models.infer` rounds. A round's `Chat` effect
-/// holds its id, and so do the thinking, reply, and tool-call events
-/// reported from the round's answer. The caller can use the id to pair the
-/// partial output it shows while a round runs with the events that report
-/// the round's answer. When tasks run concurrently, the order in which
-/// the caller answers effects can change which round gets which number.
-/// Serializes as a bare number.
+/// Rounds count from 0. One counter for the whole run numbers every round,
+/// both a section's chat rounds and its nested `models.infer` rounds. A
+/// round's `Chat` effect holds its id, and so do the thinking, reply, and
+/// tool-call events reported from the round's answer. The caller can use
+/// the id to pair the partial output it shows while a round runs with the
+/// events that report the round's answer. When tasks run concurrently, the
+/// order in which the caller answers effects can change which round gets
+/// which number. Serializes as a bare number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RoundId(u64);
 
 impl RoundId {
-    /// The round numbered `id`.
+    /// Returns the round numbered `id`.
     #[must_use]
     pub const fn new(id: u64) -> Self {
         Self(id)
     }
 
-    /// The round's number.
+    /// Returns the round's number.
     #[must_use]
     pub const fn get(self) -> u64 {
         self.0
@@ -258,7 +277,7 @@ pub enum TaskOrigin {
 }
 
 impl TaskOrigin {
-    /// The origin's tag as Lua code writes it: `author` or `model`.
+    /// Returns the origin's tag as Lua code writes it: `author` or `model`.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -267,17 +286,56 @@ impl TaskOrigin {
         }
     }
 
-    /// Parses a tag that is exactly `author` or `model`. Returns `None` for
-    /// any other text.
-    #[must_use]
-    pub fn from_tag(tag: &str) -> Option<Self> {
-        match tag {
-            "author" => Some(TaskOrigin::Author),
-            "model" => Some(TaskOrigin::Model),
-            _ => None,
-        }
+    /// Every origin, in declaration order.
+    const ALL: [TaskOrigin; 2] = [TaskOrigin::Author, TaskOrigin::Model];
+}
+
+impl FromStr for TaskOrigin {
+    type Err = ParseTaskOriginError;
+
+    /// Parses a tag that is exactly `author` or `model`, never case-folded.
+    fn from_str(tag: &str) -> Result<Self, Self::Err> {
+        TaskOrigin::ALL
+            .into_iter()
+            .find(|origin| origin.tag() == tag)
+            .ok_or_else(|| ParseTaskOriginError {
+                input: tag.to_owned(),
+            })
     }
 }
+
+/// The error returned when text is not a [`TaskOrigin`] tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseTaskOriginError {
+    /// The rejected text.
+    input: String,
+}
+
+impl ParseTaskOriginError {
+    /// Returns the rejected text.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
+    }
+}
+
+impl fmt::Display for ParseTaskOriginError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid task origin `{}`: required ", self.input)?;
+        let last = TaskOrigin::ALL.len() - 1;
+        for (position, origin) in TaskOrigin::ALL.into_iter().enumerate() {
+            match position {
+                0 => {}
+                _ if position == last => f.write_str(" or ")?,
+                _ => f.write_str(", ")?,
+            }
+            write!(f, "`{}`", origin.tag())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ParseTaskOriginError {}
 
 /// Why a live task was abandoned: how its owner chain ended while the task
 /// was still running.

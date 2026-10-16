@@ -1,7 +1,5 @@
 //! Tests for the neutral reply checks, driven through the validating
-//! constructors that run them: each check's kind and exact message, which a
-//! wire decoder building its calls through those constructors reports
-//! verbatim.
+//! constructors that run them: each check's kind and exact message.
 
 use serde_json::json;
 
@@ -9,7 +7,7 @@ use super::*;
 use crate::client::{Completion, CompletionResult, ToolCall};
 
 const EMPTY_REPLY_PHRASE: &str = "the model replied with no text and no tool calls";
-const MALFORMED_PHRASE: &str = "the model backend sent a reply that could not be understood";
+const INVALID_PARTS_PHRASE: &str = "the completion was built from invalid parts";
 
 /// The kind and message `ToolCall::from_parts` refuses these parts with.
 fn refusal(id: &str, name: &str, arguments: Value) -> (CompletionErrorKind, String) {
@@ -22,8 +20,8 @@ fn blank_tool_call_id_is_rejected() {
     assert_eq!(
         refusal("   ", "ping", json!({})),
         (
-            CompletionErrorKind::MalformedResponse,
-            format!("{MALFORMED_PHRASE}: tool call id was blank")
+            CompletionErrorKind::InvalidParts,
+            format!("{INVALID_PARTS_PHRASE}: tool call id was blank")
         )
     );
 }
@@ -33,8 +31,8 @@ fn blank_tool_call_name_is_rejected() {
     assert_eq!(
         refusal("call_1", "\t", json!({})),
         (
-            CompletionErrorKind::MalformedResponse,
-            format!("{MALFORMED_PHRASE}: tool call name was blank")
+            CompletionErrorKind::InvalidParts,
+            format!("{INVALID_PARTS_PHRASE}: tool call name was blank")
         )
     );
 }
@@ -45,8 +43,8 @@ fn non_object_arguments_are_rejected() {
         assert_eq!(
             refusal("call_arr", "ping", arguments),
             (
-                CompletionErrorKind::MalformedResponse,
-                format!("{MALFORMED_PHRASE}: tool call arguments were not a JSON object")
+                CompletionErrorKind::InvalidParts,
+                format!("{INVALID_PARTS_PHRASE}: tool call arguments were not a JSON object")
             )
         );
     }
@@ -58,10 +56,10 @@ fn duplicate_tool_call_ids_are_rejected() {
     let error =
         Completion::from_result(CompletionResult::ToolCalls(vec![call("a"), call("b")]), "m")
             .expect_err("two calls sharing an id are refused");
-    assert_eq!(error.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(error.kind(), CompletionErrorKind::InvalidParts);
     assert_eq!(
         error.to_string(),
-        format!("{MALFORMED_PHRASE}: duplicate tool call id \"dup\" within one turn")
+        format!("{INVALID_PARTS_PHRASE}: duplicate tool call id \"dup\" within one turn")
     );
 }
 

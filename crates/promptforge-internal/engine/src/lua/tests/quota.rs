@@ -44,12 +44,11 @@ fn tool_call_round() -> Answer<Error> {
         overflow_reason: None,
         reply: None,
         empty_detail: None,
-        tool_calls: Some(vec![ToolCallEvent {
-            id: "call_1".to_owned(),
-            name: "tools_echo".to_owned(),
-            arguments: json!({ "value": "hi" }),
-            tool: None,
-        }]),
+        tool_calls: Some(vec![ToolCallEvent::new(
+            "call_1",
+            "tools_echo",
+            json!({ "value": "hi" }),
+        )]),
         finish_reason: Some("tool_calls".to_owned()),
         turn: 1,
     })))

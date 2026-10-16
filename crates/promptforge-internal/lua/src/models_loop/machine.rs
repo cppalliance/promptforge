@@ -14,12 +14,13 @@
 
 use std::collections::BTreeMap;
 
+use promptforge_model_client::client::Role;
 use promptforge_types::metrics::ToolCallEvent;
 
 use crate::compactors::OverflowReason;
 use crate::error_value::{ErrorField, ErrorKind, Raised};
 use crate::messages::MessageList;
-use crate::protocol::{ChatResult, MessageContent, MessageRecord, MessageRole, ToolCallRecord};
+use crate::protocol::{ChatResult, MessageContent, MessageRecord, ToolCallRecord};
 
 /// The message the empty-reply rule raises when the answer names no
 /// empty detail.
@@ -260,11 +261,11 @@ impl<V: Clone> Machine<V> {
             return self.next_call();
         }
         if let Some(reply) = round.reply.filter(|reply| !reply.is_empty()) {
-            let record = text_record(MessageRole::Assistant, reply);
+            let record = text_record(Role::Assistant, reply);
             return self.push(vec![record], |_| Then::Return);
         }
         if round.finish_reason.as_deref() == Some("stop") && self.answered > 0 {
-            let record = text_record(MessageRole::Assistant, String::new());
+            let record = text_record(Role::Assistant, String::new());
             return self.push(vec![record], |_| Then::Return);
         }
         let mut empty = raised(ErrorKind::EmptyModelReply, EMPTY_MODEL_REPLY);
@@ -315,7 +316,7 @@ impl<V: Clone> Machine<V> {
         let calls = std::mem::take(&mut self.calls);
         let results = std::mem::take(&mut self.results);
         self.answered += calls.len();
-        let mut assistant = text_record(MessageRole::Assistant, String::new());
+        let mut assistant = text_record(Role::Assistant, String::new());
         assistant.tool_calls = calls
             .iter()
             .map(|call| ToolCallRecord {
@@ -326,7 +327,7 @@ impl<V: Clone> Machine<V> {
             .collect();
         let mut records = vec![assistant];
         records.extend(calls.into_iter().zip(results).map(|(call, result)| {
-            let mut record = text_record(MessageRole::Tool, result);
+            let mut record = text_record(Role::Tool, result);
             record.tool_call_id = Some(call.id);
             record
         }));
@@ -352,7 +353,7 @@ impl<V: Clone> Machine<V> {
 }
 
 /// A record of `role` holding the plain text `content`.
-fn text_record(role: MessageRole, content: String) -> MessageRecord {
+fn text_record(role: Role, content: String) -> MessageRecord {
     MessageRecord {
         role,
         content: MessageContent::Text(content),

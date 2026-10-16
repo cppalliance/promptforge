@@ -90,7 +90,7 @@ impl HostRunContext {
 
     /// Every usable Plugin's tools, declared by the prompt or not.
     pub(crate) fn catalog(&self) -> ToolCatalog {
-        let tools: Vec<ToolDescriptor> = self
+        let tools = self
             .plugins
             .values()
             .filter_map(|plugin| match plugin {
@@ -98,9 +98,8 @@ impl HostRunContext {
                 RunPlugin::Unavailable(_) | RunPlugin::NeedsUnmet(_) => None,
             })
             .flatten()
-            .cloned()
-            .collect();
-        ToolCatalog::new(&tools).unwrap_or_else(|error| {
+            .cloned();
+        ToolCatalog::new(tools).unwrap_or_else(|error| {
             // Every tool passed containment and uniqueness validation one
             // at a time, so this build cannot fail.
             tracing::warn!(%error, "the run's catalog failed after per-tool validation");

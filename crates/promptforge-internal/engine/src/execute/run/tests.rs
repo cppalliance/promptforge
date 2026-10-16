@@ -34,11 +34,10 @@ fn run_context() -> RunContext {
 
 fn binding() -> ModelBinding {
     test_binding("writer", "A general model for tests", "test-model").with_invocation(
-        ModelInvocation {
-            temperature: Some(Temperature::new(0.2).expect("0.2 is in range")),
-            max_tokens: NonZeroU32::new(256),
-            thinking: Some(false),
-        },
+        ModelInvocation::new()
+            .with_temperature(Some(Temperature::new(0.2).expect("0.2 is in range")))
+            .with_max_tokens(NonZeroU32::new(256))
+            .with_thinking(Some(false)),
     )
 }
 
@@ -113,11 +112,7 @@ fn a_chat_record_serializes_its_round_and_its_alias_and_no_model() {
 
 /// The origin of a call the model made in section `Only` of `run-1`.
 fn model_origin() -> ToolCallOrigin {
-    ToolCallOrigin {
-        execution: "run-1".to_owned(),
-        section: "Only".to_owned(),
-        caller: ToolCaller::Model,
-    }
+    ToolCallOrigin::new("run-1", "Only", ToolCaller::Model)
 }
 
 #[test]
@@ -158,10 +153,7 @@ fn a_tool_call_record_serializes_its_origin_in_snake_case() {
         tool: ToolId::parse("tools/echo").expect("a valid id"),
         alias: "echo".to_owned(),
         args: json!({}),
-        origin: ToolCallOrigin {
-            caller: ToolCaller::Script,
-            ..model_origin()
-        },
+        origin: ToolCallOrigin::new("run-1", "Only", ToolCaller::Script),
     };
     let wire = serde_json::to_value(&record).expect("a record serializes");
     assert_eq!(

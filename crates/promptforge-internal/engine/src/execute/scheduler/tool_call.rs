@@ -389,14 +389,14 @@ impl Scheduler {
         )
         .map_err(Error::store)?;
         let exec = access_id(&access);
-        let origin = ToolCallOrigin {
-            execution: chain.ctx.execution().to_owned(),
-            section: chain.section_name().to_owned(),
-            caller: match &site {
+        let origin = ToolCallOrigin::new(
+            chain.ctx.execution(),
+            chain.section_name(),
+            match &site {
                 CallSite::Script { .. } => ToolCaller::Script,
                 CallSite::Model { .. } | CallSite::Batch { .. } => ToolCaller::Model,
             },
-        };
+        );
         let effect = Effect::ToolCall {
             tool: binding.id().clone(),
             alias: binding.alias().to_owned(),

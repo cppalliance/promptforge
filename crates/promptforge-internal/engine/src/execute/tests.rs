@@ -23,7 +23,7 @@ use crate::test_support::seeded::Seeded;
 use crate::test_support::{FnTool, fresh_access};
 use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
-use promptforge_model_client::detail::{tool_schema_description, tool_schema_name};
+use promptforge_model_client::client::Role;
 use promptforge_vfs::{Access, VfsError};
 
 mod context;
@@ -87,7 +87,7 @@ fn last_tool_turn_content(bodies: &[ScriptedCall]) -> String {
         .as_array()
         .expect("a round's messages serialize to an array")
         .iter()
-        .find(|m| m["role"] == "tool")
+        .find(|m| m["role"] == Role::Tool.as_str())
         .expect("the re-sent conversation must include the tool turn")["content"]
         .as_str()
         .expect("a tool turn's content must be a string")
@@ -102,7 +102,7 @@ fn tool_turn_nonces(bodies: &[ScriptedCall]) -> Vec<String> {
         .as_array()
         .expect("a round's messages serialize to an array")
         .iter()
-        .filter(|m| m["role"] == "tool")
+        .filter(|m| m["role"] == Role::Tool.as_str())
         .filter_map(|m| m["content"].as_str())
         .filter_map(|content| {
             let marker = "<untrusted_input_";

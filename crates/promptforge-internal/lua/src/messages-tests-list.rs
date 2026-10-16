@@ -1,11 +1,11 @@
 //! Tests for the Rust-backed [`MessageList`]: its builders, `replace`, the
 //! leading-system rule, and the send record `commit` keeps.
 
-use promptforge_model_client::client::Message;
+use promptforge_model_client::client::{Message, Role};
 use serde_json::json;
 
 use crate::messages::MessageList;
-use crate::protocol::{MessageContent, MessageRecord, MessageRole, ToolCallRecord};
+use crate::protocol::{MessageContent, MessageRecord, ToolCallRecord};
 use crate::test_vm::{BuiltVm, TestVm};
 use crate::tests::{assistant, system, text, user};
 use crate::{Error, project_messages};
@@ -32,7 +32,7 @@ pub(super) fn refusal(vm: &BuiltVm, source: &str) -> String {
 }
 
 /// The list's records by role and text, for compact assertions.
-fn texts(list: &MessageList) -> Vec<(MessageRole, String)> {
+fn texts(list: &MessageList) -> Vec<(Role, String)> {
     list.records()
         .into_iter()
         .map(|record| match record.content {
@@ -43,7 +43,7 @@ fn texts(list: &MessageList) -> Vec<(MessageRole, String)> {
 }
 
 /// The roles and texts `entries` names.
-fn expect(entries: &[(MessageRole, &str)]) -> Vec<(MessageRole, String)> {
+fn expect(entries: &[(Role, &str)]) -> Vec<(Role, String)> {
     entries
         .iter()
         .map(|(role, content)| (*role, (*content).to_owned()))
@@ -83,7 +83,7 @@ fn each_builder_chains_and_appends_its_record() {
             },
             MessageRecord {
                 tool_call_id: Some("call_1".to_owned()),
-                ..text(MessageRole::Tool, "echoed")
+                ..text(Role::Tool, "echoed")
             },
             assistant("done"),
             user("thanks"),
@@ -99,7 +99,7 @@ fn four(vm: &BuiltVm) {
 
 #[test]
 fn replace_with_no_records_deletes_the_range() {
-    use MessageRole::{Assistant, User};
+    use Role::{Assistant, User};
     let vm = TestVm::new().messages().build();
     four(&vm);
     vm.exec("msgs:replace(2, 3)");
@@ -111,7 +111,7 @@ fn replace_with_no_records_deletes_the_range() {
 
 #[test]
 fn replace_with_first_one_past_last_inserts_before_first() {
-    use MessageRole::{Assistant, System, User};
+    use Role::{Assistant, System, User};
     let vm = TestVm::new().messages().build();
     four(&vm);
     vm.exec("msgs:replace(3, 2, { role = 'user', content = 'mid' })");
@@ -133,7 +133,7 @@ fn replace_with_first_one_past_last_inserts_before_first() {
 
 #[test]
 fn replace_over_the_whole_list_swaps_every_record() {
-    use MessageRole::{System, User};
+    use Role::{System, User};
     let vm = TestVm::new().messages().build();
     four(&vm);
     vm.exec(

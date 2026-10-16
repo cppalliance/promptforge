@@ -65,7 +65,7 @@ fn tool_error_classifies_and_hides_source() {
     let retry = ToolError::message("net").with_kind(ToolErrorKind::Transport);
     assert!(retry.is_retryable());
 
-    let sourced = ToolError::with_source("wrap", std::io::Error::other("cause"));
+    let sourced = ToolError::message("wrap").with_source(std::io::Error::other("cause"));
     assert!(std::error::Error::source(&sourced).is_some());
     assert!(
         !sourced.to_string().contains("cause"),
@@ -74,16 +74,26 @@ fn tool_error_classifies_and_hides_source() {
 }
 
 #[test]
-fn a_tool_error_built_with_a_source_is_a_backend_error() {
+fn a_tool_error_takes_its_kind_at_construction_and_a_source_as_a_builder() {
     use super::{ToolError, ToolErrorKind};
-    let err = ToolError::with_source("backend failed", std::io::Error::other("boom"));
+    let err = ToolError::new(ToolErrorKind::Backend, "backend failed")
+        .with_source(std::io::Error::other("boom"));
     assert_eq!(err.kind(), ToolErrorKind::Backend);
+    assert_eq!(err.to_string(), "backend failed");
     assert!(std::error::Error::source(&err).is_some());
+
+    let kept = ToolError::new(ToolErrorKind::Transport, "net down")
+        .with_source(std::io::Error::other("reset"));
+    assert_eq!(
+        kept.kind(),
+        ToolErrorKind::Transport,
+        "attaching a source keeps the kind the error was built with"
+    );
 }
 
 #[test]
 fn an_empty_catalog_builds_and_holds_no_tools() {
-    let catalog = ToolCatalog::new(&[]).expect("an empty catalog builds");
+    let catalog = ToolCatalog::new([]).expect("an empty catalog builds");
     assert!(catalog.tools().is_empty());
 }
 
@@ -129,18 +139,14 @@ fn survives_stop_sets_the_flag_and_round_trips_through_serde() {
 #[test]
 fn a_tool_call_origin_keeps_its_logged_shape() {
     use super::{ToolCallOrigin, ToolCaller};
-    let origin = ToolCallOrigin {
-        execution: "run-1".to_owned(),
-        section: "Chat".to_owned(),
-        caller: ToolCaller::Model,
-    };
+    let origin = ToolCallOrigin::new("run-1", "Chat", ToolCaller::Model);
     let line = r#"{"execution":"run-1","section":"Chat","caller":"model"}"#;
     assert_wire(&origin, line);
 }
 
 #[test]
 fn catalog_lookup_matches_the_whole_tool_id() {
-    let catalog = ToolCatalog::new(&[inspect_descriptor()]).expect("unique catalog");
+    let catalog = ToolCatalog::new([inspect_descriptor()]).expect("unique catalog");
 
     let found = catalog
         .get(&inspect_id())
@@ -156,7 +162,7 @@ fn catalog_lookup_matches_the_whole_tool_id() {
 
 #[test]
 fn catalog_preserves_order_and_first_match_lookup() {
-    let catalog = ToolCatalog::new(&[
+    let catalog = ToolCatalog::new([
         catalog_descriptor("inspect"),
         catalog_descriptor("summarize"),
     ])
@@ -182,13 +188,17 @@ fn catalog_preserves_order_and_first_match_lookup() {
 
 #[test]
 fn catalog_rejects_duplicate_tool_ids() {
-    let error = ToolCatalog::new(&[catalog_descriptor("inspect"), catalog_descriptor("inspect")])
+    let error = ToolCatalog::new([catalog_descriptor("inspect"), catalog_descriptor("inspect")])
         .expect_err("a repeated tool identity must be rejected at catalog construction");
     assert_eq!(error.kind(), ToolCatalogErrorKind::DuplicateId);
     assert_eq!(
         error.duplicate_id(),
         Some(&inspect_id()),
         "the error must name the duplicated identity"
+    );
+    assert_eq!(
+        error.to_string(),
+        "duplicate tool identity `fixtures/tools/inspect` in the tool catalog"
     );
 }
 
@@ -260,9 +270,30 @@ fn a_control_character_is_rejected_as_a_control_error() {
 }
 
 #[test]
-fn an_uppercase_segment_is_rejected_because_comparison_is_case_sensitive() {
+fn an_uppercase_segment_is_rejected_as_a_charset_error_because_comparison_is_case_sensitive() {
     use super::ToolIdErrorKind;
-    assert_eq!(tool_id_error_kind("Web/fetch"), ToolIdErrorKind::Control);
+    assert_eq!(tool_id_error_kind("Web/fetch"), ToolIdErrorKind::Charset);
+}
+
+#[test]
+fn an_at_sign_or_non_ascii_segment_is_rejected_as_a_charset_error() {
+    use super::ToolIdErrorKind;
+    assert_eq!(tool_id_error_kind("web@2/fetch"), ToolIdErrorKind::Charset);
+    assert_eq!(
+        tool_id_error_kind("web/f\u{e9}tch"),
+        ToolIdErrorKind::Charset
+    );
+}
+
+#[test]
+fn a_tool_id_from_str_parses_like_parse() {
+    use super::ToolIdErrorKind;
+    let parsed: ToolId = "web/fetch".parse().expect("a valid tool id parses");
+    assert_eq!(parsed, ToolId::parse("web/fetch").expect("a valid tool id"));
+    let error = "web"
+        .parse::<ToolId>()
+        .expect_err("one segment is rejected");
+    assert_eq!(error.kind(), ToolIdErrorKind::SegmentCount);
 }
 
 #[test]

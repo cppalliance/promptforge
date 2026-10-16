@@ -11,7 +11,7 @@ use std::task::{Context, Poll, Waker};
 use promptforge_plugin::testing::TestCall;
 use promptforge_plugin::{
     HostServices, OutputTrust, Package, Plugin, PluginFuture, PluginId, ServiceId, ServiceKey,
-    ToolContext, ToolDescriptor, ToolError, ToolId, ToolOutput,
+    ToolContext, ToolDescriptor, ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
 use serde_json::{Value, json};
 
@@ -48,8 +48,9 @@ fn construct(
     let greeting = services.get(&GREETING).ok_or_else(|| {
         ToolError::message("greeter needs acme/greeting, and this Host provides none")
     })?;
-    let id = ToolId::parse(&format!("{name}/greet"))
-        .map_err(|e| ToolError::with_source("greeter could not name its tool", e))?;
+    let id = ToolId::parse(&format!("{name}/greet")).map_err(|e| {
+        ToolError::new(ToolErrorKind::Backend, "greeter could not name its tool").with_source(e)
+    })?;
     let tools = vec![ToolDescriptor::new(
         id,
         "Greets this run's visitor.",

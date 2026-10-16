@@ -3,7 +3,7 @@
 use std::num::NonZeroU32;
 
 use mlua::Lua;
-use promptforge_model_client::client::Message;
+use promptforge_model_client::client::{Message, Role};
 use promptforge_model_client::detail::message_from_validated_parts;
 use promptforge_types::metrics::Usage;
 use serde_json::{Value, json};
@@ -253,13 +253,7 @@ fn next_request(reply_chars: usize, tail_chars: usize) -> Vec<Message> {
 }
 
 fn usage(prompt: u32, completion: u32, reasoning: Option<u32>) -> Usage {
-    Usage {
-        prompt_tokens: prompt,
-        completion_tokens: completion,
-        total_tokens: prompt + completion,
-        cached_tokens: None,
-        reasoning_tokens: reasoning,
-    }
+    Usage::new(prompt, completion, prompt + completion).with_reasoning_tokens(reasoning)
 }
 
 /// Whether `messages` fit `context` with no reserve beside `anchor`.
@@ -388,7 +382,7 @@ fn precheck_counts_tool_call_arguments_and_part_text() {
     // An assistant tool-call turn whose visible text is empty still sends
     // its arguments onto the wire; the estimate must count them.
     let calls = vec![message_from_validated_parts(
-        "assistant",
+        Role::Assistant,
         Value::String(String::new()),
         None,
         Some(vec![json!({
@@ -402,7 +396,7 @@ fn precheck_counts_tool_call_arguments_and_part_text() {
     assert_eq!(reason, OverflowReason::Precheck);
     // A multimodal parts array contributes its text parts.
     let parts = vec![message_from_validated_parts(
-        "user",
+        Role::User,
         json!([{ "type": "text", "text": "x".repeat(4096) }]),
         None,
         None,

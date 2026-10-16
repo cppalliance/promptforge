@@ -191,6 +191,28 @@ fn finish_fails_a_tool_call_batch_truncated_by_length_or_content_filter() {
 }
 
 #[test]
+fn finish_fails_a_tool_call_batch_sharing_an_id_as_a_retryable_malformed_reply() {
+    // The body walk builds each call alone, so the duplicate id is refused
+    // only when `finish` builds the completion, and that refusal must reach
+    // the caller as the retryable kind a bad reply earns.
+    let error = accumulate(&[
+        serde_json::json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [
+            { "index": 0, "id": "dup", "type": "function",
+              "function": { "name": "a", "arguments": "{}" } },
+            { "index": 1, "id": "dup", "type": "function",
+              "function": { "name": "b", "arguments": "{}" } }
+        ] } }] }),
+        serde_json::json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }]
+        }),
+    ])
+    .finish(Value::Null, None)
+    .expect_err("two calls sharing an id must fail");
+    assert_eq!(error.kind(), CompletionErrorKind::MalformedResponse);
+    assert!(error.is_retryable());
+}
+
+#[test]
 fn finish_returns_truncated_text_with_its_finish_reason() {
     // The truncation rule fails tool-call batches only: partial TEXT is
     // returned with finish_reason "length" so the caller can report it.

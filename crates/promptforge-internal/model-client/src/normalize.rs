@@ -1,10 +1,11 @@
-//! The neutral reply checks every completion passes, whoever built it.
+//! The neutral reply checks every caller-built completion passes.
 //!
 //! A tool call must have a nonblank id and name and object arguments, the
 //! calls in one turn must have distinct ids, and a turn with no product is
 //! an `EmptyReply`-kind failure. The validating constructors in
-//! `client/wire-canned.rs` run these checks, so a completion a wire decoder
-//! built and one a caller built by hand are judged alike.
+//! `client/wire-canned.rs` run these checks and refuse the parts with an
+//! `InvalidParts`-kind failure, so a completion is built only from parts a
+//! wire decoder would accept.
 
 use std::collections::HashSet;
 
@@ -21,7 +22,7 @@ pub(crate) fn empty_reply_error() -> CompletionError {
 /// Refuses a blank tool-call id.
 pub(crate) fn check_call_id(id: &str) -> Result<()> {
     if id.trim().is_empty() {
-        return Err(CompletionError::malformed("tool call id was blank"));
+        return Err(CompletionError::invalid_parts("tool call id was blank"));
     }
     Ok(())
 }
@@ -29,7 +30,7 @@ pub(crate) fn check_call_id(id: &str) -> Result<()> {
 /// Refuses a blank tool-call name.
 pub(crate) fn check_call_name(name: &str) -> Result<()> {
     if name.trim().is_empty() {
-        return Err(CompletionError::malformed("tool call name was blank"));
+        return Err(CompletionError::invalid_parts("tool call name was blank"));
     }
     Ok(())
 }
@@ -38,7 +39,7 @@ pub(crate) fn check_call_name(name: &str) -> Result<()> {
 /// accept.
 pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
     if !arguments.is_object() {
-        return Err(CompletionError::malformed(
+        return Err(CompletionError::invalid_parts(
             "tool call arguments were not a JSON object",
         ));
     }
@@ -48,7 +49,7 @@ pub(crate) fn check_call_arguments(arguments: &Value) -> Result<()> {
 /// Records `id` in `seen`, refusing an id another call in the turn has.
 pub(crate) fn check_unique_call_id<'a>(seen: &mut HashSet<&'a str>, id: &'a str) -> Result<()> {
     if !seen.insert(id) {
-        return Err(CompletionError::malformed(format!(
+        return Err(CompletionError::invalid_parts(format!(
             "duplicate tool call id {id:?} within one turn"
         )));
     }

@@ -17,19 +17,69 @@ fn from_validated_parts_serializes_role_and_content_verbatim() {
         { "type": "text", "text": "look at this" },
         { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } },
     ]);
-    let multimodal = message_from_validated_parts("user", parts.clone(), None, None);
+    let multimodal = message_from_validated_parts(Role::User, parts.clone(), None, None);
     assert_json(&multimodal, &json!({ "role": "user", "content": parts }));
     assert_eq!(
         multimodal.content(),
         "",
         "parts content has no text form; the accessor reports empty"
     );
-    let system =
-        message_from_validated_parts("system", Value::String("be terse".to_owned()), None, None);
+    let system = message_from_validated_parts(
+        Role::System,
+        Value::String("be terse".to_owned()),
+        None,
+        None,
+    );
     assert_json(&system, &json!({ "role": "system", "content": "be terse" }));
     assert_eq!(system.content(), "be terse");
     let plain = Message::user("hello");
     assert_json(&plain, &json!({ "role": "user", "content": "hello" }));
+}
+
+#[test]
+fn each_constructor_names_its_role() {
+    assert_eq!(Message::user("u").role(), Role::User);
+    assert_eq!(Message::assistant("a").role(), Role::Assistant);
+    assert_eq!(Message::tool("call_1", "t").role(), Role::Tool);
+}
+
+#[test]
+fn a_role_round_trips_through_serde_as_its_lowercase_name() {
+    for (role, wire) in [
+        (Role::System, "\"system\""),
+        (Role::User, "\"user\""),
+        (Role::Assistant, "\"assistant\""),
+        (Role::Tool, "\"tool\""),
+    ] {
+        assert_eq!(
+            serde_json::to_string(&role).expect("a role serializes"),
+            wire
+        );
+        assert_eq!(
+            serde_json::from_str::<Role>(wire).expect("a role deserializes"),
+            role
+        );
+        assert_eq!(format!("\"{}\"", role.as_str()), wire);
+    }
+    assert!(
+        serde_json::from_str::<Role>("\"System\"").is_err(),
+        "the wire names are exact, never case-folded"
+    );
+}
+
+#[test]
+fn a_role_parses_from_its_name_and_a_refusal_lists_the_accepted_roles() {
+    for role in [Role::System, Role::User, Role::Assistant, Role::Tool] {
+        assert_eq!(role.as_str().parse::<Role>(), Ok(role));
+    }
+    let error = "wizard"
+        .parse::<Role>()
+        .expect_err("an unknown role is refused");
+    assert_eq!(error.input(), "wizard");
+    assert_eq!(
+        error.to_string(),
+        "invalid role `wizard`: required one of `system`, `user`, `assistant`, `tool`"
+    );
 }
 
 #[test]
@@ -45,7 +95,8 @@ fn tool_arguments_view_exposes_no_raw_value() {
     assert!(!args.is_empty());
     assert!(args.contains("query"));
     assert!(!args.contains("absent"));
-    let mut names: Vec<_> = args.names().collect();
+    let iter: ArgumentNames<'_> = args.names();
+    let mut names: Vec<_> = iter.collect();
     names.sort_unstable();
     assert_eq!(names, ["limit", "query"]);
     let json = args.to_json_string();
@@ -59,6 +110,7 @@ fn tool_arguments_view_exposes_no_raw_value() {
     };
     assert!(empty.arguments().is_empty());
     assert!(!empty.arguments().contains("anything"));
+    assert_eq!(empty.arguments().names().count(), 0);
 }
 
 #[test]
@@ -74,8 +126,12 @@ fn from_parts_refuses_a_blank_id_a_blank_name_and_non_object_arguments() {
         let error = ToolCall::from_parts(id, name, arguments).expect_err(label);
         assert_eq!(
             error.kind(),
-            CompletionErrorKind::MalformedResponse,
+            CompletionErrorKind::InvalidParts,
             "{label} must be refused"
+        );
+        assert!(
+            !error.is_retryable(),
+            "{label}: rebuilding the same parts fails the same way"
         );
     }
     let call = ToolCall::from_parts("call_1", "fetch", object()).expect("a whole call is accepted");
@@ -91,7 +147,8 @@ fn from_result_refuses_an_empty_batch_and_duplicate_ids_and_accepts_text() {
     let call = ToolCall::from_parts("call_1", "fetch", json_object()).expect("a whole call");
     let twice = CompletionResult::ToolCalls(vec![call.clone(), call.clone()]);
     let duplicate = Completion::from_result(twice, "m").expect_err("a duplicate id is refused");
-    assert_eq!(duplicate.kind(), CompletionErrorKind::MalformedResponse);
+    assert_eq!(duplicate.kind(), CompletionErrorKind::InvalidParts);
+    assert!(!duplicate.is_retryable());
     assert!(
         duplicate.to_string().contains("\"call_1\""),
         "the message names the repeated id: {duplicate}"
@@ -112,18 +169,7 @@ fn a_completion_from_a_bare_result_carries_no_metrics_and_no_raw_exchange() {
 
 #[test]
 fn the_builders_set_metrics_the_raw_exchange_and_the_finish_reason() {
-    let metrics = CallMetrics {
-        usage: Some(Usage {
-            prompt_tokens: 7,
-            completion_tokens: 3,
-            total_tokens: 10,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        }),
-        llama: None,
-        vllm: None,
-        client: None,
-    };
+    let metrics = CallMetrics::new().with_usage(Some(Usage::new(7, 3, 10)));
     let request = json!({ "model": "m", "messages": [] });
     let response = json!({ "choices": [] });
     let completion = pong("m")

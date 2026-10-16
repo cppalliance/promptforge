@@ -3,6 +3,8 @@
 //! failure as the call's own answer. The per-record rules run as the list
 //! adds a record, so their tests sit with the list.
 
+use promptforge_model_client::client::Role;
+
 use super::*;
 use crate::MessageList;
 
@@ -58,7 +60,7 @@ fn chat_parses_every_message_shape() {
             assert!(binding.is_none(), "a round without a handle has no binding");
             let messages = list.records();
             assert_eq!(messages.len(), 4);
-            assert_eq!(messages[0].role, MessageRole::System);
+            assert_eq!(messages[0].role, Role::System);
             assert_eq!(
                 messages[0].content,
                 MessageContent::Text("be terse".to_owned())
@@ -71,7 +73,7 @@ fn chat_parses_every_message_shape() {
                 ]),
                 "content parts must survive the parse as typed variants"
             );
-            assert_eq!(messages[2].role, MessageRole::Assistant);
+            assert_eq!(messages[2].role, Role::Assistant);
             assert_eq!(
                 messages[2].tool_calls,
                 vec![ToolCallRecord {
@@ -80,7 +82,7 @@ fn chat_parses_every_message_shape() {
                     arguments: json!({ "value": "hi" }),
                 }]
             );
-            assert_eq!(messages[3].role, MessageRole::Tool);
+            assert_eq!(messages[3].role, Role::Tool);
             assert_eq!(messages[3].tool_call_id.as_deref(), Some("call_1"));
         }
         other => panic!("expected a chat request, got {other:?}"),
@@ -147,9 +149,9 @@ fn correlated_tool_results_hold_the_matching_call_ids() {
     match request {
         Request::Chat { list, .. } => {
             let messages = list.records();
-            assert_eq!(messages[1].role, MessageRole::Tool);
+            assert_eq!(messages[1].role, Role::Tool);
             assert_eq!(messages[1].tool_call_id.as_deref(), Some("call_1"));
-            assert_eq!(messages[2].role, MessageRole::Tool);
+            assert_eq!(messages[2].role, Role::Tool);
             assert_eq!(messages[2].tool_call_id.as_deref(), Some("call_2"));
         }
         other => panic!("expected a chat request, got {other:?}"),

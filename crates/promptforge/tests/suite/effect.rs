@@ -64,11 +64,7 @@ fn a_tool_calls_origin_is_named_at_promptforge_effect() -> TestResult {
             _ => None,
         })
         .ok_or("the greeter calls its shout tool before it ends")?;
-    let expected = ToolCallOrigin {
-        execution: "greeter".to_owned(),
-        section: "Shout".to_owned(),
-        caller: ToolCaller::Script,
-    };
+    let expected = ToolCallOrigin::new("greeter", "Shout", ToolCaller::Script);
     assert_eq!(origin, expected);
     Ok(())
 }

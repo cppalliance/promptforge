@@ -81,10 +81,7 @@ fn a_lifecycle_report_becomes_the_matching_event_with_its_coordinates() {
         vec![Event::VfsWriteSucceeded {
             execution: "run-1".to_owned(),
             section: "Gather".to_owned(),
-            provenance: Provenance {
-                task: root(),
-                seq: 0
-            },
+            provenance: Provenance::new(root(), 0),
         }]
     );
 }
@@ -154,7 +151,7 @@ fn a_library_load_report_stamps_the_coordinates_and_the_library() {
     walk.library_load("Main", "## shared_stuff", LibraryLoad::Started);
     walk.library_load("Main", "## shared_stuff", LibraryLoad::Succeeded);
     walk.library_load("Other", "## helpers", LibraryLoad::Failed);
-    let stamp = |seq| Provenance { task: root(), seq };
+    let stamp = |seq| Provenance::new(root(), seq);
     assert_eq!(
         sink.take(),
         vec![
@@ -227,10 +224,7 @@ fn an_untrusted_tool_result_reports_the_event_with_trusted_false() {
         vec![Event::ToolResult {
             execution: "run-1".to_owned(),
             section: "Chat".to_owned(),
-            provenance: Provenance {
-                task: root(),
-                seq: 0
-            },
+            provenance: Provenance::new(root(), 0),
             turn: 2,
             tool_call_id: "call_9".to_owned(),
             alias: "fetch".to_owned(),

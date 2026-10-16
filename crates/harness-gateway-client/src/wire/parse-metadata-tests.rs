@@ -48,27 +48,16 @@ fn llama_body_parses_model_usage_and_timings() {
     assert_eq!(metadata.model, "qwen3-30b");
     assert_eq!(
         metadata.metrics.usage,
-        Some(Usage {
-            prompt_tokens: 7,
-            completion_tokens: 3,
-            total_tokens: 10,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        }),
+        Some(Usage::new(7, 3, 10)),
         "flat llama.cpp usage reports the token counts only"
     );
     assert_eq!(
         metadata.metrics.llama,
-        Some(LlamaTimings {
-            prompt_n: 7,
-            prompt_ms: 12.5,
-            prompt_per_second: 560.0,
-            predicted_n: 3,
-            predicted_ms: 30.5,
-            predicted_per_second: 98.5,
-            draft_n: 4,
-            draft_n_accepted: 2,
-        })
+        Some(
+            LlamaTimings::new(7, 12.5, 560.0, 3, 30.5, 98.5)
+                .with_draft_n(4)
+                .with_draft_n_accepted(2)
+        )
     );
     assert_eq!(metadata.metrics.vllm, None);
     assert_eq!(
@@ -129,25 +118,20 @@ fn vllm_body_parses_metrics_and_cached_tokens() {
     assert_eq!(metadata.model, "meta-llama/Llama-3.1-8B-Instruct");
     assert_eq!(
         metadata.metrics.usage,
-        Some(Usage {
-            prompt_tokens: 20,
-            completion_tokens: 5,
-            total_tokens: 25,
-            cached_tokens: Some(16),
-            reasoning_tokens: None,
-        }),
+        Some(Usage::new(20, 5, 25).with_cached_tokens(Some(16))),
         "the prompt_tokens_details cache detail must flatten into usage"
     );
     assert_eq!(metadata.metrics.llama, None);
     assert_eq!(
         metadata.metrics.vllm,
-        Some(VllmMetrics {
-            time_to_first_token_ms: Some(8.5),
-            generation_time_ms: Some(22.5),
-            queue_time_ms: Some(1.5),
-            mean_itl_ms: Some(7.5),
-            tokens_per_second: Some(133.5),
-        })
+        Some(
+            VllmMetrics::new()
+                .with_time_to_first_token_ms(Some(8.5))
+                .with_generation_time_ms(Some(22.5))
+                .with_queue_time_ms(Some(1.5))
+                .with_mean_itl_ms(Some(7.5))
+                .with_tokens_per_second(Some(133.5))
+        )
     );
 }
 
@@ -163,13 +147,7 @@ fn vllm_metrics_omit_what_was_not_measured() {
     assert_eq!(warnings, 0);
     assert_eq!(
         metadata.metrics.vllm,
-        Some(VllmMetrics {
-            time_to_first_token_ms: Some(8.5),
-            generation_time_ms: None,
-            queue_time_ms: None,
-            mean_itl_ms: None,
-            tokens_per_second: None,
-        }),
+        Some(VllmMetrics::new().with_time_to_first_token_ms(Some(8.5))),
         "fields vLLM did not measure stay None inside a parsed section"
     );
 }
@@ -200,13 +178,11 @@ fn frontier_body_parses_usage_detail_fields() {
     assert_eq!(metadata.model, "gpt-5.2");
     assert_eq!(
         metadata.metrics.usage,
-        Some(Usage {
-            prompt_tokens: 100,
-            completion_tokens: 40,
-            total_tokens: 140,
-            cached_tokens: Some(64),
-            reasoning_tokens: Some(25),
-        })
+        Some(
+            Usage::new(100, 40, 140)
+                .with_cached_tokens(Some(64))
+                .with_reasoning_tokens(Some(25))
+        )
     );
     assert_eq!(
         metadata.metrics.llama, None,

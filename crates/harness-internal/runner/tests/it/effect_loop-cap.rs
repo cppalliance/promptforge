@@ -85,7 +85,7 @@ fn run_of(sections: &str) -> Run {
         "Park until the test opens the gate.",
         json!({ "type": "object", "properties": { "name": { "type": "string" } } }),
     );
-    let catalog = ToolCatalog::new(&[tool]).expect("the one-tool catalog is valid");
+    let catalog = ToolCatalog::new([tool]).expect("the one-tool catalog is valid");
     let ctx = RunContext::new(EXECUTION, TEST_SEED, Timestamp::UNIX_EPOCH).model(model);
     let (ctx, requirements) = ctx.tools(catalog).prepare(&prompt);
     assert!(

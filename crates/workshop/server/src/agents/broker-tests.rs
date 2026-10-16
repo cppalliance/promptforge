@@ -106,11 +106,7 @@ fn binding() -> ModelBinding {
         "writer",
         "the round's model",
         ModelId::gateway("m").expect("a literal model name is valid"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelInvocation::new(),
         NonZeroU32::new(4096).expect("4096 is non-zero"),
     )
 }

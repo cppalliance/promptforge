@@ -93,10 +93,7 @@ mod tests {
 
     #[test]
     fn every_constant_builds_the_variant_it_is_named_for() {
-        let provenance = Provenance {
-            task: "0".parse().expect("a task id parses"),
-            seq: 0,
-        };
+        let provenance = Provenance::new("0".parse().expect("a task id parses"), 0);
         for (variant, build) in ALL {
             let event = build("run".to_owned(), "S".to_owned(), provenance.clone());
             let json = serde_json::to_value(&event).expect("an event serializes");

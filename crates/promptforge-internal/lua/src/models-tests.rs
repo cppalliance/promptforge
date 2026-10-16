@@ -3,8 +3,7 @@
 use super::{ModelRuntime, UseOptions};
 use crate::test_vm::{BuiltVm, TestVm};
 use promptforge_model_client::model::ModelBinding;
-use promptforge_model_client::model::{ModelInvocation, ModelSet, Temperature};
-use promptforge_types::detail::model_id_from_validated;
+use promptforge_model_client::model::{ModelId, ModelInvocation, ModelSet, Temperature};
 use std::sync::Arc;
 
 /// The runtime's selected label, if any.
@@ -39,12 +38,8 @@ fn bound_role(label: &str, capabilities: &[&str]) -> ModelBinding {
     ModelBinding::new(
         label,
         "A general model for tests",
-        model_id_from_validated("gateway", "m1"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelId::gateway("m1").expect("a static model id is valid"),
+        ModelInvocation::new(),
         std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
     )
     .with_capabilities(capabilities.iter().map(|word| (*word).to_owned()).collect())
@@ -284,7 +279,7 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
     let vm = models_vm();
     vm.eval::<()>("models.default('writer')");
     assert_eq!(
-        vm.models.lock().expect("set lock").default.as_deref(),
+        vm.models.lock().expect("set lock").default_alias(),
         Some("writer")
     );
 }
@@ -296,7 +291,7 @@ fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
     // same default must be a no-op.
     vm.eval::<()>("models.default('writer'); models.default('writer')");
     assert_eq!(
-        vm.models.lock().expect("set lock").default.as_deref(),
+        vm.models.lock().expect("set lock").default_alias(),
         Some("writer")
     );
     let error = vm.eval_err("models.default('critic')");

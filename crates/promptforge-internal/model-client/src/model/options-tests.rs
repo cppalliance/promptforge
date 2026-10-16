@@ -1,6 +1,5 @@
-//! Tests for the model set's read view and the float-bearing option types:
-//! the poisoned and healthy view methods, the withheld `Eq`, and the
-//! temperature range.
+//! Tests for the model set's read view and the temperature range: the
+//! poisoned and healthy view methods, and the finite range check.
 
 use super::*;
 
@@ -36,32 +35,12 @@ fn a_healthy_model_set_answers_every_view_method() {
 }
 
 #[test]
-fn model_invocation_equality_is_not_reflexive_for_nan() {
-    // Documents why these float-bearing types intentionally do not implement
-    // `Eq`: a NaN temperature is not equal to itself. Built with the in-crate
-    // private `Temperature(NaN)` tuple (colocated here so it can reach the
-    // private field) to prove the soundness reason `Eq` is withheld.
-    let nan = ModelInvocation {
-        temperature: Some(Temperature(f64::NAN)),
-        max_tokens: None,
-        thinking: None,
-    };
-    assert_ne!(nan, nan.clone());
-}
-
-#[test]
-fn completion_options_equality_is_not_reflexive_for_nan() {
-    // `CompletionOptions` has an `Option<Temperature>` (an `f64` newtype)
-    // temperature, so it must not implement `Eq`: a NaN temperature is not
-    // equal to itself. This assertion documents the violated reflexivity
-    // contract even though Rust permits a manual `Eq` implementation.
-    let options = CompletionOptions {
-        model: "m".to_owned(),
-        temperature: Some(Temperature(f64::NAN)),
-        max_tokens: None,
-        thinking: None,
-    };
-    assert_ne!(options, options.clone());
+fn a_model_set_compares_as_a_total_equivalence() {
+    fn assert_eq_impl<T: Eq>() {}
+    assert_eq_impl::<Temperature>();
+    assert_eq_impl::<ModelInvocation>();
+    assert_eq_impl::<ModelBinding>();
+    assert_eq_impl::<ModelSet>();
 }
 
 #[test]

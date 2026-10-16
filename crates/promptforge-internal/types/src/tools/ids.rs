@@ -1,10 +1,11 @@
 //! Stable tool identity and its validation errors.
 
+use std::str::FromStr;
+
 use crate::names::{GlobalName, GlobalNameErrorKind};
 use crate::plugins::PluginId;
 
-/// A tool's identity: its Plugin's local name, then one or more segments the
-/// Plugin chooses.
+/// Identifies a tool by its Plugin's local name and the Plugin's own segments.
 ///
 /// A tool id is a [`GlobalName`] of two or more segments, such as
 /// `web/fetch`. The first segment is the id of the Plugin that contributed
@@ -20,15 +21,15 @@ use crate::plugins::PluginId;
 pub struct ToolId(GlobalName);
 
 impl ToolId {
-    /// Parses a tool id, which must have two or more segments
-    /// (`plugin/name`).
+    /// Parses a tool id of two or more segments (`plugin/name`).
     ///
     /// # Errors
     /// Returns [`ToolIdError`] when the id has fewer than two segments
     /// ([`ToolIdErrorKind::SegmentCount`]), is empty or has an empty segment
-    /// ([`ToolIdErrorKind::Empty`]), or a segment contains a character
-    /// outside the set of lowercase ASCII letters, digits, `-`, `_`, and `.`
-    /// ([`ToolIdErrorKind::Control`]).
+    /// ([`ToolIdErrorKind::Empty`]), a segment contains a control byte
+    /// ([`ToolIdErrorKind::Control`]), or a segment contains any other
+    /// character outside the set of lowercase ASCII letters, digits, `-`,
+    /// `_`, and `.` ([`ToolIdErrorKind::Charset`]).
     pub fn parse(id: &str) -> Result<ToolId, ToolIdError> {
         let name =
             GlobalName::parse(id).map_err(|e| ToolIdError::from_global_name_kind(e.kind()))?;
@@ -50,14 +51,30 @@ impl ToolId {
         &segments[segments.len() - 1]
     }
 
-    /// Returns the id of the Plugin that contributed this tool, which is
-    /// the tool id's first segment.
+    /// Returns the id of the Plugin that contributed this tool.
     ///
-    /// That segment was validated when the tool id was parsed. This method
-    /// reuses that validation and builds the [`PluginId`] directly.
+    /// It is the tool id's first segment, validated when the tool id was
+    /// parsed. This method reuses that validation and builds the
+    /// [`PluginId`] directly.
     #[must_use]
     pub fn plugin(&self) -> PluginId {
         PluginId::from_segment(self.0.first())
+    }
+
+    /// Returns the first segment, the contributing Plugin's local name.
+    ///
+    /// Crate-internal: backs [`PluginId::contains`] without building a
+    /// [`PluginId`].
+    pub(crate) fn plugin_segment(&self) -> &str {
+        self.0.first()
+    }
+}
+
+impl FromStr for ToolId {
+    type Err = ToolIdError;
+
+    fn from_str(id: &str) -> Result<ToolId, ToolIdError> {
+        ToolId::parse(id)
     }
 }
 
@@ -72,7 +89,7 @@ impl std::fmt::Display for ToolId {
 impl serde::Serialize for ToolId {
     /// Serializes the id as a single slash-separated string.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0.to_string())
+        serializer.collect_str(&self.0)
     }
 }
 
@@ -98,13 +115,16 @@ pub enum ToolIdErrorKind {
     SegmentCount,
     /// The id was empty or had an empty segment.
     Empty,
-    /// A segment contained a character outside the allowed set.
+    /// A segment contained a control byte.
     Control,
+    /// A segment contained a character outside the allowed set that is not
+    /// a control byte, such as an uppercase letter, `@`, or a non-ASCII
+    /// character.
+    Charset,
 }
 
 /// The reason a [`ToolId`] failed to parse.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid tool {field}: {reason}")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ToolIdError {
     /// What was rejected: `id`, the tool id being parsed.
@@ -134,6 +154,10 @@ impl ToolIdError {
             GlobalNameErrorKind::Empty => (ToolIdErrorKind::Empty, "segments must not be empty"),
             GlobalNameErrorKind::Control => (
                 ToolIdErrorKind::Control,
+                "segments must not contain a control character",
+            ),
+            GlobalNameErrorKind::Charset => (
+                ToolIdErrorKind::Charset,
                 "segments may contain only lowercase ASCII letters, digits, '-', '_', '.'",
             ),
         };
@@ -144,3 +168,11 @@ impl ToolIdError {
         }
     }
 }
+
+impl std::fmt::Display for ToolIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid tool {}: {}", self.field, self.reason)
+    }
+}
+
+impl std::error::Error for ToolIdError {}

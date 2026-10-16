@@ -238,10 +238,11 @@ impl Plugin for Server {
                 );
             match (&mut task.0).await {
                 Ok(outcome) => outcome,
-                Err(join) => Err(
-                    ToolError::with_source("the MCP call task did not finish", join)
-                        .with_kind(ToolErrorKind::Transport),
-                ),
+                Err(join) => Err(ToolError::new(
+                    ToolErrorKind::Transport,
+                    "the MCP call task did not finish",
+                )
+                .with_source(join)),
             }
         })
     }

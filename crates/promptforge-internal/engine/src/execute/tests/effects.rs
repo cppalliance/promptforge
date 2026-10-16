@@ -27,11 +27,7 @@ fn assert_round_trips(records: &[EffectRecord]) {
 
 /// The origin of a call made by `caller` in `section` of the test run.
 fn origin(section: &str, caller: ToolCaller) -> ToolCallOrigin {
-    ToolCallOrigin {
-        execution: EXECUTION.to_owned(),
-        section: section.to_owned(),
-        caller,
-    }
+    ToolCallOrigin::new(EXECUTION, section, caller)
 }
 
 #[test]

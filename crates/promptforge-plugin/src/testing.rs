@@ -35,11 +35,7 @@ impl TestCall {
         let access = VfsRef::default()
             .acquire(Origin::new("plugin test"))
             .expect("a fresh memory filesystem acquires");
-        let origin = ToolCallOrigin {
-            execution: "plugin-test".to_owned(),
-            section: "Test".to_owned(),
-            caller: ToolCaller::Script,
-        };
+        let origin = ToolCallOrigin::new("plugin-test", "Test", ToolCaller::Script);
         TestCall {
             tool,
             access,

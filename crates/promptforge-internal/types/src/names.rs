@@ -9,6 +9,7 @@
 //! name carries no version, so a `@` is a parse error.
 
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(test)]
 #[path = "names-tests.rs"]
@@ -43,8 +44,10 @@ impl GlobalName {
     ///
     /// - a segment is empty, including the whole string being empty
     ///   ([`GlobalNameErrorKind::Empty`]);
-    /// - a segment contains any other character
-    ///   ([`GlobalNameErrorKind::Control`]).
+    /// - a segment contains a control byte
+    ///   ([`GlobalNameErrorKind::Control`]);
+    /// - a segment contains any other character outside the set
+    ///   ([`GlobalNameErrorKind::Charset`]).
     pub fn parse(s: &str) -> Result<GlobalName, GlobalNameError> {
         let segments: Vec<&str> = s.split('/').collect();
         for segment in &segments {
@@ -55,6 +58,16 @@ impl GlobalName {
         })
     }
 
+    /// Builds a one-segment name from a segment already validated as part
+    /// of another name.
+    ///
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
+    pub(crate) fn from_validated_segment(segment: &str) -> GlobalName {
+        GlobalName {
+            segments: vec![segment.to_owned()],
+        }
+    }
+
     /// Returns the segments (one or more by construction).
     ///
     /// Crate-internal: the id newtypes count and index segments.
@@ -62,28 +75,42 @@ impl GlobalName {
         &self.segments
     }
 
-    /// Returns the first segment as a one-segment name.
+    /// Returns the first segment.
     ///
-    /// Crate-internal: backs [`crate::tools::ToolId::plugin`].
-    pub(crate) fn first(&self) -> GlobalName {
-        GlobalName {
-            segments: self.segments[..1].to_vec(),
-        }
+    /// Crate-internal: backs [`crate::tools::ToolId::plugin`] and
+    /// [`crate::plugins::PluginId::contains`].
+    pub(crate) fn first(&self) -> &str {
+        &self.segments[0]
+    }
+}
+
+impl FromStr for GlobalName {
+    type Err = GlobalNameError;
+
+    fn from_str(s: &str) -> Result<GlobalName, GlobalNameError> {
+        GlobalName::parse(s)
     }
 }
 
 impl fmt::Display for GlobalName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.segments.join("/"))
+        for (position, segment) in self.segments.iter().enumerate() {
+            if position > 0 {
+                f.write_str("/")?;
+            }
+            f.write_str(segment)?;
+        }
+        Ok(())
     }
 }
 
 /// Validates one segment against the charset rule.
 ///
 /// A segment must be non-empty and contain only lowercase ASCII
-/// alphanumeric characters plus `-`, `_`, `.`. Anything else - including
-/// uppercase (comparison is case-sensitive), `@`, control characters, and
-/// non-ASCII - is rejected.
+/// alphanumeric characters plus `-`, `_`, `.`. A control byte is a
+/// `Control` error; anything else outside the set - including uppercase
+/// (comparison is case-sensitive), `@`, and non-ASCII - is a `Charset`
+/// error.
 fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
     if segment.is_empty() {
         return Err(GlobalNameError {
@@ -100,7 +127,7 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
         }
         if !matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.') {
             return Err(GlobalNameError {
-                kind: GlobalNameErrorKind::Control,
+                kind: GlobalNameErrorKind::Charset,
                 reason: "segments may contain only lowercase ASCII letters, digits, '-', '_', '.'",
             });
         }
@@ -117,17 +144,17 @@ fn validate_segment(segment: &str) -> Result<(), GlobalNameError> {
 pub enum GlobalNameErrorKind {
     /// A segment was empty.
     Empty,
-    /// A segment contained a character other than a lowercase ASCII letter, a
-    /// digit, `-`, `_`, or `.`.
-    ///
-    /// This covers control characters, uppercase letters, `@`, and non-ASCII
-    /// characters.
+    /// A segment contained a control byte.
     Control,
+    /// A segment contained a character other than a lowercase ASCII letter, a
+    /// digit, `-`, `_`, or `.` that is not a control byte.
+    ///
+    /// This covers uppercase letters, `@`, and non-ASCII characters.
+    Charset,
 }
 
 /// The error returned when a [`GlobalName`] fails to parse.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid global name: {reason}")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GlobalNameError {
     /// A stable classification of why the name was rejected.
@@ -143,3 +170,11 @@ impl GlobalNameError {
         self.kind
     }
 }
+
+impl fmt::Display for GlobalNameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid global name: {}", self.reason)
+    }
+}
+
+impl std::error::Error for GlobalNameError {}

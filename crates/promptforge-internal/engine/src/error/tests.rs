@@ -53,11 +53,9 @@ fn source_bearing_binding_errors_preserve_their_cause() {
     // The binding and tool-scope failures keep the originating typed
     // error as a private `source()` instead of flattening it to a string,
     // and the chain survives through the public `RunError` wrapper.
-    use promptforge_model_client::client::ToolSchemaError;
-
-    let schema_error = ToolSchemaError::NonObjectSchema {
-        name: "echo".to_owned(),
-    };
+    let schema_error =
+        promptforge_model_client::detail::tool_schema_new("echo", "", serde_json::json!([]))
+            .expect_err("an array is not an object schema");
     let bind = Error::BindSchema {
         alias: "echo".to_owned(),
         source: Box::new(schema_error),

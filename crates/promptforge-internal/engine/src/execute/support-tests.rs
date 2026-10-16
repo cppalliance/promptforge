@@ -40,18 +40,11 @@ fn completion(model: &str, metrics: Option<CallMetrics>, diagnostics: &[&str]) -
 /// Metrics holding only the token accounting of a round that sent
 /// `prompt_tokens` and got `completion_tokens` back.
 fn usage_metrics(prompt_tokens: u32, completion_tokens: u32) -> CallMetrics {
-    CallMetrics {
-        usage: Some(Usage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens + completion_tokens,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        }),
-        llama: None,
-        vllm: None,
-        client: None,
-    }
+    CallMetrics::new().with_usage(Some(Usage::new(
+        prompt_tokens,
+        completion_tokens,
+        prompt_tokens + completion_tokens,
+    )))
 }
 
 /// Reports `completion` as chat turn 3, round 5, and returns the events it

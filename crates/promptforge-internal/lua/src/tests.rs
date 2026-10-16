@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use super::*;
 use crate::test_vm::{BuiltVm, TEST_SECTION, TestVm, fresh_access, test_nonce};
 use crate::vm::{LuaOutcome, run_chunk};
+use promptforge_model_client::client::Role;
 use promptforge_types::tools::ToolDescriptor;
 use promptforge_vfs::{AcquireContext, ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
 use serde_json::json;
@@ -220,7 +221,7 @@ fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
 
 /// A text record under `role`, with no tool calls and no call id.
 #[track_caller]
-pub(crate) fn text(role: MessageRole, content: &str) -> MessageRecord {
+pub(crate) fn text(role: Role, content: &str) -> MessageRecord {
     MessageRecord {
         role,
         content: MessageContent::Text(content.to_owned()),
@@ -231,17 +232,17 @@ pub(crate) fn text(role: MessageRole, content: &str) -> MessageRecord {
 
 #[track_caller]
 pub(crate) fn system(content: &str) -> MessageRecord {
-    text(MessageRole::System, content)
+    text(Role::System, content)
 }
 
 #[track_caller]
 pub(crate) fn user(content: &str) -> MessageRecord {
-    text(MessageRole::User, content)
+    text(Role::User, content)
 }
 
 #[track_caller]
 pub(crate) fn assistant(content: &str) -> MessageRecord {
-    text(MessageRole::Assistant, content)
+    text(Role::Assistant, content)
 }
 
 /// The 1-based number of the first line where two texts differ. When one is

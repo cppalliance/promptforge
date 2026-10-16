@@ -23,25 +23,11 @@ fn read_tool() -> ToolId {
 }
 
 fn provenance(path: &str, seq: u32) -> Provenance {
-    Provenance {
-        task: task(path),
-        seq,
-    }
+    Provenance::new(task(path), seq)
 }
 
 fn sample_metrics() -> CallMetrics {
-    CallMetrics {
-        usage: Some(Usage {
-            prompt_tokens: 7,
-            completion_tokens: 3,
-            total_tokens: 10,
-            cached_tokens: None,
-            reasoning_tokens: None,
-        }),
-        llama: None,
-        vllm: None,
-        client: None,
-    }
+    CallMetrics::new().with_usage(Some(Usage::new(7, 3, 10)))
 }
 
 fn round_trips(event: &Event) {
@@ -244,12 +230,10 @@ fn content_samples() -> Vec<Event> {
             turn: 2,
             round: RoundId::new(1),
             model: "llama-3".to_owned(),
-            calls: vec![ToolCallEvent {
-                id: "call_1".to_owned(),
-                name: "read_file".to_owned(),
-                arguments: json!({ "path": "notes.txt" }),
-                tool: Some(read_tool()),
-            }],
+            calls: vec![
+                ToolCallEvent::new("call_1", "read_file", json!({ "path": "notes.txt" }))
+                    .with_tool(Some(read_tool())),
+            ],
         },
         Event::ToolResult {
             execution: "run-1".to_owned(),

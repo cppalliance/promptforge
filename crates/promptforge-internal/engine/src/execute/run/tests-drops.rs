@@ -49,7 +49,7 @@ fn bound_sections(sections: &str) -> Run {
         "Echoes its value.",
         json!({ "type": "object" }),
     );
-    let catalog = ToolCatalog::new(&[echo]).expect("one tool is a valid catalog");
+    let catalog = ToolCatalog::new([echo]).expect("one tool is a valid catalog");
     let (ctx, requirements) = run_context().model(model).tools(catalog).prepare(&prompt);
     assert!(
         requirements.refusal().is_none(),

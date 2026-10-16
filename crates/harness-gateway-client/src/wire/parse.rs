@@ -13,7 +13,8 @@
 //! Each parsed call is built with [`ToolCall::from_parts`], so the Engine's
 //! neutral checks (blank id, blank name, non-object arguments) run on every
 //! decoded call; the duplicate-id check runs when the read loop builds the
-//! [`Completion`](promptforge::model::Completion) from the batch.
+//! [`Completion`](promptforge::model::Completion) from the batch. Either
+//! refusal of decoded parts is reported as a `MalformedResponse`.
 //!
 //! Beside the strict turn parse, [`response_metadata`] leniently parses the
 //! body's call metadata - the serving `model`, `usage` token accounting,
@@ -27,7 +28,7 @@ use promptforge::model::{CompletionError, CompletionErrorKind, CompletionResult,
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::failure::malformed;
+use crate::failure::{decoded, malformed};
 
 /// The specific added to an empty reply when reasoning was present but
 /// ignored as answer text.
@@ -214,7 +215,7 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>, Complet
                 ));
             }
         };
-        calls.push(ToolCall::from_parts(id, name, arguments)?);
+        calls.push(ToolCall::from_parts(id, name, arguments).map_err(decoded)?);
     }
     Ok(calls)
 }
@@ -277,12 +278,20 @@ pub(super) fn response_metadata(body: &Value) -> ResponseMetadata {
     let mut diagnostics = Vec::new();
     ResponseMetadata {
         model: parse_model(body, &mut diagnostics),
-        metrics: CallMetrics {
-            usage: parse_section(body, "usage", parse_usage, &mut diagnostics),
-            llama: parse_section(body, "timings", parse_llama_timings, &mut diagnostics),
-            vllm: parse_section(body, "metrics", parse_vllm_metrics, &mut diagnostics),
-            client: None,
-        },
+        metrics: CallMetrics::new()
+            .with_usage(parse_section(body, "usage", parse_usage, &mut diagnostics))
+            .with_llama(parse_section(
+                body,
+                "timings",
+                parse_llama_timings,
+                &mut diagnostics,
+            ))
+            .with_vllm(parse_section(
+                body,
+                "metrics",
+                parse_vllm_metrics,
+                &mut diagnostics,
+            )),
         diagnostics,
     }
 }
@@ -363,17 +372,19 @@ struct WireCompletionTokensDetails {
 /// canonical [`Usage`] shape.
 fn parse_usage(value: &Value) -> Result<Usage, serde_json::Error> {
     let wire = WireUsage::deserialize(value)?;
-    Ok(Usage {
-        prompt_tokens: wire.prompt_tokens,
-        completion_tokens: wire.completion_tokens,
-        total_tokens: wire.total_tokens,
-        cached_tokens: wire
-            .prompt_tokens_details
+    Ok(Usage::new(
+        wire.prompt_tokens,
+        wire.completion_tokens,
+        wire.total_tokens,
+    )
+    .with_cached_tokens(
+        wire.prompt_tokens_details
             .and_then(|details| details.cached_tokens),
-        reasoning_tokens: wire
-            .completion_tokens_details
+    )
+    .with_reasoning_tokens(
+        wire.completion_tokens_details
             .and_then(|details| details.reasoning_tokens),
-    })
+    ))
 }
 
 /// The wire shape of llama.cpp's top-level `timings` extension.
@@ -398,16 +409,16 @@ struct WireLlamaTimings {
 /// Parses llama.cpp's `timings` object into the canonical [`LlamaTimings`].
 fn parse_llama_timings(value: &Value) -> Result<LlamaTimings, serde_json::Error> {
     let wire = WireLlamaTimings::deserialize(value)?;
-    Ok(LlamaTimings {
-        prompt_n: wire.prompt_n,
-        prompt_ms: wire.prompt_ms,
-        prompt_per_second: wire.prompt_per_second,
-        predicted_n: wire.predicted_n,
-        predicted_ms: wire.predicted_ms,
-        predicted_per_second: wire.predicted_per_second,
-        draft_n: wire.draft_n,
-        draft_n_accepted: wire.draft_n_accepted,
-    })
+    Ok(LlamaTimings::new(
+        wire.prompt_n,
+        wire.prompt_ms,
+        wire.prompt_per_second,
+        wire.predicted_n,
+        wire.predicted_ms,
+        wire.predicted_per_second,
+    )
+    .with_draft_n(wire.draft_n)
+    .with_draft_n_accepted(wire.draft_n_accepted))
 }
 
 /// Parses vLLM's `metrics` object into the canonical [`VllmMetrics`].

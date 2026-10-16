@@ -46,24 +46,15 @@ impl ModelId {
         Ok(Self { server, name })
     }
 
-    /// Builds an identity in the `"gateway"` namespace from the name the
-    /// gateway lists the model under.
+    /// Builds an identity in the `"gateway"` namespace.
+    ///
+    /// `name` is the name the gateway lists the model under.
     ///
     /// # Errors
     /// Returns [`ModelIdError`] if `name` is empty or contains a control
     /// character.
     pub fn gateway(name: impl Into<String>) -> std::result::Result<ModelId, ModelIdError> {
         Self::new(Self::GATEWAY, name)
-    }
-
-    /// Builds an identity from components already known to be valid.
-    ///
-    /// Crate-internal: backs [`crate::detail::model_id_from_validated`].
-    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
-        ModelId {
-            server: server.into(),
-            name: name.into(),
-        }
     }
 
     /// Validates one identity component, naming the field in any error.
@@ -101,8 +92,7 @@ impl ModelId {
 }
 
 /// The reason building a [`ModelId`] from its components failed.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid model id: {field} {reason}")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelIdError {
     /// Which component was rejected (`server` or `name`).
@@ -111,13 +101,20 @@ pub struct ModelIdError {
     reason: &'static str,
 }
 
+impl std::fmt::Display for ModelIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid model id: {} {}", self.field, self.reason)
+    }
+}
+
+impl std::error::Error for ModelIdError {}
+
 /// The reason building a [`ModelCatalog`] from its descriptors failed.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ModelCatalogError {
     /// Two descriptors shared one stable [`ModelId`], which would make lookups
     /// ambiguous.
-    #[error("duplicate model identity in catalog: {server}/{name}")]
     #[non_exhaustive]
     DuplicateId {
         /// The repeated identity's server namespace.
@@ -126,6 +123,18 @@ pub enum ModelCatalogError {
         name: String,
     },
 }
+
+impl std::fmt::Display for ModelCatalogError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModelCatalogError::DuplicateId { server, name } => {
+                write!(f, "duplicate model identity in catalog: {server}/{name}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ModelCatalogError {}
 
 /// Whether a catalogued model can emit thinking tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -140,8 +149,10 @@ pub enum ThinkingMode {
     Switchable,
 }
 
-/// One catalogued model: its identity, description, context window,
-/// thinking mode, and the provider id the catalog names, if any.
+/// Describes one catalogued model.
+///
+/// It holds the model's identity, description, context window, thinking
+/// mode, and the provider id the catalog names, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelDescriptor {
@@ -215,7 +226,7 @@ impl ModelDescriptor {
 ///
 /// [`ModelCatalog::new`] rejects a repeated `ModelId`, and
 /// [`ModelCatalog::empty`] returns an empty catalog.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ModelCatalog {
     models: Vec<ModelDescriptor>,

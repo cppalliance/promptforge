@@ -176,9 +176,8 @@ pub use prelude::install_preludes;
 pub use projection::project_messages;
 pub use prose::ProseState;
 pub use protocol::{
-    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, MessageRole,
-    Request, TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome,
-    YieldParse,
+    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request,
+    TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
 };
 pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 pub use sys::enrich_sys_model;

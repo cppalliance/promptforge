@@ -55,7 +55,7 @@ fn catalog() -> ToolCatalog {
         "Wait until the test's tool performer answers.",
         json!({ "type": "object", "properties": {} }),
     );
-    ToolCatalog::new(&[wait]).expect("the one-tool catalog is valid")
+    ToolCatalog::new([wait]).expect("the one-tool catalog is valid")
 }
 
 /// A prompt whose one section runs `lua` as its only block.

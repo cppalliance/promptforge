@@ -19,7 +19,6 @@ use std::sync::mpsc;
 use std::thread;
 
 use promptforge_model_client::model::ModelInvocation;
-use promptforge_types::detail::model_id_from_validated;
 use promptforge_types::event::Event;
 use promptforge_types::seed::RunSeed;
 use promptforge_types::timestamp::Timestamp;
@@ -86,12 +85,8 @@ pub(crate) fn test_binding(alias: &str, description: &str, model: &str) -> Model
     ModelBinding::new(
         alias,
         description,
-        model_id_from_validated("gateway", model),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelId::gateway(model).expect("the test model id is valid"),
+        ModelInvocation::new(),
         NonZeroU32::new(4096).expect("4096 is non-zero"),
     )
 }
@@ -399,8 +394,8 @@ impl Scenario {
         let mut ctx =
             RunContext::new(self.name.clone(), self.seed, TEST_STARTED_AT).vfs(self.store.vfs());
         if !self.tools.is_empty() {
-            let descriptors: Vec<_> = self.tools.iter().map(FnTool::descriptor).collect();
-            let catalog = ToolCatalog::new(&descriptors).expect("the scenario's tool ids differ");
+            let catalog = ToolCatalog::new(self.tools.iter().map(FnTool::descriptor))
+                .expect("the scenario's tool ids differ");
             ctx = ctx.tools(catalog);
         }
         let edit = std::mem::replace(&mut self.context, Box::new(|ctx| ctx));

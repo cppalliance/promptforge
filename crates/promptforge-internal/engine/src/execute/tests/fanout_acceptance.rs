@@ -307,14 +307,14 @@ fn three_arms_running_models_loop_hold_three_model_rounds_in_flight_at_once() {
         "each arm opened its own round one"
     );
     for body in &bodies[3..] {
-        let roles: Vec<&str> = body
+        let roles: Vec<Role> = body
             .messages
             .iter()
             .map(crate::model::Message::role)
             .collect();
         assert_eq!(
             roles,
-            vec!["user", "assistant", "tool"],
+            vec![Role::User, Role::Assistant, Role::Tool],
             "round two replays the round-one exchange"
         );
     }

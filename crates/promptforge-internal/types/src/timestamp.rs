@@ -30,29 +30,36 @@ impl Timestamp {
     /// The Unix epoch, `1970-01-01T00:00:00Z`.
     pub const UNIX_EPOCH: Timestamp = Timestamp(0);
 
-    /// The instant `millis` milliseconds after the Unix epoch (before it
-    /// when negative).
+    /// Returns the instant `millis` milliseconds after the Unix epoch.
+    ///
+    /// A negative count is before the epoch.
     #[must_use]
     pub const fn from_unix_millis(millis: i64) -> Self {
         Self(millis)
     }
 
-    /// Milliseconds since the Unix epoch.
+    /// Returns the milliseconds since the Unix epoch.
     #[must_use]
     pub const fn unix_millis(self) -> i64 {
         self.0
     }
 
-    /// Renders the instant as an RFC 3339 UTC string, such as
-    /// `2024-02-29T12:34:56.789Z`.
+    /// Renders the instant as an RFC 3339 UTC string.
     ///
-    /// The fractional second is omitted when the instant falls on a whole
-    /// second. Otherwise it drops its trailing zeros (`.78`, `.7`). This
-    /// matches the `time` crate's rendering. Years outside `0000..=9999`
-    /// render with more digits or a sign, so the result is valid RFC 3339
-    /// only within that range.
+    /// An example is `2024-02-29T12:34:56.789Z`. The fractional second is
+    /// omitted when the instant falls on a whole second. Otherwise it drops
+    /// its trailing zeros (`.78`, `.7`). This matches the `time` crate's
+    /// rendering. Years outside `0000..=9999` render with more digits or a
+    /// sign, so the result is valid RFC 3339 only within that range.
     #[must_use]
     pub fn to_rfc3339(self) -> String {
+        self.to_string()
+    }
+}
+
+impl fmt::Display for Timestamp {
+    /// Writes the [`to_rfc3339`](Timestamp::to_rfc3339) form.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const MILLIS_PER_DAY: i64 = 86_400_000;
         let days = self.0.div_euclid(MILLIS_PER_DAY);
         let millis_of_day = self.0.rem_euclid(MILLIS_PER_DAY);
@@ -63,21 +70,17 @@ impl Timestamp {
             seconds_of_day % 3_600 / 60,
             seconds_of_day % 60,
         );
-        let mut out = format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}");
-        let millis = millis_of_day % 1_000;
-        if millis != 0 {
-            let fraction = format!("{millis:03}");
-            out.push('.');
-            out.push_str(fraction.trim_end_matches('0'));
+        write!(
+            f,
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}"
+        )?;
+        match millis_of_day % 1_000 {
+            0 => {}
+            millis if millis % 100 == 0 => write!(f, ".{}", millis / 100)?,
+            millis if millis % 10 == 0 => write!(f, ".{:02}", millis / 10)?,
+            millis => write!(f, ".{millis:03}")?,
         }
-        out.push('Z');
-        out
-    }
-}
-
-impl fmt::Display for Timestamp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_rfc3339())
+        f.write_str("Z")
     }
 }
 

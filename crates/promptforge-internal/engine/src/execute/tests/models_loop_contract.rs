@@ -250,7 +250,7 @@ fn two_notices_drained_into_one_round_land_in_the_order_their_tasks_ended() {
         .find("Task id=0.0")
         .expect("0.0's notice is sent");
     assert!(
-        last.role() == "user" && ended_first < ended_second,
+        last.role() == Role::User && ended_first < ended_second,
         "the round's last message holds both notices in queue order: {last:?}"
     );
 }

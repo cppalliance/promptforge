@@ -23,7 +23,7 @@ fn reexport_descriptor() -> ToolDescriptor {
 
 #[test]
 fn reexported_identity_looks_up_in_reexported_catalog() {
-    let catalog = ToolCatalog::new(&[reexport_descriptor()]).expect("unique catalog");
+    let catalog = ToolCatalog::new([reexport_descriptor()]).expect("unique catalog");
 
     let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     let found = catalog
@@ -53,7 +53,7 @@ fn reexported_types_are_the_contract_types() {
     let id = crate::tools::ToolId::parse("fixtures/tools/reexport").expect("valid id");
     assert_eq!(takes_contract_id(&id), "reexport");
 
-    let catalog = ToolCatalog::new(&[reexport_descriptor()]).expect("unique catalog");
+    let catalog = ToolCatalog::new([reexport_descriptor()]).expect("unique catalog");
     assert_eq!(takes_contract_catalog(&catalog), 1);
 }
 

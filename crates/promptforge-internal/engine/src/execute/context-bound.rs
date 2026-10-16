@@ -126,11 +126,7 @@ pub(super) fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
             role.description()
                 .unwrap_or_else(|| descriptor.description()),
             descriptor.id().clone(),
-            ModelInvocation {
-                temperature: None,
-                max_tokens: None,
-                thinking,
-            },
+            ModelInvocation::new().with_thinking(thinking),
             descriptor.context(),
         )
         .with_capabilities(
@@ -143,7 +139,7 @@ pub(super) fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
         if let Some(provider) = descriptor.provider() {
             binding = binding.with_provider(provider);
         }
-        set.bindings.push(binding);
+        set.push(binding);
     }
     set
 }

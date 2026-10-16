@@ -45,11 +45,7 @@ fn raw_gateway_binding(alias: &str) -> mlua::Result<ModelBinding> {
         alias,
         alias,
         id,
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
+        ModelInvocation::new(),
         RAW_ID_CONTEXT,
     ))
 }
@@ -291,17 +287,17 @@ pub(crate) fn install_models(
                         "models.default label {label:?} is not a bound model role"
                     ))
                 })?;
-            match &set.default {
+            match set.default_alias() {
                 // Idempotent under `require`: every section that requires
                 // a library re-runs it, so naming the same default again is
                 // a no-op.
-                Some(existing) if existing == &label => {}
+                Some(existing) if existing == label => {}
                 Some(existing) => {
                     return Err(mlua::Error::external(format!(
                         "models.default is already {existing:?}: the prompt-wide default cannot change mid-run"
                     )));
                 }
-                None => set.default = Some(label),
+                None => set.set_default_alias(label),
             }
             Ok(LuaModelHandle::from_binding(&binding))
         })

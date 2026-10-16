@@ -21,7 +21,7 @@ use promptforge_types::metrics::Usage;
 use serde_json::Value;
 
 use super::{Error, Lua, NonZeroU32, Result};
-use promptforge_model_client::client::Message;
+use promptforge_model_client::client::{Message, Role};
 use promptforge_model_client::detail::{message_content_value, message_raw_tool_calls};
 
 /// Why a request cannot fit the model's context window.
@@ -171,7 +171,7 @@ impl UsageAnchor {
     fn count(&self, messages: &[Message]) -> Option<u64> {
         let sent = self.sent.len();
         let reply = messages.get(sent)?;
-        if reply.role() != "assistant" || messages[..sent] != self.sent[..] {
+        if reply.role() != Role::Assistant || messages[..sent] != self.sent[..] {
             return None;
         }
         Some(self.tokens + estimate_tokens(&messages[sent + 1..]))

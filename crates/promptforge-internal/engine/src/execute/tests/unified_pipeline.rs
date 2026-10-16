@@ -58,7 +58,7 @@ fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     );
     assert_eq!(
         bodies[1].messages[0].role(),
-        "system",
+        Role::System,
         "the loop sends the builder's system message first: {bodies:?}"
     );
     assert_eq!(
@@ -74,7 +74,7 @@ fn finite_pipeline_runs_the_unified_surface_end_to_end() {
     let tool_turn = bodies[2]
         .messages
         .iter()
-        .find(|message| message.role() == "tool")
+        .find(|message| message.role() == Role::Tool)
         .expect("the second loop round answers the tool call");
     assert_eq!(
         tool_turn.content(),

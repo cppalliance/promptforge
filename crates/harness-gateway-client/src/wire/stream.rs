@@ -21,14 +21,14 @@
 
 use std::collections::BTreeMap;
 
-use promptforge::metrics::{CallMetrics, ClientTiming};
+use promptforge::metrics::ClientTiming;
 use promptforge::model::{Completion, CompletionError, RawExchange};
 use serde_json::{Map, Value};
 
 use super::classify::classify_stream_error;
 use super::delta::StreamDelta;
 use super::parse::{normalize, response_metadata};
-use crate::failure::malformed;
+use crate::failure::{decoded, malformed};
 
 /// Splits a raw SSE byte stream into `data:` payloads.
 ///
@@ -316,7 +316,8 @@ impl StreamAccumulator {
     /// response it becomes the completion's [`RawExchange`] for the debug
     /// capture. `client_timing`
     /// is what the transport measured on its own clock; it joins the
-    /// backend's sections in the completion's [`CallMetrics`], which is
+    /// backend's sections in the completion's
+    /// [`CallMetrics`](promptforge::metrics::CallMetrics), which is
     /// absent when nothing was measured.
     ///
     /// # Errors
@@ -324,8 +325,8 @@ impl StreamAccumulator {
     /// tool-call batch was cut short by a `length` or `content_filter`
     /// finish (partial arguments must not execute), the normalizer's own
     /// errors (`EmptyReply` for a turn with neither non-empty tool calls nor
-    /// non-empty text), and the validating constructor's (a
-    /// `MalformedResponse` for two calls sharing an id).
+    /// non-empty text), and the validating constructor's refusal, reported
+    /// as a `MalformedResponse` (two calls sharing an id).
     pub(super) fn finish(
         self,
         request_body: Value,
@@ -349,15 +350,13 @@ impl StreamAccumulator {
         let response_body = self.into_body();
         let turn = normalize(&response_body)?;
         let metadata = response_metadata(&response_body);
-        let metrics = CallMetrics {
-            client: client_timing,
-            ..metadata.metrics
-        };
+        let metrics = metadata.metrics.with_client(client_timing);
         let measured = metrics.usage.is_some()
             || metrics.llama.is_some()
             || metrics.vllm.is_some()
             || metrics.client.is_some();
-        let mut completion = Completion::from_result(turn.outcome, metadata.model)?
+        let mut completion = Completion::from_result(turn.outcome, metadata.model)
+            .map_err(decoded)?
             .with_metadata_diagnostics(metadata.diagnostics);
         if let Some(Value::String(model)) = request_body.get("model") {
             completion = completion.with_model(model.clone());

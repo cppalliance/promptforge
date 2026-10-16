@@ -24,10 +24,26 @@ fn plugin_id_rejects_empty_and_control_segments() {
 
     let upper = PluginId::parse("Web")
         .expect_err("comparison is case-sensitive: uppercase is outside the charset");
-    assert_eq!(upper.kind(), PluginIdErrorKind::Control);
+    assert_eq!(upper.kind(), PluginIdErrorKind::Charset);
 
     let versioned = PluginId::parse("web@2").expect_err("v1 is unversioned: '@' is a parse error");
-    assert_eq!(versioned.kind(), PluginIdErrorKind::Control);
+    assert_eq!(versioned.kind(), PluginIdErrorKind::Charset);
+
+    let accented = PluginId::parse("w\u{e9}b").expect_err("non-ASCII is outside the charset");
+    assert_eq!(accented.kind(), PluginIdErrorKind::Charset);
+
+    let control = PluginId::parse("we\tb").expect_err("a control byte is rejected");
+    assert_eq!(control.kind(), PluginIdErrorKind::Control);
+}
+
+#[test]
+fn plugin_id_from_str_parses_like_parse() {
+    let parsed: PluginId = "web".parse().expect("one segment parses");
+    assert_eq!(parsed, PluginId::parse("web").expect("one segment parses"));
+    let error = "web/fetch"
+        .parse::<PluginId>()
+        .expect_err("two segments are a tool id");
+    assert_eq!(error.kind(), PluginIdErrorKind::SegmentCount);
 }
 
 #[test]

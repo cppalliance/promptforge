@@ -13,7 +13,7 @@ use crate::execute::scope::DispatchTarget;
 use crate::lua::TaskAllowlist;
 use crate::model::ToolSchema;
 use crate::{Error, Result};
-use promptforge_model_client::detail::{tool_schema_name, tool_schema_new};
+use promptforge_model_client::detail::tool_schema_new;
 
 /// One built-in's fixed schema; the four are the Engine's own, so a
 /// refusal by the validated constructor is an internal fault.
@@ -107,7 +107,7 @@ pub(crate) fn advertise_task_builtins(
         )?,
     ];
     for schema in built {
-        dispatch.insert(tool_schema_name(&schema).into(), DispatchTarget::Builtin);
+        dispatch.insert(schema.name().into(), DispatchTarget::Builtin);
         schemas.push(schema);
     }
     Ok(())

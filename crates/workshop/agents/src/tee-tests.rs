@@ -27,10 +27,7 @@ fn meta() -> RunMeta {
 }
 
 fn provenance() -> Provenance {
-    Provenance {
-        task: "0".parse().unwrap(),
-        seq: 0,
-    }
+    Provenance::new("0".parse().unwrap(), 0)
 }
 
 fn section_started() -> Event {

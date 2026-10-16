@@ -37,13 +37,14 @@ use crate::tools::{OutputTrust, ToolId};
 #[path = "emitter-tests.rs"]
 mod tests;
 
-/// Whether a run captures each model round's raw request and response
-/// bodies as `Request` and `Response` events.
+/// Selects whether a run reports each model round's raw bodies as events.
 ///
-/// Off by default. The `Chat` effect and its answer already carry the
-/// bodies, so a caller that logs effects has them. A caller that also
-/// wants them in the event stream selects `On`.
+/// The bodies are the round's raw request and response, reported as
+/// `Request` and `Response` events. Off by default. The `Chat` effect and
+/// its answer already carry the bodies, so a caller that logs effects has
+/// them. A caller that also wants them in the event stream selects `On`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DebugMode {
     /// The model rounds skip the `Request` and `Response` events and
     /// the body clones those events need.
@@ -53,9 +54,11 @@ pub enum DebugMode {
     On,
 }
 
-/// One boundary of loading a library section into a section's
-/// environment: the phase [`Emitter::library_load`] reports.
+/// Names one phase of loading a library section into a section's environment.
+///
+/// [`Emitter::library_load`] reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum LibraryLoad {
     /// Loading began.
     Started,
@@ -80,10 +83,7 @@ impl EventBuffer {
     /// by one. Saturating at `u32::MAX`, which no reachable run approaches.
     fn next_provenance(&mut self, task: &TaskId) -> Provenance {
         let seq = self.seqs.entry(task.clone()).or_insert(0);
-        let provenance = Provenance {
-            task: task.clone(),
-            seq: *seq,
-        };
+        let provenance = Provenance::new(task.clone(), *seq);
         *seq = seq.saturating_add(1);
         provenance
     }

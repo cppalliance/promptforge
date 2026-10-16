@@ -9,13 +9,7 @@ use crate::lua::UsageAnchor;
 use crate::model::{Message, ModelId};
 
 fn usage(prompt: u32, completion: u32) -> Usage {
-    Usage {
-        prompt_tokens: prompt,
-        completion_tokens: completion,
-        total_tokens: prompt + completion,
-        cached_tokens: None,
-        reasoning_tokens: None,
-    }
+    Usage::new(prompt, completion, prompt + completion)
 }
 
 fn request(text: &str) -> Vec<Message> {
