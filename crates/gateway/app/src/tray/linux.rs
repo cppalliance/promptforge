@@ -284,7 +284,7 @@ async fn notify_first_run(bus: &zbus::Connection, settings_url: &str) {
 /// One `org.freedesktop.Notifications` `Notify` call: no icon, no actions,
 /// the daemon-default timeout. The reply (the notification id) is unused.
 async fn post_notification(bus: &zbus::Connection, settings_url: &str) -> Result<(), zbus::Error> {
-    let hints: std::collections::HashMap<&str, zbus::zvariant::Value> =
+    let hints: std::collections::HashMap<&str, zbus::zvariant::Value<'_>> =
         std::collections::HashMap::new();
     bus.call_method(
         Some(logic::linux::NOTIFICATIONS_NAME),
