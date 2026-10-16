@@ -16,7 +16,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64.zip",
-            sha256: "39f2c4e4e2660f8d1df35cac5a9da187b4bfda1463b597f4b55bdb984fd634bb",
+            sha256: "7d4b402495dd8ce1574abcdde3fb37823155571efc3f056caaf3c2b4220de42f",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "whisper.dll",
@@ -28,7 +28,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         // CUDA 13 runs on Windows driver 580 or later.
         min_driver_major: Some(580),
         // The native code in the pinned archive's `ggml-cuda.dll` fatbinary,
-        // as read on 2026-10-02. Its PTX for compute_75, compute_80, and
+        // as read on 2026-10-16. Its PTX for compute_75, compute_80, and
         // compute_90 is ISA 9.3 from CUDA 13.3, which an older driver cannot
         // compile. Like `X86_BASELINE`, the list is tied to `WHISPER_RELEASE`,
         // and a release bump re-reads it from the new archive.
@@ -38,7 +38,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-windows-x86_64-cuda.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip",
-            sha256: "f1bc54d7288e21ee826ccb5767249836b780fc316bec4a0374873e73163dae12",
+            sha256: "b2683fe38fd28d80fdb42d123c3e03d480786095b4a0affa0542ae1ce88ac752",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "whisper.dll",
@@ -54,7 +54,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-aarch64-metal.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-macos-aarch64-metal.zip",
-            sha256: "2315c758f1a7a0a8a98e887d1b49b2418c1e95e75e12dd063472d855bfbe2f78",
+            sha256: "3afe9e7b5754af9bb0231e6b817f2a3dc164e8d72f7e5dab11aaab529cd0e37f",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.dylib",
@@ -70,7 +70,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-macos-x86_64.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-macos-x86_64.zip",
-            sha256: "425664a05f844683bc1c9c26c52311cfc6546b9f72f3ce8fd4f096c5e93df22b",
+            sha256: "7dc019031785d1d9d5da3e0235cfd4e161b9b28dee842ef743d9a11965af081a",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.dylib",
@@ -86,7 +86,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64.zip",
-            sha256: "0dc1a6adc29bfaecb6c2c8c8fc9ec2f903b25e6bfadd67bbdb239521f9101155",
+            sha256: "1f29906b27587b5ed3412bdcaaa335cd2058e2291c496a73c03a8977e387d427",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.so",
@@ -106,7 +106,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-x86_64-cuda.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-linux-x86_64-cuda.zip",
-            sha256: "d1e7eba5d486652718c3cc4572f57497eab33dfafc66dcb83583c01f93dac863",
+            sha256: "d08cfcdfc72ee373745b19a71da8fd67d32fa42ac8d63cfb4a28034937eafa97",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.so",
@@ -122,7 +122,7 @@ pub(super) const WHISPER_ASSETS: &[WhisperAsset<'static>] = &[
         archive: ArchiveRef {
             archive_name: "whisper-b4938-linux-aarch64.zip",
             url: "https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-linux-aarch64.zip",
-            sha256: "1400ed00171e15596838ce839e5e90fab176f8653ead5b940dfda36bc5e68fc3",
+            sha256: "30033c694a77dc5a82a73a99f846461af38820efc558fd0e2c0665c43fbeee1f",
             archive_kind: ArchiveKind::Zip,
         },
         library_name: "libwhisper.so",

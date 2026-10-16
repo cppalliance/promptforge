@@ -66,7 +66,7 @@ jobs:
             -Uri 'https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip' `
             -OutFile $archive
           $runtimeHash = (Get-FileHash $archive -Algorithm SHA256).Hash
-          if ($runtimeHash -ne 'F1BC54D7288E21EE826CCB5767249836B780FC316BEC4A0374873E73163DAE12') {
+          if ($runtimeHash -ne 'B2683FE38FD28D80FDB42D123C3E03D480786095B4A0AFFA0542AE1CE88AC752') {
             throw "unexpected Whisper runtime hash: $runtimeHash"
           }
           Expand-Archive -Path $archive -DestinationPath $fixture -Force

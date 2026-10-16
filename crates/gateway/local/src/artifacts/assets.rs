@@ -239,7 +239,7 @@ const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {
     archives: &[ArchiveRef {
         archive_name: "llama-server-cuda-blackwell-b10082-win-x64.zip",
         url: "https://github.com/cppalliance/runvil/releases/download/llama-cuda-blackwell-b10082/llama-server-cuda-blackwell-b10082-win-x64.zip",
-        sha256: "10dcd278f0051060bd9adeee75e1d0024e7d19fe359c2df2e20b1ffc7937168c",
+        sha256: "261083aeafef04d95ba9d136bd5025ea8a996a061dfbf60669c8b21cf5a87867",
         archive_kind: ArchiveKind::Zip,
     }],
     executable_name: "llama-server.exe",
