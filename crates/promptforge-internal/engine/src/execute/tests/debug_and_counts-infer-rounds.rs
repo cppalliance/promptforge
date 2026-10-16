@@ -3,10 +3,9 @@
 //! reasoning, then one `assistant_reply` with `origin = Infer`.
 
 use promptforge_parser::test_support::PromptSource;
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::metrics::CallMetrics;
 
 use super::*;
+use crate::test_support::recording::{ReplyReport, ThinkingReport};
 
 /// Records an infer round's boundary observations and content hooks as one
 /// line each, so the whole sequence is asserted rather than a count: the
@@ -37,34 +36,30 @@ impl Observer for InferRoundRecorder {
         self.push(format!("{section}: {event}"));
     }
 
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
+    fn on_thinking(&self, report: ThinkingReport<'_>) {
+        let ThinkingReport {
+            section,
+            turn,
+            model,
+            text,
+            ..
+        } = report;
         self.push(format!(
             "{section}: thinking turn={turn} model={model} text={text}"
         ));
     }
 
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
+    fn on_assistant_reply(&self, report: ReplyReport<'_>) {
+        let ReplyReport {
+            section,
+            turn,
+            text,
+            finish_reason,
+            model,
+            metrics,
+            origin,
+            ..
+        } = report;
         self.push(format!(
             "{section}: assistant_reply origin={origin:?} turn={turn} text={text} finish={finish_reason:?} model={model} metrics={}",
             metrics.is_some()

@@ -360,7 +360,7 @@ impl Trace {
     pub(crate) fn captures(&self) -> Vec<Capture> {
         let captures = Captures::default();
         for event in self.events.iter().cloned() {
-            forward_one(event, &NullObserver::default(), Some(&captures));
+            forward_one(event, &NullObserver, Some(&captures));
         }
         captures
             .0

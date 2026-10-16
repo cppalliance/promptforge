@@ -24,6 +24,7 @@ fn chain(error: &(dyn std::error::Error + 'static)) -> Vec<String> {
 }
 
 /// One failure of each variant that keeps its cause in a plain field.
+#[track_caller]
 fn cause_bearing() -> Vec<Error> {
     let frontmatter = Prompt::parse("---\nname: [unclosed\n---\n\n# T\n\n## S\n\np\n", "test")
         .0
@@ -70,6 +71,7 @@ fn cause_bearing() -> Vec<Error> {
 
 /// One failure of each variant that still keeps its cause as a `source()`,
 /// so a chain printer walks more than one segment.
+#[track_caller]
 fn source_bearing() -> Vec<Error> {
     let schema =
         promptforge_model_client::detail::tool_schema_new("echo", "", serde_json::json!([]))
@@ -89,6 +91,7 @@ fn source_bearing() -> Vec<Error> {
 
 /// Asserts that no segment of `error`'s source chain repeats inside an
 /// earlier one, and returns how many segments the chain has.
+#[track_caller]
 fn assert_no_segment_repeats(error: &(dyn std::error::Error + 'static)) -> usize {
     let segments = chain(error);
     for (index, segment) in segments.iter().enumerate() {

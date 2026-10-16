@@ -5,15 +5,14 @@
 //! Lifecycle variants become the matching [`Observation`]; content
 //! variants become the `on_*` hooks; `Request` and `Response` become the
 //! capture pair. The order of the batch is the order the observer sees.
-//!
-//! The `on_*` hooks take a `chain_id` and `depth` an [`Event`] does not
-//! have - its provenance names the task instead - so the adapter passes
-//! zero for both; a suite that needs the grouping reads `provenance.task`
-//! off the events themselves.
 
 use promptforge_types::event::Event;
+use promptforge_types::tools::OutputTrust;
 
-use super::{DebugCapture, DebugEvent, Observation, Observer};
+use super::{
+    DebugCapture, DebugEvent, Observation, Observer, ReplyReport, TaskNoticeReport, ThinkingReport,
+    ToolCallsReport, ToolResultReport,
+};
 
 /// Declares the payload-free lifecycle pairs once and derives the
 /// event-to-observation fold from the one list.
@@ -303,7 +302,13 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             model,
             text,
             ..
-        } => observer.on_thinking(&execution, &section, 0, 0, turn, &model, &text),
+        } => observer.on_thinking(ThinkingReport {
+            execution: &execution,
+            section: &section,
+            turn,
+            model: &model,
+            text: &text,
+        }),
         Event::AssistantReply {
             execution,
             section,
@@ -314,18 +319,16 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             metrics,
             origin,
             ..
-        } => observer.on_assistant_reply(
-            &execution,
-            &section,
-            0,
-            0,
+        } => observer.on_assistant_reply(ReplyReport {
+            execution: &execution,
+            section: &section,
             turn,
-            &text,
-            finish_reason.as_deref(),
-            &model,
-            metrics.as_ref(),
+            text: &text,
+            finish_reason: finish_reason.as_deref(),
+            model: &model,
+            metrics: metrics.as_ref(),
             origin,
-        ),
+        }),
         Event::AssistantToolCalls {
             execution,
             section,
@@ -333,7 +336,13 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             model,
             calls,
             ..
-        } => observer.on_assistant_tool_calls(&execution, &section, 0, 0, turn, &model, &calls),
+        } => observer.on_assistant_tool_calls(ToolCallsReport {
+            execution: &execution,
+            section: &section,
+            turn,
+            model: &model,
+            calls: &calls,
+        }),
         Event::ToolResult {
             execution,
             section,
@@ -343,17 +352,19 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             content,
             trusted,
             ..
-        } => observer.on_tool_result(
-            &execution,
-            &section,
-            0,
-            0,
+        } => observer.on_tool_result(ToolResultReport {
+            execution: &execution,
+            section: &section,
             turn,
-            &tool_call_id,
-            &alias,
-            &content,
-            trusted,
-        ),
+            tool_call_id: &tool_call_id,
+            alias: &alias,
+            content: &content,
+            trust: if trusted {
+                OutputTrust::Trusted
+            } else {
+                OutputTrust::Untrusted
+            },
+        }),
         Event::TaskNotice {
             execution,
             section,
@@ -361,7 +372,13 @@ fn forward_content(event: Event, observer: &dyn Observer) {
             task,
             text,
             ..
-        } => observer.on_task_notice(&execution, &section, 0, 0, turn, &task, &text),
+        } => observer.on_task_notice(TaskNoticeReport {
+            execution: &execution,
+            section: &section,
+            turn,
+            task: &task,
+            text: &text,
+        }),
         // Routed here by `forward_one` for this group alone; `Event` is
         // `#[non_exhaustive]` in `promptforge-types`.
         _ => {}

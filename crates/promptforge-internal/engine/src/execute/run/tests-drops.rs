@@ -27,6 +27,7 @@ use crate::test_support::scripted_chat::text;
 
 /// A run over one section whose Lua is `body`, with the `writer` role
 /// bound to `test-model` and `tools/echo` in the catalog.
+#[track_caller]
 fn bound_run(body: &str) -> Run {
     bound_sections(&format!(
         "## Only\n\n```lua\nmodels.use('writer')\n{body}\n```\n"
@@ -35,6 +36,7 @@ fn bound_run(body: &str) -> Run {
 
 /// A run over `sections`, the prompt's H2 sections, with the `writer` role
 /// bound to `test-model` and `tools/echo` in the catalog.
+#[track_caller]
 fn bound_sections(sections: &str) -> Run {
     let source = format!(
         "---\nname: t\ndescription: d\npromptforge: 0\nmodels:\n  writer: {{}}\n\
@@ -60,6 +62,7 @@ fn bound_sections(sections: &str) -> Run {
 
 /// Steps `run` to its next effect and answers it `Dropped`, returning the
 /// effect's record and the answer's.
+#[track_caller]
 fn drop_next(run: &mut Run) -> (EffectRecord, AnswerRecord) {
     let (id, effect) = only_effect(run.step());
     let answer = EffectAnswer::Dropped;
@@ -216,6 +219,7 @@ fn an_uncaught_dropped_chat_or_tool_call_ends_the_run_cancelled() {
 
 /// A run whose `## Main` runs `main` beside the `## Child` it spawns, whose
 /// one round stays out until the test answers it.
+#[track_caller]
 fn timed_run(main: &str) -> Run {
     bound_sections(&format!(
         "## Main\n\n```lua\nmodels.use('writer')\n{main}\n```\n\n\
@@ -236,6 +240,7 @@ fn caught_wait(wait: &str) -> String {
 
 /// Steps `run` to the main's parked timed wait and returns the wait's
 /// timer and the child's round.
+#[track_caller]
 fn parked_wait(run: &mut Run) -> (EffectId, EffectId) {
     let Step::Pending { effects, .. } = run.step() else {
         panic!("the main parks on its timed wait while the child's round is out");

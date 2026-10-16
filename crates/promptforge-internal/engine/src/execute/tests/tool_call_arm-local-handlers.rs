@@ -42,7 +42,7 @@ fn a_local_lua_tool_call_issues_no_leaf_work() {
     assert!(
         lines
             .iter()
-            .any(|line| line == "Only: tool_result id= alias=grab trusted=true content=got hi"),
+            .any(|line| line == "Only: tool_result id= alias=grab trust=Trusted content=got hi"),
         "a script-initiated local call reports its trusted result under no call id: {lines:?}"
     );
 }
@@ -62,9 +62,10 @@ fn a_model_issued_local_tool_call_reports_under_its_call_id() {
     );
     let lines = tool_lines(&trace).lines();
     assert!(
-        lines.iter().any(
-            |line| line == "Only: tool_result id=call_7 alias=grab trusted=true content=got hi"
-        ),
+        lines
+            .iter()
+            .any(|line| line
+                == "Only: tool_result id=call_7 alias=grab trust=Trusted content=got hi"),
         "ToolResult fires under the model's call id: {lines:?}"
     );
 }
@@ -82,7 +83,7 @@ fn a_script_called_local_handler_uses_the_store() {
     assert_eq!(trace.text(), "kept hi");
     assert_eq!(
         tool_result_lines(&tool_lines(&trace)),
-        vec!["Only: tool_result id= alias=grab trusted=true content=kept hi".to_owned()]
+        vec!["Only: tool_result id= alias=grab trust=Trusted content=kept hi".to_owned()]
     );
 }
 
@@ -130,8 +131,8 @@ fn a_nested_local_call_reports_both_results_innermost_first() {
     assert_eq!(
         tool_result_lines(&tool_lines(&trace)),
         vec![
-            "Only: tool_result id= alias=inner trusted=true content=inner hi".to_owned(),
-            "Only: tool_result id=call_1 alias=outer trusted=true content=outer inner hi"
+            "Only: tool_result id= alias=inner trust=Trusted content=inner hi".to_owned(),
+            "Only: tool_result id=call_1 alias=outer trust=Trusted content=outer inner hi"
                 .to_owned(),
         ],
         "each call reports under its own id, the inner call closing first"
@@ -176,7 +177,7 @@ fn a_bound_failure_inside_a_model_issued_local_call_raises_kind_tool_in_the_hand
     );
     assert_eq!(
         tool_result_lines(&tool_lines(&trace)),
-        vec!["Only: tool_result id=call_1 alias=grab trusted=true content=tool".to_owned()],
+        vec!["Only: tool_result id=call_1 alias=grab trust=Trusted content=tool".to_owned()],
         "the inner failure fires no ToolResult; only the local call reports under call_1"
     );
 }
@@ -208,13 +209,13 @@ fn a_handlers_text_stays_trusted_and_a_bound_tools_wrapper_survives() {
     let lines = tool_result_lines(&tool_lines(&trace));
     assert!(
         lines.contains(
-            &"Only: tool_result id= alias=plain trusted=true content=plain text".to_owned()
+            &"Only: tool_result id= alias=plain trust=Trusted content=plain text".to_owned()
         ),
         "the plain handler reports trusted: {lines:?}"
     );
     assert!(
         lines.iter().any(|line| {
-            line.starts_with("Only: tool_result id= alias=grab trusted=true content=")
+            line.starts_with("Only: tool_result id= alias=grab trust=Trusted content=")
                 && line.contains("<untrusted_input_")
         }),
         "the wrapping handler reports trusted, its text still wrapped: {lines:?}"

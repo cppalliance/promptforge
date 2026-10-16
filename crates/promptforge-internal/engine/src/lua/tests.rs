@@ -37,6 +37,7 @@ use crate::test_support::recording::null_emitter;
 use crate::test_support::scenario::{TEST_SEED, test_binding};
 use crate::untrusted::GuardNonce;
 
+#[track_caller]
 fn test_models() -> ModelSet {
     ModelSet::from_parts(
         vec![test_binding("fast", "a fast model", "test-model")],
@@ -47,6 +48,7 @@ fn test_models() -> ModelSet {
 /// A minimal tool descriptor behind a bound alias, for handle-form
 /// dispatch tests; dispatch never reaches an implementation through the
 /// yield boundary, so the tool is data alone.
+#[track_caller]
 fn stub_tool() -> ToolDescriptor {
     ToolDescriptor::new(
         ToolId::parse("tools/echo").expect("valid id"),
@@ -56,6 +58,7 @@ fn stub_tool() -> ToolDescriptor {
 }
 
 /// One tool set offering the stub tool under its wire name `tools_echo`.
+#[track_caller]
 fn test_tools() -> ToolSet {
     ToolSet::new(
         Vec::new(),
@@ -67,12 +70,14 @@ fn test_tools() -> ToolSet {
 /// Builds a section VM through the real setup path: construction, Engine
 /// injection, the control surface with the yield shims, `require`, and the
 /// store yield shims.
+#[track_caller]
 fn scheduler_vm(models: &ModelSet, var: Option<&serde_json::Value>) -> SectionVm {
     scheduler_vm_with_tools(models, &ToolSet::default(), var)
 }
 
 /// [`scheduler_vm`] with an explicit tool set, so `tools.get` reads its
 /// tool objects.
+#[track_caller]
 fn scheduler_vm_with_tools(
     models: &ModelSet,
     tools: &ToolSet,
@@ -145,6 +150,7 @@ fn set_up_vm(binds: &VmBinds<'_>) -> SectionVm {
 
 /// Starts `source` as a coroutine on the VM and runs it to its first
 /// yield, returning the thread and the yielded values.
+#[track_caller]
 fn start(vm: &SectionVm, source: &str) -> (Thread, MultiValue) {
     let function = vm
         .lua()
@@ -161,12 +167,14 @@ fn start(vm: &SectionVm, source: &str) -> (Thread, MultiValue) {
     (thread, yielded)
 }
 
+#[track_caller]
 fn yielded_request(vm: &SectionVm, source: &str) -> Request {
     let (_thread, yielded) = start(vm, source);
     parse_request(vm, yielded)
 }
 
 /// Parses one yielded request table, failing on anything malformed.
+#[track_caller]
 fn parse_request(vm: &SectionVm, yielded: MultiValue) -> Request {
     let value = yielded.into_iter().next().expect("one yielded value");
     match Request::from_yield(vm.lua(), &value) {
@@ -176,6 +184,7 @@ fn parse_request(vm: &SectionVm, yielded: MultiValue) -> Request {
 }
 
 /// Renders `answer` as the shim's envelope and resumes the thread with it.
+#[track_caller]
 fn resume_with(vm: &SectionVm, thread: &Thread, answer: Answer<Error>) -> MultiValue {
     let (envelope, _retained) = answer
         .into_envelope(vm.lua())
@@ -187,6 +196,7 @@ fn resume_with(vm: &SectionVm, thread: &Thread, answer: Answer<Error>) -> MultiV
 
 /// Compiles one author block the way the parser's prologue chunks are
 /// compiled.
+#[track_caller]
 fn compile_block(source: &str) -> LuaProgram {
     LuaProgram::compile(
         source,

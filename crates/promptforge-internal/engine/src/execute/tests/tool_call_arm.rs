@@ -16,6 +16,7 @@ use promptforge_parser::test_support::one_section;
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::lua::ToolBinding;
+use crate::test_support::recording::ToolResultReport;
 use crate::test_support::scenario::Trace;
 
 /// Records every observation and every `on_tool_result` report as one
@@ -44,20 +45,17 @@ impl Observer for ToolRecorder {
         self.push(format!("{section}: {event}"));
     }
 
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        _turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
+    fn on_tool_result(&self, report: ToolResultReport<'_>) {
+        let ToolResultReport {
+            section,
+            tool_call_id,
+            alias,
+            content,
+            trust,
+            ..
+        } = report;
         self.push(format!(
-            "{section}: tool_result id={tool_call_id} alias={alias} trusted={trusted} content={content}"
+            "{section}: tool_result id={tool_call_id} alias={alias} trust={trust:?} content={content}"
         ));
     }
 }
@@ -105,7 +103,7 @@ fn a_failing_bound_tool_with_a_call_id_resumes_with_untrusted_failure_text() {
     assert!(
         lines
             .iter()
-            .any(|line| line.starts_with("Only: tool_result id=call_1 alias=fail trusted=false")),
+            .any(|line| line.starts_with("Only: tool_result id=call_1 alias=fail trust=Untrusted")),
         "ToolResult fires under the model's call id as untrusted: {lines:?}"
     );
 }

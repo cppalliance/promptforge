@@ -67,6 +67,11 @@ pub(crate) fn fresh_access() -> std::sync::Arc<promptforge_vfs::Access> {
 /// unbound, and a model round is answered by
 /// `chat`, a function of the effect alone so the answer never depends on
 /// arrival order.
+///
+/// # Panics
+///
+/// Only when `chat` panics: a store operation's failure is answered as a
+/// `Vfs` error, not raised.
 pub fn perform_locally(
     effect: &Effect,
     chat: &mut impl FnMut(&Effect) -> EffectAnswer,
@@ -95,6 +100,12 @@ pub fn perform_locally(
 /// `perform` is handed the effect's id beside the effect so a scripted
 /// performer can correlate answers however it likes; it must return an
 /// answer of the effect's own kind (or `Dropped`), as the run requires.
+///
+/// # Panics
+///
+/// Only when `perform` panics. An answer of the wrong kind ends the run
+/// with an internal failure in its result, and so does a pending step
+/// that issued no effect.
 pub fn drive(
     mut run: Run,
     mut perform: impl FnMut(EffectId, &Effect) -> EffectAnswer,

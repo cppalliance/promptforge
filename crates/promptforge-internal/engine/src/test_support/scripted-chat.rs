@@ -54,8 +54,10 @@ fn mock_text(content: &str, finish_reason: Option<&str>) -> ScriptedReply {
     }
 }
 
-/// A tool-call batch naming [`MOCK_MODEL`]: each call's id, wire name, and
-/// JSON-encoded arguments, in batch order.
+/// A tool-call batch naming [`MOCK_MODEL`].
+///
+/// Each call is its id, wire name, and JSON-encoded arguments, in batch
+/// order.
 ///
 /// # Panics
 /// When a call's arguments are not JSON.
@@ -76,9 +78,10 @@ pub fn calls(calls: &[(&str, &str, &str)]) -> ScriptedReply {
     }
 }
 
-/// A failed round of `kind`, as the gateway client reports a non-success
-/// `status` with `body`: the kind's phrase with the status appended, and
-/// the body as the detail.
+/// A failed round of `kind`, with HTTP `status` and response `body`.
+///
+/// It reads as the gateway client reports a non-success status: the kind's
+/// phrase with the status appended, and the body as the detail.
 #[must_use]
 pub fn fail(kind: CompletionErrorKind, status: u16, body: &str) -> ScriptedReply {
     ScriptedReply::Failure {
@@ -98,7 +101,9 @@ pub fn delayed(delay: Duration, reply: ScriptedReply) -> ScriptedReply {
 /// One scripted answer to a round.
 #[derive(Clone, Debug)]
 pub enum ScriptedReply {
-    /// A text reply. Whitespace-only `content` is an empty reply.
+    /// A text reply.
+    ///
+    /// Whitespace-only `content` is an empty reply.
     Text {
         /// The model the completion names as its server.
         model: String,
@@ -118,8 +123,10 @@ pub enum ScriptedReply {
         /// The calls, in batch order.
         calls: Vec<(String, String, Value)>,
     },
-    /// A failed round. A fresh [`CompletionError`] is built for every
-    /// answer, because the error is not `Clone`.
+    /// A failed round.
+    ///
+    /// A fresh [`CompletionError`] is built for every answer, because the
+    /// error is not `Clone`.
     Failure {
         /// The failure's kind.
         kind: CompletionErrorKind,
@@ -143,8 +150,10 @@ impl ScriptedReply {
         }
     }
 
-    /// Answers a round with this reply, ignoring its delay: the answer
-    /// [`ScriptedChat::complete_now`] gives a round within the timeout.
+    /// Answers a round with this reply, ignoring its delay.
+    ///
+    /// This is the answer [`ScriptedChat::complete_now`] gives a round
+    /// within the timeout.
     ///
     /// # Errors
     /// Returns the scripted failure, the `EmptyReply` failure for an empty
@@ -255,10 +264,11 @@ impl ScriptedCall {
     }
 }
 
-/// A scripted model: it answers rounds from its script in order,
-/// repeating the last reply once the script is exhausted, counts them,
-/// and records what each carried. Clones share the script, the count, and
-/// the record.
+/// A scripted model that answers rounds from its script in order.
+///
+/// It repeats the last reply once the script is exhausted, counts the
+/// rounds, and records what each carried. Clones share the script, the
+/// count, and the record.
 #[derive(Clone, Debug)]
 pub struct ScriptedChat {
     replies: Arc<Vec<ScriptedReply>>,
@@ -310,10 +320,12 @@ impl ScriptedChat {
             .cloned()
     }
 
-    /// Answers one round at once: records what it carried, counts it, and
-    /// returns the completion or the failure. Nothing waits: a delay past
-    /// `timeout` answers the `Timeout` failure, and any other delay answers
-    /// the inner reply.
+    /// Answers one round at once.
+    ///
+    /// It records what the round carried, counts it, and returns the
+    /// completion or the failure. Nothing waits: a delay past `timeout`
+    /// answers the `Timeout` failure, and any other delay answers the inner
+    /// reply.
     ///
     /// # Errors
     /// Returns the scripted failure, the `Timeout` failure for a delay past

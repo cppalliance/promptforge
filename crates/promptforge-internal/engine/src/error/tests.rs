@@ -10,6 +10,7 @@ use crate::parser::Prompt;
 #[path = "tests-chain.rs"]
 mod chain;
 
+#[track_caller]
 fn assert_source_survives_run_error(error: Error) {
     assert!(
         std::error::Error::source(&error).is_some(),

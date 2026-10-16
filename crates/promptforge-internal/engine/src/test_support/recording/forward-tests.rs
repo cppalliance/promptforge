@@ -1,7 +1,8 @@
 //! Tests for the recording emitter's forwarding of event groups to their
-//! seams: a batch reaches its seams in order, a library load keeps its
-//! library, a debug event without a capture is dropped, and every `Event`
-//! variant the suite names reaches exactly one seam.
+//! seams: a batch reaches its seams in order, a tool result keeps its
+//! coordinates and trust, a library load keeps its library, a debug event
+//! without a capture is dropped, and every `Event` variant the suite names
+//! reaches exactly one seam.
 
 use std::sync::Mutex;
 
@@ -33,99 +34,89 @@ impl Observer for SeamRecorder {
             .push((section.to_owned(), event.to_string()));
     }
 
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        _metrics: Option<&promptforge_types::metrics::CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
+    fn on_assistant_reply(&self, report: ReplyReport<'_>) {
+        let ReplyReport {
+            execution,
+            section,
+            turn,
+            text,
+            finish_reason,
+            model,
+            origin,
+            ..
+        } = report;
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: reply origin={origin:?} chain={chain_id} depth={depth} turn={turn} text={text} finish={finish_reason:?} model={model}"
+                "{execution}/{section}: reply origin={origin:?} turn={turn} text={text} finish={finish_reason:?} model={model}"
             ));
     }
 
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
+    fn on_thinking(&self, report: ThinkingReport<'_>) {
+        let ThinkingReport {
+            execution,
+            section,
+            turn,
+            model,
+            text,
+        } = report;
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: thinking turn={turn} model={model} text={text}"
+                "{execution}/{section}: thinking turn={turn} model={model} text={text}"
             ));
     }
 
-    fn on_assistant_tool_calls(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        model: &str,
-        calls: &[ToolCallEvent],
-    ) {
+    fn on_assistant_tool_calls(&self, report: ToolCallsReport<'_>) {
+        let ToolCallsReport {
+            execution,
+            section,
+            turn,
+            model,
+            calls,
+        } = report;
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: calls turn={turn} model={model} n={}",
+                "{execution}/{section}: calls turn={turn} model={model} n={}",
                 calls.len()
             ));
     }
 
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
+    fn on_tool_result(&self, report: ToolResultReport<'_>) {
+        let ToolResultReport {
+            execution,
+            section,
+            turn,
+            tool_call_id,
+            alias,
+            content,
+            trust,
+        } = report;
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: result turn={turn} id={tool_call_id} alias={alias} content={content} trusted={trusted}"
+                "{execution}/{section}: result turn={turn} id={tool_call_id} alias={alias} content={content} trust={trust:?}"
             ));
     }
 
-    fn on_task_notice(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        task: &TaskId,
-        text: &str,
-    ) {
+    fn on_task_notice(&self, report: TaskNoticeReport<'_>) {
+        let TaskNoticeReport {
+            execution,
+            section,
+            turn,
+            task,
+            text,
+        } = report;
         self.content
             .lock()
             .expect("the recorder mutex is not poisoned")
             .push(format!(
-                "{section}: notice turn={turn} task={task} text={text}"
+                "{execution}/{section}: notice turn={turn} task={task} text={text}"
             ));
     }
 }
@@ -214,9 +205,8 @@ fn each_event_group_reaches_its_seam_in_batch_order() {
     assert_eq!(
         *recorder.content.lock().expect("not poisoned"),
         vec![
-            "A: reply origin=Chat chain=0 depth=0 turn=1 text=hi finish=Some(\"stop\") model=m"
-                .to_owned(),
-            "A: thinking turn=1 model=m text=hmm".to_owned(),
+            "run/A: reply origin=Chat turn=1 text=hi finish=Some(\"stop\") model=m".to_owned(),
+            "run/A: thinking turn=1 model=m text=hmm".to_owned(),
         ]
     );
     assert_eq!(
@@ -248,10 +238,42 @@ fn a_reply_forwards_its_origin_to_the_observer() {
     assert_eq!(
         *recorder.content.lock().expect("not poisoned"),
         vec![
-            "A: reply origin=Infer chain=0 depth=0 turn=1 text=inferred finish=Some(\"stop\") model=m"
+            "run/A: reply origin=Infer turn=1 text=inferred finish=Some(\"stop\") model=m"
                 .to_owned(),
         ],
         "the observer must see the reply's origin"
+    );
+}
+
+#[test]
+fn a_tool_result_forwards_its_coordinates_and_trust_to_the_observer() {
+    // Each report names its own event's run and section and its trust
+    // level: swapping the coordinates, dropping one, or inverting the
+    // trust mapping would change these lines.
+    let recorder = SeamRecorder::default();
+    let result = |execution: &str, trusted: bool| Event::ToolResult {
+        execution: execution.to_owned(),
+        section: "A".to_owned(),
+        provenance: provenance(),
+        turn: 2,
+        tool_call_id: "call_1".to_owned(),
+        alias: "search".to_owned(),
+        tool: None,
+        content: "found".to_owned(),
+        trusted,
+    };
+    forward(
+        vec![result("run-1", true), result("run-2", false)],
+        &recorder,
+    );
+    assert_eq!(
+        *recorder.content.lock().expect("not poisoned"),
+        vec![
+            "run-1/A: result turn=2 id=call_1 alias=search content=found trust=Trusted".to_owned(),
+            "run-2/A: result turn=2 id=call_1 alias=search content=found trust=Untrusted"
+                .to_owned(),
+        ],
+        "the observer must see each result's own run and trust level"
     );
 }
 

@@ -82,14 +82,17 @@ pub(crate) mod detail {
     }
 }
 
-/// One typed operational observation, as the suites name it: the
-/// payload-free view of a lifecycle [`Event`](promptforge_types::event::Event),
-/// a library load with its library, the author's `log` checkpoint, or a
-/// task boundary with its seeds.
+/// One typed operational observation, as the suites name it.
+///
+/// It is the payload-free view of a lifecycle
+/// [`Event`](promptforge_types::event::Event), a library load with its
+/// library, the author's `log` checkpoint, or a task boundary with its
+/// seeds.
 ///
 /// Every fixed variant maps 1:1 to an event variant; its [`Display`](fmt::Display)
 /// rendering is the stable trace string the suites compare.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Observation {
     /// Prompt parsing began.
     ParseStarted,
@@ -244,8 +247,10 @@ pub enum Observation {
 }
 
 impl Observation {
-    /// Returns the fixed trace label for a fixed variant, or `None` for
-    /// [`Observation::Lua`] / [`Observation::Other`], which hold a message.
+    /// Returns the fixed trace label for a fixed variant.
+    ///
+    /// Returns `None` for [`Observation::Lua`] and [`Observation::Other`],
+    /// which hold a message.
     #[must_use]
     pub fn label(&self) -> Option<&'static str> {
         let label = match self {

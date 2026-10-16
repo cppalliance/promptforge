@@ -24,6 +24,7 @@ use promptforge_types::ids::TaskId;
 
 use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
 use super::*;
+use crate::test_support::recording::TaskNoticeReport;
 use crate::test_support::rig::Rig;
 
 /// The tool a child parks on until the test releases it: `tools/delayed`,
@@ -76,20 +77,15 @@ impl Observer for NoticeRecorder {
             .push((section.to_owned(), event));
     }
 
-    fn on_task_notice(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        _turn: u32,
-        task: &TaskId,
-        text: &str,
-    ) {
+    fn on_task_notice(&self, report: TaskNoticeReport<'_>) {
         self.notices
             .lock()
             .expect("the recorder mutex is not poisoned")
-            .push((section.to_owned(), task.clone(), text.to_owned()));
+            .push((
+                report.section.to_owned(),
+                report.task.clone(),
+                report.text.to_owned(),
+            ));
     }
 }
 

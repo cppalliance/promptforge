@@ -4,14 +4,14 @@
 //! run reports for the loop.
 
 use promptforge_parser::test_support::{PromptSource, one_section};
-use promptforge_types::event::ReplyOrigin;
-use promptforge_types::ids::TaskId;
-use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
 
 use super::super::models_loop::loop_events;
 use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, Step};
+use crate::test_support::recording::{
+    ReplyReport, TaskNoticeReport, ThinkingReport, ToolCallsReport, ToolResultReport,
+};
 use crate::test_support::scenario::{chat_answer, only_effect, text_of};
 
 /// Records every observation and every content report as one line, in
@@ -40,34 +40,27 @@ impl Observer for TraceRecorder {
         self.push(format!("{section}: {event}"));
     }
 
-    fn on_assistant_reply(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        _model: &str,
-        _metrics: Option<&CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
+    fn on_assistant_reply(&self, report: ReplyReport<'_>) {
+        let ReplyReport {
+            section,
+            turn,
+            text,
+            finish_reason,
+            origin,
+            ..
+        } = report;
         self.push(format!(
             "{section}: reply turn={turn} origin={origin:?} finish={finish_reason:?} text={text}"
         ));
     }
 
-    fn on_assistant_tool_calls(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        _model: &str,
-        calls: &[ToolCallEvent],
-    ) {
+    fn on_assistant_tool_calls(&self, report: ToolCallsReport<'_>) {
+        let ToolCallsReport {
+            section,
+            turn,
+            calls,
+            ..
+        } = report;
         let calls: Vec<String> = calls
             .iter()
             .map(|call| format!("{}:{}", call.id, call.name))
@@ -75,47 +68,40 @@ impl Observer for TraceRecorder {
         self.push(format!("{section}: tool_calls turn={turn} calls={calls:?}"));
     }
 
-    fn on_tool_result(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
+    fn on_tool_result(&self, report: ToolResultReport<'_>) {
+        let ToolResultReport {
+            section,
+            turn,
+            tool_call_id,
+            alias,
+            content,
+            trust,
+            ..
+        } = report;
         self.push(format!(
             "{section}: tool_result turn={turn} id={tool_call_id} alias={alias} \
-             trusted={trusted} content={content}"
+             trust={trust:?} content={content}"
         ));
     }
 
-    fn on_thinking(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        _model: &str,
-        text: &str,
-    ) {
+    fn on_thinking(&self, report: ThinkingReport<'_>) {
+        let ThinkingReport {
+            section,
+            turn,
+            text,
+            ..
+        } = report;
         self.push(format!("{section}: thinking turn={turn} text={text}"));
     }
 
-    fn on_task_notice(
-        &self,
-        _execution: &str,
-        section: &str,
-        _chain_id: u32,
-        _depth: u32,
-        turn: u32,
-        task: &TaskId,
-        text: &str,
-    ) {
+    fn on_task_notice(&self, report: TaskNoticeReport<'_>) {
+        let TaskNoticeReport {
+            section,
+            turn,
+            task,
+            text,
+            ..
+        } = report;
         self.push(format!(
             "{section}: notice turn={turn} task={task} text={text}"
         ));
@@ -217,7 +203,7 @@ fn a_handler_raising_mid_batch_leaves_the_list_untouched_and_raises_its_own_tabl
     );
     assert_eq!(
         tool_result_lines(&recorder),
-        vec!["Only: tool_result id=c1 alias=grab trusted=true content=grabbed a".to_owned()],
+        vec!["Only: tool_result id=c1 alias=grab trust=Trusted content=grabbed a".to_owned()],
         "only the call that returned reports a result"
     );
     assert_eq!(gateway.call_count(), 1, "no round follows the raise");
@@ -356,13 +342,13 @@ fn the_scheduler_reports_the_whole_trace_of_a_bound_round_a_local_round_and_a_re
     expected.extend([
         "Only: tool_calls turn=1 calls=[\"call_1:echo\"]",
         "Only: Tool call succeeded",
-        "Only: tool_result turn=1 id=call_1 alias=echo trusted=true content=echoed: a",
+        "Only: tool_result turn=1 id=call_1 alias=echo trust=Trusted content=echoed: a",
     ]);
     expected.extend(validated);
     expected.extend([
         "Only: tool_calls turn=2 calls=[\"call_2:grab\"]",
         "Only: Tool call succeeded",
-        "Only: tool_result turn=2 id=call_2 alias=grab trusted=true content=grabbed b",
+        "Only: tool_result turn=2 id=call_2 alias=grab trust=Trusted content=grabbed b",
     ]);
     expected.extend(validated);
     expected.extend([

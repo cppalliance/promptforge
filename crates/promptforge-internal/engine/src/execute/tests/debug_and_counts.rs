@@ -53,7 +53,7 @@ fn debug_capture_receives_request_and_response_when_set() {
         DebugEvent::Request { body } => {
             assert!(body.is_null(), "{body}");
         }
-        other => panic!("expected request first, got {other:?}"),
+        other @ DebugEvent::Response { .. } => panic!("expected request first, got {other:?}"),
     }
     match &captures[1].event {
         DebugEvent::Response {
@@ -65,7 +65,7 @@ fn debug_capture_receives_request_and_response_when_set() {
             assert_eq!(reasoning_content, &None);
             assert!(body.is_null(), "{body}");
         }
-        other => panic!("expected response second, got {other:?}"),
+        other @ DebugEvent::Request { .. } => panic!("expected response second, got {other:?}"),
     }
 }
 

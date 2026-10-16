@@ -1,6 +1,7 @@
-//! The suites' recording observer vocabulary: [`Observer`], the callback
-//! shape the Engine's tests were written against, and [`Observation`], the
-//! payload-free view of the
+//! The suites' recording observer vocabulary.
+//!
+//! [`Observer`] is the callback shape the Engine's tests were written
+//! against, and [`Observation`] is the payload-free view of the
 //! [`Event`](promptforge_types::event::Event) values a run returns.
 //!
 //! The Engine reports as values and never through a callback. The suites,
@@ -19,6 +20,7 @@
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::TaskId;
 use promptforge_types::metrics::{CallMetrics, ToolCallEvent};
+use promptforge_types::tools::OutputTrust;
 use serde_json::Value;
 
 mod forward;
@@ -30,93 +32,123 @@ pub use observation::Observation;
 #[cfg(test)]
 pub(crate) use observation::detail;
 
-/// The recording seam a suite implements: one method per run report,
-/// each with a default body that discards it, so a recorder pays only
-/// for the hooks it overrides.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "each content report names its full run coordinates in one call, as the suites' recorders expect"
-)]
+/// The recording seam a suite implements, one method per run report.
+///
+/// Each method has a default body that discards the report, so a recorder
+/// pays only for the hooks it overrides.
 pub trait Observer: Send + Sync {
     /// Records one typed [`Observation`] for `execution` and `section`.
     fn observe(&self, execution: &str, section: &str, event: Observation);
 
-    /// Records one completed assistant reply. `origin` is the reply's
-    /// provenance: [`ReplyOrigin::Chat`] for a user-facing turn,
-    /// [`ReplyOrigin::Infer`] for a programmatic inference round.
+    /// Records one completed assistant reply.
     #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_assistant_reply(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        text: &str,
-        finish_reason: Option<&str>,
-        model: &str,
-        metrics: Option<&CallMetrics>,
-        origin: ReplyOrigin,
-    ) {
-    }
+    fn on_assistant_reply(&self, report: ReplyReport<'_>) {}
 
     /// Records one batch of tool calls the model requested, unexecuted.
     #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_assistant_tool_calls(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        calls: &[ToolCallEvent],
-    ) {
-    }
+    fn on_assistant_tool_calls(&self, report: ToolCallsReport<'_>) {}
 
     /// Records the result of one dispatched tool call.
     #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_tool_result(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        tool_call_id: &str,
-        alias: &str,
-        content: &str,
-        trusted: bool,
-    ) {
-    }
+    fn on_tool_result(&self, report: ToolResultReport<'_>) {}
 
     /// Records one completed block of model thinking.
     #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_thinking(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        model: &str,
-        text: &str,
-    ) {
-    }
+    fn on_thinking(&self, report: ThinkingReport<'_>) {}
 
     /// Records one model-task notice as it was queued for the task's owner.
     #[expect(unused_variables, reason = "the default body discards the report")]
-    fn on_task_notice(
-        &self,
-        execution: &str,
-        section: &str,
-        chain_id: u32,
-        depth: u32,
-        turn: u32,
-        task: &TaskId,
-        text: &str,
-    ) {
-    }
+    fn on_task_notice(&self, report: TaskNoticeReport<'_>) {}
+}
+
+/// One completed assistant reply, as [`Observer::on_assistant_reply`]
+/// receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct ReplyReport<'a> {
+    /// The caller-chosen run identifier.
+    pub execution: &'a str,
+    /// The event's reporting scope.
+    pub section: &'a str,
+    /// The model-turn counter the reply was produced under.
+    pub turn: u32,
+    /// The reply text.
+    pub text: &'a str,
+    /// The provider's stop label, when it sent one.
+    pub finish_reason: Option<&'a str>,
+    /// The model that produced the reply.
+    pub model: &'a str,
+    /// The call's measurements, when any were reported.
+    pub metrics: Option<&'a CallMetrics>,
+    /// The kind of round that produced the reply.
+    pub origin: ReplyOrigin,
+}
+
+/// One batch of tool calls the model requested, as
+/// [`Observer::on_assistant_tool_calls`] receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolCallsReport<'a> {
+    /// The caller-chosen run identifier.
+    pub execution: &'a str,
+    /// The event's reporting scope.
+    pub section: &'a str,
+    /// The model-turn counter the batch was requested under.
+    pub turn: u32,
+    /// The model that requested the calls.
+    pub model: &'a str,
+    /// The calls, unexecuted.
+    pub calls: &'a [ToolCallEvent],
+}
+
+/// One dispatched tool call's result, as [`Observer::on_tool_result`]
+/// receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolResultReport<'a> {
+    /// The caller-chosen run identifier.
+    pub execution: &'a str,
+    /// The event's reporting scope.
+    pub section: &'a str,
+    /// The model-turn counter the call was dispatched under.
+    pub turn: u32,
+    /// The provider-issued tool-call id the result answers.
+    pub tool_call_id: &'a str,
+    /// The alias the call named.
+    pub alias: &'a str,
+    /// The tool's output.
+    pub content: &'a str,
+    /// Whether the dispatch treated the tool's output as trusted.
+    pub trust: OutputTrust,
+}
+
+/// One completed block of model thinking, as [`Observer::on_thinking`]
+/// receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct ThinkingReport<'a> {
+    /// The caller-chosen run identifier.
+    pub execution: &'a str,
+    /// The event's reporting scope.
+    pub section: &'a str,
+    /// The model-turn counter the block was produced under.
+    pub turn: u32,
+    /// The model that produced it.
+    pub model: &'a str,
+    /// The thinking text.
+    pub text: &'a str,
+}
+
+/// One model-task notice queued for the task's owner, as
+/// [`Observer::on_task_notice`] receives it.
+#[derive(Debug, Clone, Copy)]
+pub struct TaskNoticeReport<'a> {
+    /// The caller-chosen run identifier.
+    pub execution: &'a str,
+    /// The owner's reporting scope.
+    pub section: &'a str,
+    /// The owner's model-turn counter when the notice was queued.
+    pub turn: u32,
+    /// The task that ended.
+    pub task: &'a TaskId,
+    /// The sentence the model reads.
+    pub text: &'a str,
 }
 
 /// An emitter over a sink nobody drains: the silent stand-in a suite
@@ -132,10 +164,8 @@ pub(crate) fn null_emitter() -> promptforge_types::emitter::Emitter {
 }
 
 /// An [`Observer`] that discards every report: what a suite installs when
-/// it has nothing to assert about the boundaries. Construct it through
-/// `Default`.
+/// it has nothing to assert about the boundaries.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[non_exhaustive]
 pub(crate) struct NullObserver;
 
 impl Observer for NullObserver {
@@ -159,16 +189,13 @@ pub(crate) trait DebugCapture: Send + Sync {
     )
 )]
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub(crate) enum DebugEvent {
     /// The JSON body sent to the chat-completions endpoint.
-    #[non_exhaustive]
     Request {
         /// The serialized request body.
         body: Value,
     },
     /// The JSON body returned, with parsed metadata.
-    #[non_exhaustive]
     Response {
         /// The raw response body.
         body: Value,

@@ -847,7 +847,7 @@ Paths starting `S/` are under `crates/promptforge-internal/engine/src/execute/sc
 </step-7>
 <step-8>
 
-### Step 8: engine test support and the remaining engine tests
+### Step 8: engine test support and the remaining engine tests [completed]
 
 - Component: `engine`
 - Tests: Verify runs these from the repository root in PowerShell, in this order.
