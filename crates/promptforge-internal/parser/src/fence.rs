@@ -1,4 +1,4 @@
-//! Strict `lua` fence checking and block splitting.
+//! Checks the strict `lua` fence rule and splits content into Lua and prose blocks.
 //!
 //! H1 and section content is an alternating sequence of `lua` fences and
 //! prose. A `lua` fence opens with a line that is exactly three backticks
@@ -12,13 +12,10 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use promptforge_types::emitter::Emitter;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag};
 
-use promptforge_types::emitter::Emitter;
-
-use super::build::{body_text, line_add, newlines_before, nz_source_line};
-use super::{Block, LuaProgram, ParseErrorKind};
-use crate::{Error, Result};
+use crate::{Block, Error, LuaProgram, ParseErrorKind, Result, sections};
 
 /// Uncompiled block produced while scanning section content.
 pub(super) enum RawBlock<'a> {
@@ -50,17 +47,18 @@ pub(super) fn split_h1(
     for raw in raw_blocks {
         match raw {
             RawBlock::Prose(text) => blocks.push(Block::Prose {
-                text: body_text(body, text)?,
+                text: sections::body_text(body, text)?,
             }),
             RawBlock::Lua {
                 source,
                 line_offset,
             } => {
                 let location = format!("H1 `{title}` lua");
+                let line = sections::line_add(content_abs_line, line_offset)?;
                 blocks.push(Block::Lua(LuaProgram::compile(
                     &source,
                     &location,
-                    nz_source_line(line_add(content_abs_line, line_offset)?)?,
+                    sections::nz_source_line(line)?,
                     emitter,
                     title,
                 )?));
@@ -125,12 +123,12 @@ fn strip_exact_lua_opening(content: &str) -> Option<&str> {
 }
 
 /// Yields the extent and the label of every fence the Markdown parser
-/// reports, in source order. Each extent starts at the opening line's first
-/// byte and ends where the parser ends the block.
+/// reports, in source order.
 ///
-/// That includes fences inside block quotes and list items, and never a fence
-/// inside another code block's body, so fence-looking lines in a longer fence
-/// stay prose rather than being reserved or rejected.
+/// Each extent starts at the opening line's first byte and ends where the
+/// parser ends the block. That includes fences inside block quotes and list
+/// items, and never a fence inside another code block's body, so fence-looking
+/// lines in a longer fence stay prose rather than being reserved or rejected.
 fn fence_openings(content: &str) -> impl Iterator<Item = (Range<usize>, CowStr<'_>)> {
     Parser::new_ext(content, Options::empty())
         .into_offset_iter()
@@ -289,8 +287,9 @@ fn rule_ranges(content: &str) -> Vec<Range<usize>> {
 }
 
 /// Returns the pending Markdown of one prose segment: everything after the
-/// segment's last thematic break. The break itself is never included, and
-/// commentary above it is excluded.
+/// segment's last thematic break.
+///
+/// The break itself is never included, and commentary above it is excluded.
 fn pending_prose<'a>(content: &'a str, segment: Range<usize>, rules: &[Range<usize>]) -> &'a str {
     let start = rules
         .iter()
@@ -317,7 +316,8 @@ fn pending_prose<'a>(content: &'a str, segment: Range<usize>, rules: &[Range<usi
 ///
 /// # Errors
 /// Returns a fence-classified parse error when an exact `lua` fence is not
-/// closed.
+/// closed, and [`Error::Internal`] when an opening the Markdown parser
+/// reports falls inside the previous fence's extracted source.
 pub(super) fn split_section_blocks<'a>(
     content: &'a str,
     section: &str,
@@ -340,9 +340,8 @@ pub(super) fn split_section_blocks<'a>(
             strip_exact_lua_opening(&content[opening..])
         };
         let Some(after_open) = after_open else {
-            return Err(Error::parse(
-                ParseErrorKind::Structure,
-                "internal section fence classification mismatch",
+            return Err(Error::Internal(
+                "parser: section fence split disagrees with the Markdown parser",
             ));
         };
         // Preserve classic location wording for unclosed leading/trailing fences.
@@ -361,7 +360,7 @@ pub(super) fn split_section_blocks<'a>(
             blocks.push(RawBlock::Prose(pending.trim()));
         }
 
-        let line_offset = line_add(newlines_before(content, opening)?, 1)?;
+        let line_offset = sections::line_add(sections::newlines_before(content, opening)?, 1)?;
         blocks.push(RawBlock::Lua {
             source,
             line_offset,

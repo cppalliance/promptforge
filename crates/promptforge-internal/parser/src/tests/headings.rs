@@ -16,6 +16,17 @@ fn empty_h1_title_errors() {
 }
 
 #[test]
+fn more_than_one_h1_is_refused_naming_the_count_and_lines() {
+    // The frontmatter takes lines 1-4, so the H1s head lines 6, 12, and 16.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n\n# U\n\nq\n\n# V\n";
+    assert_parse_error(
+        src,
+        ParseErrorKind::Structure,
+        "prompt must contain exactly one H1 title, found 3 at lines 6, 12, 16",
+    );
+}
+
+#[test]
 fn preface_before_h1_is_ignored() {
     let src = "---\nname: x\ndescription: d\n---\n\nIgnored preface.\n\n```text\nalso ignored\n```\n\n# T\n\nDescription.\n\n## S\n\np\n";
     let prompt = parse_ok(src);
@@ -111,10 +122,10 @@ fn duplicate_sibling_section_names_are_rejected() {
     // A structured parse error reports a stable kind and a byte span rather
     // than inferring them from the message.
     assert_eq!(err.kind(), ParseErrorKind::Structure);
-    let (start, end) = err.span().expect("duplicate section has a span");
+    let span = err.span().expect("duplicate section has a span");
     assert!(
-        start < end,
-        "span must be a non-empty range, got {start}..{end}"
+        !span.is_empty(),
+        "span must be a non-empty range, got {span:?}"
     );
 
     // The same name under DIFFERENT parents (not siblings) is allowed.

@@ -109,7 +109,7 @@ fn keyword_name(keyword: ModelKeyword) -> &'static str {
 /// `models.use` on the label fails at run time.
 pub(super) fn bound_model_set(prompt: &Prompt, ctx: &RunContext) -> ModelSet {
     let mut set = ModelSet::default();
-    for (label, role) in prompt.frontmatter().models().iter() {
+    for (label, role) in prompt.frontmatter().models() {
         let Some(descriptor) = ctx.model_bindings.resolve(label) else {
             continue;
         };

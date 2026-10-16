@@ -689,7 +689,7 @@ Paths starting `L/` are under `crates/promptforge-internal/lua/src/`.
 </step-4>
 <step-5>
 
-### Step 5: parser and facade
+### Step 5: parser and facade [completed]
 
 - Component: `parser-facade`
 - Tests: Verify runs these from the repository root in PowerShell, in this order.

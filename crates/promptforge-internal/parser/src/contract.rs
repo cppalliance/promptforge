@@ -1,4 +1,4 @@
-//! The frontmatter contract keys: `plugins`, `args`, `models`.
+//! Parses the frontmatter contract keys: `plugins`, `args`, and `models`.
 //!
 //! The YAML is the whole contract: Plugins install, models declare, args
 //! type. Parsing validates the static shape - each Plugin a one-segment
@@ -11,14 +11,14 @@
 //! `args` and `models` are defined in submodules; this root owns the
 //! duplicate-Plugin check and the map deserializer the two map keys share.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::marker::PhantomData;
 
+use promptforge_types::plugins::PluginId;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-
-use promptforge_types::plugins::PluginId;
 
 mod args;
 mod models;
@@ -26,8 +26,8 @@ mod models;
 #[cfg(test)]
 mod tests;
 
-pub use args::{ArgDecl, ArgType, ArgsDecl};
-pub use models::{ModelKeyword, ModelRole, ModelRoles};
+pub use args::{ArgDecl, ArgType, ArgsDecl, ArgsDeclIter};
+pub use models::{ModelKeyword, ModelRole, ModelRoles, ModelRolesIter};
 
 /// The prompt-local alias grammar: `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
@@ -102,25 +102,37 @@ where
                     "invalid {what} `{key}`: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}"
                 )));
             }
-            if entries.contains_key(&key) {
-                return Err(de::Error::custom(format!(
-                    "duplicate {what} `{key}`: contract map keys must be unique"
-                )));
+            match entries.entry(key) {
+                Entry::Occupied(entry) => {
+                    return Err(de::Error::custom(format!(
+                        "duplicate {what} `{}`: contract map keys must be unique",
+                        entry.key()
+                    )));
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(map.next_value::<T>()?);
+                }
             }
-            entries.insert(key, map.next_value::<T>()?);
         }
         Ok(entries)
     }
 }
 
-/// Refuses a `plugins:` list that names one Plugin twice. Returns the
-/// refusal's message, naming the first Plugin declared again.
-pub(crate) fn check_distinct_plugins(plugins: &[PluginId]) -> Result<(), String> {
+/// A refused `plugins:` list.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PluginListError {
+    /// The list names this Plugin more than once.
+    #[error("invalid frontmatter: Plugin {0} is declared more than once under plugins")]
+    Duplicate(PluginId),
+}
+
+/// Refuses a `plugins:` list that names one Plugin twice.
+///
+/// The refusal names the first Plugin declared again.
+pub(crate) fn check_distinct_plugins(plugins: &[PluginId]) -> Result<(), PluginListError> {
     let mut seen = BTreeSet::new();
     match plugins.iter().find(|plugin| !seen.insert(*plugin)) {
-        Some(plugin) => Err(format!(
-            "invalid frontmatter: Plugin {plugin} is declared more than once under plugins"
-        )),
+        Some(plugin) => Err(PluginListError::Duplicate(plugin.clone())),
         None => Ok(()),
     }
 }

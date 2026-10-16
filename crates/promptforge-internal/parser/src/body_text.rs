@@ -1,6 +1,7 @@
-//! [`BodyText`]: a stretch of a prompt's text that sections and blocks read
-//! in place. The parser makes one shared copy of the prompt body, and every
-//! section's Markdown, list item, and prose block points into it.
+//! Defines [`BodyText`], a stretch of prompt text that sections and blocks read in place.
+//!
+//! The parser makes one shared copy of the prompt body, and every section's
+//! Markdown, list item, and prose block points into it.
 
 use std::fmt;
 use std::ops::Range;
@@ -20,8 +21,9 @@ impl BodyText {
         &self.text[self.range.clone()]
     }
 
-    /// `part` located inside `text` by its byte offset; `None` when `part` is
-    /// not a subslice of `text`.
+    /// Locates `part` inside `text` by its byte offset.
+    ///
+    /// Returns `None` when `part` is not a subslice of `text`.
     #[must_use]
     pub(crate) fn within(text: &Arc<str>, part: &str) -> Option<BodyText> {
         let start = part.as_ptr().addr().checked_sub(text.as_ptr().addr())?;

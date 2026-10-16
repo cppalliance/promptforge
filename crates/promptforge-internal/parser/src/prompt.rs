@@ -1,13 +1,12 @@
-//! The parsed prompt tree: [`Prompt`], its [`Section`]s, and their
-//! [`Block`]s. Code outside the Engine reads a prompt's title and
-//! frontmatter; the tree below them is the Engine's, reached through
-//! [`crate::detail`].
+//! Holds the parsed prompt tree: [`Prompt`], its [`Section`]s, and their [`Block`]s.
+//!
+//! Code outside the Engine reads a prompt's title and frontmatter; the tree
+//! below them is the Engine's, reached through [`crate::detail`].
 //!
 //! Construction happens in the parsing modules; this module holds the value
 //! types and the invariant-preserving operations on them.
 
-use crate::build::Frontmatter;
-use crate::{BodyText, LuaProgram};
+use crate::{BodyText, Frontmatter, LuaProgram};
 
 /// One executable block inside a section: a compiled Lua fence or prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,8 +15,10 @@ pub enum Block {
     /// An exact `lua` fence compiled at parse time.
     Lua(LuaProgram),
     /// Author prose: the pending Markdown accumulated since the nearest
-    /// preceding heading, `lua` fence, or thematic break. The executor
-    /// installs it as the following Lua block's lazy `prose` template.
+    /// preceding heading, `lua` fence, or thematic break.
+    ///
+    /// The executor installs it as the following Lua block's lazy `prose`
+    /// template.
     #[non_exhaustive]
     Prose {
         /// Captured Markdown, trimmed of surrounding blank lines.
@@ -38,6 +39,7 @@ pub struct Section {
     /// Child sections nested under this one (deeper heading levels).
     pub(crate) children: Vec<Section>,
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
+    ///
     /// Empty for non-list sections.
     pub(crate) items: Vec<BodyText>,
     /// The section's own raw Markdown, without its heading line or children.

@@ -1,27 +1,14 @@
-//! Frontmatter parsing and heading-tree construction: the [`Frontmatter`]
-//! model, the `max_tool_iterations` cap, frontmatter splitting/version
-//! detection, and the markdown heading walk that builds the [`Section`]
-//! tree.
+//! Walks a prompt body's markdown headings and builds its [`Section`] tree.
 
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::sync::Arc;
 
+use promptforge_types::emitter::Emitter;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use promptforge_types::emitter::Emitter;
-
-use super::fence::{RawBlock, lua_block_location, split_section_blocks, trim_leading_blank_lines};
-use super::list::{is_all_list_markers, parse_bullet_items};
-use super::{Block, BodyText, LuaProgram, ParseErrorKind, Section};
-use crate::{Error, Result};
-
-#[path = "build-frontmatter.rs"]
-mod frontmatter;
-
-pub(crate) use frontmatter::split_frontmatter;
-pub use frontmatter::{
-    FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
-};
+use crate::fence::{self, RawBlock};
+use crate::{Block, BodyText, Error, LuaProgram, ParseErrorKind, Result, Section, list};
 
 /// Wraps a computed 1-based source line for [`LuaProgram::compile`].
 ///
@@ -31,8 +18,8 @@ pub use frontmatter::{
 ///
 /// # Errors
 /// Returns [`Error::Internal`] when `line` is zero.
-pub(crate) fn nz_source_line(line: u32) -> Result<std::num::NonZeroU32> {
-    std::num::NonZeroU32::new(line).ok_or(Error::Internal(
+pub(crate) fn nz_source_line(line: u32) -> Result<NonZeroU32> {
+    NonZeroU32::new(line).ok_or(Error::Internal(
         "parser: computed 1-based source line was zero",
     ))
 }
@@ -67,7 +54,7 @@ pub(crate) struct Heading<'a> {
     /// 1-based line number within `body` where `content` begins.
     pub(crate) content_start_line: u32,
     /// 1-based line number within `body` of the heading line itself.
-    source_line: u32,
+    pub(crate) source_line: u32,
     /// Byte range of the heading within `body`, kept for span diagnostics.
     span: Range<usize>,
 }
@@ -140,30 +127,31 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading<'_>>> {
         }
     }
 
-    // Second pass: the content of heading i runs from the end of its heading to
-    // the start of the next heading (or the end of the body).
+    // Second pass: the content of each heading runs from the end of its
+    // heading to the start of the next heading (or the end of the body).
     let mut headings = Vec::with_capacity(raws.len());
-    for i in 0..raws.len() {
-        let start = raws[i].range.end;
-        let end = raws.get(i + 1).map_or(body.len(), |next| next.range.start);
-        let content = &body[start..end];
+    let mut raws = raws.into_iter().peekable();
+    while let Some(raw) = raws.next() {
+        let start = raw.range.end;
+        let end = raws.peek().map_or(body.len(), |next| next.range.start);
         // +1 because newlines_before gives 0-based offset, and we want
         // the 1-based line number of the first content line.
         let content_start_line = line_add(newlines_before(body, start)?, 1)?;
-        let source_line = line_add(newlines_before(body, raws[i].range.start)?, 1)?;
+        let source_line = line_add(newlines_before(body, raw.range.start)?, 1)?;
         headings.push(Heading {
-            level: raws[i].level,
-            title: raws[i].title.clone(),
-            content,
+            level: raw.level,
+            title: raw.title,
+            content: &body[start..end],
             content_start_line,
             source_line,
-            span: raws[i].range.clone(),
+            span: raw.range,
         });
     }
     Ok(headings)
 }
 
 /// Builds one heading's executable blocks while preserving source positions.
+///
 /// Prose reads in place from `body`, the shared text `heading` was sliced from.
 /// `label` names the section in each Lua block's location.
 fn build_heading_blocks(
@@ -175,7 +163,7 @@ fn build_heading_blocks(
     emitter: &Emitter,
 ) -> Result<Vec<Block>> {
     let content_abs_line = line_add(frontmatter_lines, heading.content_start_line)?;
-    let raw_blocks = split_section_blocks(heading.content, name)?;
+    let raw_blocks = fence::split_section_blocks(heading.content, name)?;
     let has_prose = raw_blocks
         .iter()
         .any(|block| matches!(block, RawBlock::Prose(_)));
@@ -193,7 +181,7 @@ fn build_heading_blocks(
             } => {
                 ordinal += 1;
                 let abs_line = line_add(content_abs_line, line_offset)?;
-                let location = lua_block_location(label, index, total, has_prose, ordinal);
+                let location = fence::lua_block_location(label, index, total, has_prose, ordinal);
                 let program = LuaProgram::compile(
                     &source,
                     &location,
@@ -208,10 +196,12 @@ fn build_heading_blocks(
     Ok(blocks)
 }
 
-/// Rejects an orphan deep heading: one that skips a level (e.g. an H4 under an
-/// H2 with no intervening H3, or an H3/H4 top-level section with no parent H2).
-/// Such a heading has no well-defined parent, so reject it rather than
-/// silently reparenting it to a shallower ancestor.
+/// Rejects an orphan deep heading, one that skips a level.
+///
+/// Examples are an H4 under an H2 with no intervening H3, or an H3/H4
+/// top-level section with no parent H2. Such a heading has no well-defined
+/// parent, so reject it rather than silently reparenting it to a shallower
+/// ancestor.
 fn check_child_level(heading: &Heading<'_>, parent_level: u8) -> Result<()> {
     let level = heading.level;
     if level > parent_level + 1 {
@@ -228,9 +218,10 @@ fn check_child_level(heading: &Heading<'_>, parent_level: u8) -> Result<()> {
     Ok(())
 }
 
-/// Returns the heading's section name. A section's name is its runtime address
-/// (jumps, lookups, fanout), so an empty/whitespace heading is unaddressable
-/// and must be rejected at parse.
+/// Returns the heading's section name.
+///
+/// A section's name is its runtime address (jumps, lookups, fanout), so an
+/// empty/whitespace heading is unaddressable and must be rejected at parse.
 fn section_name(heading: &Heading<'_>, level: u8) -> Result<String> {
     let name = heading.title.clone();
     if name.trim().is_empty() {
@@ -243,10 +234,11 @@ fn section_name(heading: &Heading<'_>, level: u8) -> Result<String> {
     Ok(name)
 }
 
-/// Returns the section's list items, or none when it is not a list. A section
-/// is a list only when it has no Lua and every nonblank prose line is a list
-/// marker; one incidental bullet in mixed prose leaves a non-marker line, so
-/// the section stays prose.
+/// Returns the section's list items, or none when it is not a list.
+///
+/// A section is a list only when it has no Lua and every nonblank prose line
+/// is a list marker; one incidental bullet in mixed prose leaves a non-marker
+/// line, so the section stays prose.
 fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyText>> {
     let has_no_lua = blocks
         .iter()
@@ -257,9 +249,9 @@ fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyT
     });
     if has_no_lua
         && let Some(prose) = prose_for_items
-        && is_all_list_markers(prose)
+        && list::is_all_list_markers(prose)
     {
-        parse_bullet_items(prose, name)?
+        list::parse_bullet_items(prose, name)?
             .into_iter()
             .map(|item| body_text(body, item))
             .collect()
@@ -268,11 +260,13 @@ fn list_items(body: &Arc<str>, blocks: &[Block], name: &str) -> Result<Vec<BodyT
     }
 }
 
-/// Names a section in its Lua block locations: the title alone, or the title
-/// and its heading line when another section in `headings` shares the
-/// title, so a reader can tell the two sections' errors apart. The
-/// locations are display names; each block's line-based chunk name, not
-/// its location, decides which program maps an error.
+/// Names a section in its Lua block locations.
+///
+/// The name is the title alone, or the title and its heading line when
+/// another section in `headings` shares the title, so a reader can tell the
+/// two sections' errors apart. The locations are display names; each block's
+/// line-based chunk name, not its location, decides which program maps an
+/// error.
 fn block_label(headings: &[Heading<'_>], name: &str, heading_abs_line: u32) -> String {
     if headings
         .iter()
@@ -286,10 +280,11 @@ fn block_label(headings: &[Heading<'_>], name: &str, heading_abs_line: u32) -> S
     }
 }
 
-/// Rejects a section whose name an earlier sibling already took. Sections are
-/// addressed by name (jumps, lookups), so two siblings sharing a name would
-/// make the target ambiguous. The error names BOTH heading locations so the
-/// author can find each one.
+/// Rejects a section whose name an earlier sibling already took.
+///
+/// Sections are addressed by name (jumps, lookups), so two siblings sharing a
+/// name would make the target ambiguous. The error names BOTH heading
+/// locations so the author can find each one.
 fn check_unique_sibling(
     siblings: &[(String, u32)],
     name: &str,
@@ -319,9 +314,10 @@ fn check_unique_sibling(
 /// # Errors
 /// Returns [`Error::ParseStructured`] for an orphan heading, an empty heading,
 /// duplicate sibling names, or malformed section content. Propagates
-/// [`Error::LuaCompile`] or [`Error::Lua`] from Lua compilation and
-/// [`Error::Internal`] from invalid or overflowing source-line calculations,
-/// or from section text that is not a slice of `body`.
+/// [`Error::Lua`] from Lua compilation and [`Error::Internal`] from invalid
+/// or overflowing source-line calculations, from a fence split that disagrees
+/// with the Markdown parser, or from section text that is not a slice of
+/// `body`.
 pub(crate) fn build_sections(
     body: &Arc<str>,
     headings: &[Heading<'_>],
@@ -357,12 +353,12 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
-            markdown: body_text(body, trim_leading_blank_lines(h.content).trim_end())?,
+            markdown: body_text(body, fence::trim_leading_blank_lines(h.content).trim_end())?,
         });
     }
     Ok(result)
 }
 
 #[cfg(test)]
-#[path = "build-tests.rs"]
+#[path = "sections-tests.rs"]
 mod position_tests;

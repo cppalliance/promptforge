@@ -79,6 +79,7 @@ impl AppError {
             ParseErrorKind::Fence => "parse_fence",
             ParseErrorKind::List => "parse_list",
             ParseErrorKind::Lua => "parse_lua",
+            ParseErrorKind::Internal => "parse_internal",
             // Any other kind has no wire code of its own.
             _ => "parse_error",
         };

@@ -1,12 +1,11 @@
-//! List-only section parsing.
+//! Detects list-only sections and extracts their bullet items.
 //!
 //! A no-Lua section whose every nonblank line is a bullet marker is a list; one
 //! marker classifier (`classify_list_line`) feeds both detection
 //! ([`is_all_list_markers`]) and extraction ([`parse_bullet_items`]) so the two
 //! can never disagree about what counts as a marker.
 
-use super::ParseErrorKind;
-use crate::{Error, Result};
+use crate::{Error, ParseErrorKind, Result};
 
 /// Parses bullet items from prose in a list-only section.
 ///
@@ -52,14 +51,15 @@ pub(super) fn parse_bullet_items<'a>(prose: &'a str, section: &str) -> Result<Ve
     Ok(items)
 }
 
-/// Returns true when `prose` is entirely list markers: every nonblank line is a
-/// list marker (well-formed or empty) and there is at least one such line.
+/// Returns true when `prose` is entirely list markers.
 ///
-/// This is the list-only invariant: a single incidental bullet line in
-/// otherwise ordinary prose leaves a non-marker line present, so the section
-/// is classified as prose rather than forced through strict list parsing. A
-/// section whose lines are all markers but include an empty one is still a
-/// list, so [`parse_bullet_items`] reports the empty item.
+/// Every nonblank line must be a list marker (well-formed or empty), and at
+/// least one such line must exist. This is the list-only invariant: a single
+/// incidental bullet line in otherwise ordinary prose leaves a non-marker
+/// line present, so the section is classified as prose rather than forced
+/// through strict list parsing. A section whose lines are all markers but
+/// include an empty one is still a list, so [`parse_bullet_items`] reports
+/// the empty item.
 pub(super) fn is_all_list_markers(prose: &str) -> bool {
     let mut saw_marker = false;
     for line in prose.lines() {

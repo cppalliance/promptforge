@@ -1,10 +1,10 @@
-//! The [`Frontmatter`] model and its `max_tool_iterations` cap, and the
-//! frontmatter splitting and version detection that read a prompt's source.
+//! Splits a prompt's YAML frontmatter from its body and models what it declares.
+
+use std::num::NonZeroU32;
 
 use promptforge_types::plugins::PluginId;
 
-use crate::contract::{ArgsDecl, ModelRoles};
-use crate::{Error, ParseErrorKind, Result};
+use crate::{ArgsDecl, Error, ModelRoles, ParseErrorKind, Result};
 
 /// A declared input or output file in a prompt's frontmatter.
 ///
@@ -47,8 +47,10 @@ pub struct Frontmatter {
     pub(crate) name: String,
     /// One-line description shown in prompt listings and name retrieval.
     pub(crate) description: String,
-    /// The promptforge Engine major this file targets. Its presence marks the
-    /// file as a promptforge prompt; `None` means the file is not one. Optional.
+    /// The promptforge Engine major this file targets, when declared.
+    ///
+    /// Its presence marks the file as a promptforge prompt; `None` means the
+    /// file is not one.
     #[serde(default)]
     pub(crate) promptforge: Option<u32>,
     /// Maximum model round trips a section's tool-call loop may take.
@@ -92,7 +94,7 @@ pub enum MaxToolIterations {
     #[default]
     Default,
     /// An explicit, positive, bounded cap.
-    Limit(std::num::NonZeroU32),
+    Limit(NonZeroU32),
 }
 
 impl MaxToolIterations {
@@ -107,7 +109,7 @@ impl MaxToolIterations {
 
     /// Returns the explicit limit when one was declared.
     #[must_use]
-    pub fn limit(self) -> Option<std::num::NonZeroU32> {
+    pub fn limit(self) -> Option<NonZeroU32> {
         match self {
             MaxToolIterations::Default => None,
             MaxToolIterations::Limit(limit) => Some(limit),
@@ -135,7 +137,7 @@ impl<'de> serde::Deserialize<'de> for MaxToolIterations {
         // 1 <= raw <= MAX_TOOL_ITERATIONS, so both conversions are infallible.
         let value = u32::try_from(raw)
             .map_err(|_| serde::de::Error::custom("max_tool_iterations is out of range"))?;
-        let limit = std::num::NonZeroU32::new(value)
+        let limit = NonZeroU32::new(value)
             .ok_or_else(|| serde::de::Error::custom("max_tool_iterations must be non-zero"))?;
         Ok(MaxToolIterations::Limit(limit))
     }
@@ -162,37 +164,43 @@ impl Frontmatter {
     }
 
     /// Returns the declared cap on model round trips in each section's
-    /// tool-call loop. Returns `None` when the prompt omits the cap, so the
-    /// caller's default applies.
+    /// tool-call loop.
+    ///
+    /// Returns `None` when the prompt omits the cap, so the caller's default
+    /// applies.
     #[must_use]
-    pub fn max_tool_iterations(&self) -> Option<std::num::NonZeroU32> {
+    pub fn max_tool_iterations(&self) -> Option<NonZeroU32> {
         self.max_tool_iterations.limit()
     }
 
-    /// Returns the declared input file, when present. The prompt expects to
-    /// find this file in the store when it starts.
+    /// Returns the declared input file, when present.
+    ///
+    /// The prompt expects to find this file in the store when it starts.
     #[must_use]
     pub fn input(&self) -> Option<&FileDecl> {
         self.input.as_ref()
     }
 
-    /// Returns the declared output file, when present. The prompt leaves this
-    /// file in the store when it finishes.
+    /// Returns the declared output file, when present.
+    ///
+    /// The prompt leaves this file in the store when it finishes.
     #[must_use]
     pub fn output(&self) -> Option<&FileDecl> {
         self.output.as_ref()
     }
 
-    /// Returns the declared Plugins, in declaration order. Every declared
-    /// Plugin is required.
+    /// Returns the declared Plugins, in declaration order.
+    ///
+    /// Every declared Plugin is required.
     #[must_use]
     pub fn plugins(&self) -> &[PluginId] {
         &self.plugins
     }
 
-    /// Returns the typed args declaration. A prompt that omits the `args:` key
-    /// yields the default declaration (one optional string field named
-    /// `prose`).
+    /// Returns the typed args declaration.
+    ///
+    /// A prompt that omits the `args:` key yields the default declaration
+    /// (one optional string field named `prose`).
     #[must_use]
     pub fn args(&self) -> &ArgsDecl {
         &self.args

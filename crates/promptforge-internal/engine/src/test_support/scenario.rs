@@ -401,7 +401,7 @@ impl Scenario {
         let edit = std::mem::replace(&mut self.context, Box::new(|ctx| ctx));
         let mut ctx = edit(ctx);
         if self.bind_roles {
-            for (label, _) in prompt.frontmatter().models().iter() {
+            for (label, _) in prompt.frontmatter().models() {
                 ctx.bind_role_for_test(label, test_model(TEST_MODEL));
             }
         }

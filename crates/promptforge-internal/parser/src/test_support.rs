@@ -33,11 +33,14 @@ pub fn prose_block(text: String) -> Block {
     }
 }
 
-/// The prompt `t`: frontmatter with `name: t`, `description: d`, and
-/// `promptforge: 0`, then the `front` lines, then `# Test prompt` and one
-/// `lua`-fenced section per `(heading, lua)` entry. A heading that starts
-/// with `#` is written as given, and any other heading becomes an H2. Every
-/// line is trimmed, so `front` and each body can be indented raw strings.
+/// Writes the prompt `t` with one `lua`-fenced section per `(heading, lua)`
+/// entry.
+///
+/// The frontmatter has `name: t`, `description: d`, and `promptforge: 0`,
+/// then the `front` lines, then `# Test prompt` and the sections. A heading
+/// that starts with `#` is written as given, and any other heading becomes an
+/// H2. Every line is trimmed, so `front` and each body can be indented raw
+/// strings.
 #[must_use]
 pub fn prompt(front: &str, sections: &[(&str, &str)]) -> String {
     let mut source = PromptSource::new().front(front);
@@ -53,9 +56,10 @@ pub fn one_section(lua: &str) -> String {
     prompt("", &[("Only", lua)])
 }
 
-/// A prompt source built part by part, for shapes [`prompt`] cannot express:
-/// another name or title, H1 blocks, and prose sections. It has
-/// [`prompt`]'s defaults and trimming.
+/// A prompt source built part by part, for shapes [`prompt`] cannot express.
+///
+/// Those shapes are another name or title, H1 blocks, and prose sections. It
+/// has [`prompt`]'s defaults and trimming.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct PromptSource {

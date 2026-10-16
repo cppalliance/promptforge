@@ -1,15 +1,15 @@
-//! The `models` frontmatter key: declared model roles.
+//! Parses the `models` frontmatter key into declared model roles.
 //!
 //! A role is a slot: a fill function at prepare maps it to a concrete model
 //! and checks the hard keywords and the context minimum against the filled
 //! descriptor. Parse only validates shape and exposes the declaration.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map};
 use std::num::NonZeroU32;
 
 use serde::Deserialize;
 
-use super::{ContractKeys, deserialize_contract_map};
+use crate::contract::{self, ContractKeys};
 
 /// A keyword that describes the model a role needs.
 ///
@@ -24,19 +24,19 @@ use super::{ContractKeys, deserialize_contract_map};
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum ModelKeyword {
-    /// The model supports extended thinking. This keyword is hard.
+    /// A hard keyword: the model supports extended thinking.
     Thinking,
-    /// The model runs with thinking turned off. This keyword is hard.
+    /// A hard keyword: the model runs with thinking turned off.
     NoThinking,
-    /// A frontier-capability model. This keyword is soft.
+    /// A soft keyword: a frontier-capability model.
     Frontier,
-    /// A fast model. This keyword is soft.
+    /// A soft keyword: a fast model.
     Fast,
-    /// A small model. This keyword is soft.
+    /// A soft keyword: a small model.
     Small,
-    /// A creative model. This keyword is soft.
+    /// A soft keyword: a creative model.
     Creative,
-    /// A chat-tuned model. This keyword is soft.
+    /// A soft keyword: a chat-tuned model.
     Chat,
 }
 
@@ -101,11 +101,11 @@ impl ModelRoles {
         self.roles.get(label)
     }
 
-    /// Iterates the declared roles as `(label, role)` pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &ModelRole)> {
-        self.roles
-            .iter()
-            .map(|(label, role)| (label.as_str(), role))
+    /// Iterates the declared roles as `(label, role)` pairs, in label order.
+    pub fn iter(&self) -> ModelRolesIter<'_> {
+        ModelRolesIter {
+            roles: self.roles.iter(),
+        }
     }
 
     /// Returns the number of declared roles.
@@ -121,12 +121,47 @@ impl ModelRoles {
     }
 }
 
+impl<'a> IntoIterator for &'a ModelRoles {
+    type Item = (&'a str, &'a ModelRole);
+    type IntoIter = ModelRolesIter<'a>;
+
+    fn into_iter(self) -> ModelRolesIter<'a> {
+        self.iter()
+    }
+}
+
+/// Yields the declared roles of one [`ModelRoles`] as `(label, role)` pairs,
+/// in label order.
+///
+/// [`ModelRoles::iter`] returns it.
+#[derive(Debug, Clone)]
+#[must_use = "an iterator does nothing until it is consumed"]
+pub struct ModelRolesIter<'a> {
+    roles: btree_map::Iter<'a, String, ModelRole>,
+}
+
+impl<'a> Iterator for ModelRolesIter<'a> {
+    type Item = (&'a str, &'a ModelRole);
+
+    fn next(&mut self) -> Option<(&'a str, &'a ModelRole)> {
+        self.roles
+            .next()
+            .map(|(label, role)| (label.as_str(), role))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.roles.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ModelRolesIter<'_> {}
+
 impl<'de> Deserialize<'de> for ModelRoles {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let roles = deserialize_contract_map(
+        let roles = contract::deserialize_contract_map(
             deserializer,
             ContractKeys {
                 what: "model role label",

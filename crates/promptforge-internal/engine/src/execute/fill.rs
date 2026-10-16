@@ -22,7 +22,7 @@ pub(super) fn fill_model_bindings(
     let Some(model) = model else {
         return bindings;
     };
-    for (label, role) in prompt.frontmatter().models().iter() {
+    for (label, role) in prompt.frontmatter().models() {
         if let Some(minimum) = role.min_context()
             && model.context() < minimum
         {

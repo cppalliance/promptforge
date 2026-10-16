@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU32;
 
-use super::{ArgType, ModelKeyword};
+use super::{ArgType, ArgsDeclIter, ModelKeyword, ModelRolesIter};
 use crate::ParseErrorKind;
 use crate::test_support::{assert_parse_error, parse_err, parse_ok, prompt};
 
@@ -131,10 +131,20 @@ fn args_declarations_round_trip() {
 
 #[test]
 fn an_arg_default_must_match_the_declared_type() {
-    for (kind, default) in [("boolean", "'true'"), ("integer", "1.5"), ("string", "42")] {
+    for (kind, default, actual) in [
+        ("boolean", "'true'", "string"),
+        ("integer", "1.5", "number"),
+        ("string", "42", "integer"),
+        ("number", "[1]", "sequence"),
+    ] {
         let front = format!("args: {{ flag: {{ type: {kind}, default: {default} }} }}");
-        let error = parse_err(&prompt(&front, &[]));
-        assert_eq!(error.kind(), ParseErrorKind::Frontmatter, "{kind}: {error}");
+        assert_parse_error(
+            &prompt(&front, &[]),
+            ParseErrorKind::Frontmatter,
+            &format!(
+                "the default has type `{actual}`, which does not match the declared type `{kind}`"
+            ),
+        );
     }
     // A matching default passes.
     let prompt = parse_ok(&prompt(
@@ -219,6 +229,33 @@ fn model_roles_round_trip_with_defaults() {
 }
 
 #[test]
+fn args_and_model_roles_iterate_in_name_order_through_named_iterators() {
+    let prompt = parse_ok(&prompt(
+        "args: { query: { type: string }, limit: { type: integer } }
+        models: { triage: {}, analyst: {} }",
+        &[],
+    ));
+    let fm = prompt.frontmatter();
+
+    let args: ArgsDeclIter<'_> = fm.args().iter();
+    assert_eq!(args.len(), 2);
+    let names: Vec<&str> = args.map(|(name, _)| name).collect();
+    assert_eq!(names, ["limit", "query"]);
+    let mut kinds = Vec::new();
+    for (_, decl) in fm.args() {
+        kinds.push(decl.kind());
+    }
+    assert_eq!(kinds, [ArgType::Integer, ArgType::String]);
+
+    let roles: ModelRolesIter<'_> = fm.models().iter();
+    assert_eq!(roles.len(), 2);
+    let labels: Vec<&str> = roles.map(|(label, _)| label).collect();
+    assert_eq!(labels, ["analyst", "triage"]);
+    let by_reference: Vec<&str> = fm.models().into_iter().map(|(label, _)| label).collect();
+    assert_eq!(by_reference, labels);
+}
+
+#[test]
 fn an_unknown_model_keyword_is_a_parse_error() {
     // The keyword vocabulary is closed; `multimodal` is a non-goal and a
     // typo must fail at parse rather than being silently ignored.
@@ -259,12 +296,12 @@ fn contract_errors_report_their_frontmatter_line_and_column() {
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
     assert_eq!(
         error.line(),
-        Some(5),
+        NonZeroU32::new(5),
         "the offending scalar's line: {error}"
     );
     assert_eq!(
         error.column(),
-        Some(5),
+        NonZeroU32::new(5),
         "the offending scalar's column: {error}"
     );
     assert_eq!(

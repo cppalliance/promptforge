@@ -198,9 +198,24 @@ fn closer_and_lookalike_errors_report_the_offending_line() {
         ));
         assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
         assert_eq!(error.to_string(), message);
-        assert_eq!(error.line(), Some(line), "{error}");
-        assert_eq!(error.column(), Some(1), "{error}");
+        assert_eq!(error.line(), NonZeroU32::new(line), "{error}");
+        assert_eq!(error.column(), NonZeroU32::new(1), "{error}");
     }
+}
+
+#[test]
+fn a_fence_split_that_disagrees_with_the_markdown_parser_is_an_internal_error() {
+    // The parse refuses the four-backtick closing line before any split, so
+    // only a direct split can reach the disagreement.
+    let content = "```lua\nvar.a = 1\n````\n\n```lua\nvar.b = 2\n```\n";
+    let Err(error) = crate::fence::split_section_blocks(content, "S") else {
+        panic!("required a split failure, actual a split of {content:?}");
+    };
+    assert!(matches!(error, Error::Internal(_)), "{error:?}");
+    assert_eq!(
+        ParseError::from_inner(error).kind(),
+        ParseErrorKind::Internal
+    );
 }
 
 #[test]

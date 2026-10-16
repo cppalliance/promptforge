@@ -168,11 +168,13 @@ auto promptforge::plugins::Prelude: Freeze, RefUnwindSafe, Send, Sync, Unpin, Un
 auto promptforge::prompt::ArgDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ArgType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ArgsDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ArgsDeclIter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::FileDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::Frontmatter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelKeyword: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRole: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::prompt::ModelRoles: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::prompt::ModelRolesIter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::replay::Flags: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::timestamp::Timestamp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::tools::OutputTrust: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -295,11 +297,13 @@ derives promptforge::plugins::Prelude: Clone, Debug, Eq, PartialEq
 derives promptforge::prompt::ArgDecl: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ArgType: Clone, Copy, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ArgsDecl: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ArgsDeclIter: Clone, Debug
 derives promptforge::prompt::FileDecl: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::Frontmatter: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ModelKeyword: Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd
 derives promptforge::prompt::ModelRole: Clone, Debug, Deserialize, Eq, PartialEq
 derives promptforge::prompt::ModelRoles: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives promptforge::prompt::ModelRolesIter: Clone, Debug
 derives promptforge::replay::Flags: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize
 derives promptforge::timestamp::Timestamp: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
 derives promptforge::tools::OutputTrust: Clone, Copy, Debug, Eq, PartialEq
@@ -394,6 +398,8 @@ impl core::fmt::Display for promptforge::vfs::VfsPath
 impl core::fmt::Display for promptforge::vfs::VfsPathBuf
 impl core::future::future::Future for promptforge::cancel::Cancelled
 impl core::future::future::Future for promptforge::cancel::Cancelled { type Output = () }
+impl core::iter::traits::exact_size::ExactSizeIterator for promptforge::prompt::ArgsDeclIter<'_>
+impl core::iter::traits::exact_size::ExactSizeIterator for promptforge::prompt::ModelRolesIter<'_>
 impl core::ops::bit::BitOr for promptforge::replay::Flags
 impl core::ops::bit::BitOr for promptforge::replay::Flags { type Output = promptforge::replay::Flags }
 impl core::ops::bit::BitOrAssign for promptforge::replay::Flags
@@ -419,8 +425,18 @@ impl promptforge::vfs::Policy for promptforge::vfs::ModePolicy
 impl promptforge::vfs::Vfs for promptforge::vfs::MemoryBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::RealBackend
 impl promptforge::vfs::Vfs for promptforge::vfs::VfsRef
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ArgsDecl
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ArgsDecl { type IntoIter = promptforge::prompt::ArgsDeclIter<'a> }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ArgsDecl { type Item = (&'a str, &'a promptforge::prompt::ArgDecl) }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ModelRoles
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ModelRoles { type IntoIter = promptforge::prompt::ModelRolesIter<'a> }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a promptforge::prompt::ModelRoles { type Item = (&'a str, &'a promptforge::prompt::ModelRole) }
 impl<'a> core::iter::traits::iterator::Iterator for promptforge::model::ArgumentNames<'a>
 impl<'a> core::iter::traits::iterator::Iterator for promptforge::model::ArgumentNames<'a> { type Item = &'a str }
+impl<'a> core::iter::traits::iterator::Iterator for promptforge::prompt::ArgsDeclIter<'a>
+impl<'a> core::iter::traits::iterator::Iterator for promptforge::prompt::ArgsDeclIter<'a> { type Item = (&'a str, &'a promptforge::prompt::ArgDecl) }
+impl<'a> core::iter::traits::iterator::Iterator for promptforge::prompt::ModelRolesIter<'a>
+impl<'a> core::iter::traits::iterator::Iterator for promptforge::prompt::ModelRolesIter<'a> { type Item = (&'a str, &'a promptforge::prompt::ModelRole) }
 impl<'a> promptforge::vfs::OpEvent<'a>
 pub const fn promptforge::RunSeed::as_bytes(&self) -> &[u8; 32]
 pub const fn promptforge::RunSeed::from_bytes(bytes: [u8; 32]) -> promptforge::RunSeed
@@ -444,11 +460,12 @@ pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
 pub fn promptforge::MissingService::new(plugin: promptforge::plugins::PluginId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
-pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
+pub fn promptforge::ParseError::cause(&self) -> core::option::Option<&dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static>
+pub fn promptforge::ParseError::column(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
 pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind
-pub fn promptforge::ParseError::line(&self) -> core::option::Option<u32>
+pub fn promptforge::ParseError::line(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
 pub fn promptforge::ParseError::name(&self) -> core::option::Option<&str>
-pub fn promptforge::ParseError::span(&self) -> core::option::Option<(usize, usize)>
+pub fn promptforge::ParseError::span(&self) -> core::option::Option<core::ops::range::Range<usize>>
 pub fn promptforge::Prompt::frontmatter(&self) -> &promptforge::prompt::Frontmatter
 pub fn promptforge::Prompt::parse(input: &str, execution: &str) -> (core::result::Result<promptforge::Prompt, promptforge::ParseError>, alloc::vec::Vec<promptforge::event::Event>)
 pub fn promptforge::Prompt::strip_h1_prose(&mut self)
@@ -658,7 +675,7 @@ pub fn promptforge::prompt::ArgDecl::kind(&self) -> promptforge::prompt::ArgType
 pub fn promptforge::prompt::ArgsDecl::get(&self, name: &str) -> core::option::Option<&promptforge::prompt::ArgDecl>
 pub fn promptforge::prompt::ArgsDecl::is_default(&self) -> bool
 pub fn promptforge::prompt::ArgsDecl::is_empty(&self) -> bool
-pub fn promptforge::prompt::ArgsDecl::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ArgDecl)>
+pub fn promptforge::prompt::ArgsDecl::iter(&self) -> promptforge::prompt::ArgsDeclIter<'_>
 pub fn promptforge::prompt::ArgsDecl::len(&self) -> usize
 pub fn promptforge::prompt::FileDecl::description(&self) -> &str
 pub fn promptforge::prompt::FileDecl::path(&self) -> &str
@@ -676,7 +693,7 @@ pub fn promptforge::prompt::ModelRole::keywords(&self) -> &[promptforge::prompt:
 pub fn promptforge::prompt::ModelRole::min_context(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
 pub fn promptforge::prompt::ModelRoles::get(&self, label: &str) -> core::option::Option<&promptforge::prompt::ModelRole>
 pub fn promptforge::prompt::ModelRoles::is_empty(&self) -> bool
-pub fn promptforge::prompt::ModelRoles::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &promptforge::prompt::ModelRole)>
+pub fn promptforge::prompt::ModelRoles::iter(&self) -> promptforge::prompt::ModelRolesIter<'_>
 pub fn promptforge::prompt::ModelRoles::len(&self) -> usize
 pub fn promptforge::timestamp::Timestamp::to_rfc3339(self) -> alloc::string::String
 pub fn promptforge::tools::ToolCatalog::get(&self, id: &promptforge::tools::ToolId) -> core::option::Option<&promptforge::tools::ToolDescriptor>
@@ -802,6 +819,7 @@ pub promptforge::MissingService::plugin: promptforge::plugins::PluginId
 pub promptforge::MissingService::service: alloc::string::String
 pub promptforge::ParseErrorKind::Fence
 pub promptforge::ParseErrorKind::Frontmatter
+pub promptforge::ParseErrorKind::Internal
 pub promptforge::ParseErrorKind::List
 pub promptforge::ParseErrorKind::Lua
 pub promptforge::ParseErrorKind::Structure
@@ -1498,6 +1516,8 @@ pub struct promptforge::model::ParseRoleError { /* private fields */ }
 pub struct promptforge::model::Temperature(/* private fields */)
 pub struct promptforge::plugins::GlobalName { /* private fields */ }
 pub struct promptforge::plugins::Prelude { /* private fields */ }
+pub struct promptforge::prompt::ArgsDeclIter<'a> { /* private fields */ }
+pub struct promptforge::prompt::ModelRolesIter<'a> { /* private fields */ }
 pub struct promptforge::replay::Flags(/* private fields */)
 pub struct promptforge::timestamp::Timestamp(/* private fields */)
 pub struct promptforge::vfs::Access { /* private fields */ }

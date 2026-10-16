@@ -305,7 +305,7 @@ fn unrecognized_lua_label_error_reports_the_fence_opening_line() {
          ## S\n\nProse.\n\n```lua extra\nfunction f()\nend\n```\n\n```Lua\nreturn 1\n```\n";
     let error = parse_err(src);
     assert_eq!(error.kind(), ParseErrorKind::Fence, "{error}");
-    assert_eq!(error.line(), Some(12), "{error}");
-    assert_eq!(error.column(), Some(1), "{error}");
+    assert_eq!(error.line(), NonZeroU32::new(12), "{error}");
+    assert_eq!(error.column(), NonZeroU32::new(1), "{error}");
     assert!(error.span().is_some(), "{error}");
 }

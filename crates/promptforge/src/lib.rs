@@ -134,11 +134,13 @@ pub mod prompt {
     pub use promptforge_parser::ArgDecl;
     pub use promptforge_parser::ArgType;
     pub use promptforge_parser::ArgsDecl;
+    pub use promptforge_parser::ArgsDeclIter;
     pub use promptforge_parser::FileDecl;
     pub use promptforge_parser::Frontmatter;
     pub use promptforge_parser::ModelKeyword;
     pub use promptforge_parser::ModelRole;
     pub use promptforge_parser::ModelRoles;
+    pub use promptforge_parser::ModelRolesIter;
 }
 
 pub mod vfs {

@@ -84,7 +84,7 @@ fn a_role_check_by_hand_finds_the_same_shortfall_prepare_reports() -> TestResult
     } = Scenario::default().model(model.clone()).prepare(&source)?;
 
     let mut misses = Vec::new();
-    for (label, role) in prompt.frontmatter().models().iter() {
+    for (label, role) in prompt.frontmatter().models() {
         let keyword_miss = role.keywords().iter().any(|keyword| match keyword {
             ModelKeyword::Thinking => model.thinking() == ThinkingMode::Never,
             ModelKeyword::NoThinking => model.thinking() == ThinkingMode::Always,

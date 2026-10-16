@@ -1,16 +1,15 @@
-//! The parse entry point: frontmatter decoding, H1 validation, and the
-//! assembly of a [`Prompt`] from its headings, fences, and sections.
+//! Parses a prompt's source into a [`Prompt`]: frontmatter, H1, and sections.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_types::event::{Event, lifecycle};
 
-use crate::build::{
-    Frontmatter, Heading, build_sections, collect_headings, line_add, split_frontmatter,
-};
-use crate::fence::{FenceViolation, first_fence_violation, split_h1};
-use crate::{Error, ParseError, ParseErrorKind, Prompt, Result};
+use crate::contract::{self, PluginListError};
+use crate::fence::{self, FenceViolation};
+use crate::sections::{self, Heading};
+use crate::{Error, Frontmatter, ParseError, ParseErrorKind, Prompt, Result, frontmatter};
 
 impl Prompt {
     /// Parses the full source text of a prompt file into a [`Prompt`] and
@@ -54,6 +53,8 @@ impl Prompt {
     /// - `List` when a section made up only of list items has an empty item.
     /// - `Lua` when a Lua block in the H1 or in a section fails to compile as
     ///   Lua.
+    /// - `Internal` when the parser fails through no fault of the prompt: one
+    ///   of its own invariants breaks, or the Lua compiler cannot start.
     pub fn parse(
         input: &str,
         execution: &str,
@@ -74,31 +75,36 @@ impl Prompt {
     }
 
     fn parse_inner(input: &str, emitter: &Emitter) -> Result<Prompt> {
-        let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
+        let (yaml, body, frontmatter_lines) = frontmatter::split_frontmatter(input)?;
         let body: Arc<str> = Arc::from(body);
         let frontmatter: Frontmatter = serde_yaml_ng::from_str(&yaml).map_err(|e| {
-            // Retain the YAML decode failure as the `#[source]` cause and
-            // surface its location, so the public parse error exposes the
-            // frontmatter syntax position as stored fields. The location is
-            // relative to the frontmatter block, which starts on file line 2
-            // (line 1 is the opening `---` delimiter).
+            // The location is relative to the frontmatter block, which starts
+            // on file line 2 (line 1 is the opening `---` delimiter).
             let (line, column) = e.location().map_or((None, None), |location| {
                 (
                     u32::try_from(location.line())
                         .ok()
-                        .and_then(|line| line.checked_add(1)),
-                    u32::try_from(location.column()).ok(),
+                        .and_then(|line| line.checked_add(1))
+                        .and_then(NonZeroU32::new),
+                    u32::try_from(location.column())
+                        .ok()
+                        .and_then(NonZeroU32::new),
                 )
             });
             Error::ParseFrontmatter {
                 message: e.to_string(),
-                source: Box::new(e),
+                cause: Box::new(e),
                 line,
                 column,
             }
         })?;
-        crate::contract::check_distinct_plugins(frontmatter.plugins())
-            .map_err(|message| Error::parse(ParseErrorKind::Frontmatter, message))?;
+        contract::check_distinct_plugins(frontmatter.plugins()).map_err(
+            |refusal| match refusal {
+                PluginListError::Duplicate(_) => {
+                    Error::parse(ParseErrorKind::Frontmatter, refusal.to_string())
+                }
+            },
+        )?;
         // Everything past the frontmatter postdates the prompt's name, so a
         // failure from here on is stamped with it (and its span's position).
         let name = frontmatter.name().to_owned();
@@ -113,7 +119,7 @@ impl Prompt {
         emitter: &Emitter,
     ) -> Result<Prompt> {
         let body: &str = shared;
-        let headings = collect_headings(body)?;
+        let headings = sections::collect_headings(body)?;
 
         let h1_positions: Vec<usize> = headings
             .iter()
@@ -121,13 +127,26 @@ impl Prompt {
             .filter_map(|(index, heading)| (heading.level == 1).then_some(index))
             .collect();
         let [h1_index] = h1_positions.as_slice() else {
+            if h1_positions.is_empty() {
+                return Err(Error::parse(
+                    ParseErrorKind::Structure,
+                    "prompt requires an H1 title",
+                ));
+            }
+            let lines = h1_positions
+                .iter()
+                .map(|&index| {
+                    sections::line_add(frontmatter_lines, headings[index].source_line)
+                        .map(|line| line.to_string())
+                })
+                .collect::<Result<Vec<_>>>()?;
             return Err(Error::parse(
                 ParseErrorKind::Structure,
-                if h1_positions.is_empty() {
-                    "prompt requires an H1 title"
-                } else {
-                    "prompt must contain exactly one H1 title"
-                },
+                format!(
+                    "prompt must contain exactly one H1 title, found {} at lines {}",
+                    lines.len(),
+                    lines.join(", ")
+                ),
             ));
         };
         let h1 = &headings[*h1_index];
@@ -138,8 +157,8 @@ impl Prompt {
             ));
         }
         let title = h1.title.clone();
-        let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
-        if let Some((line, violation)) = first_fence_violation(body) {
+        let h1_content_abs_line = sections::line_add(frontmatter_lines, h1.content_start_line)?;
+        if let Some((line, violation)) = fence::first_fence_violation(body) {
             let message = match violation {
                 FenceViolation::Label(label) => {
                     format!("unrecognized fence label `{label}`; the only Lua fence label is `lua`")
@@ -152,7 +171,7 @@ impl Prompt {
             return Err(Error::parse_at(ParseErrorKind::Fence, line, message));
         }
         let (h1_blocks, description_text) =
-            split_h1(shared, h1.content, &title, h1_content_abs_line, emitter)?;
+            fence::split_h1(shared, h1.content, &title, h1_content_abs_line, emitter)?;
 
         // Everything before the H1 is preface and has no prompt semantics.
         // Sections are headings after the H1 at level 2 or deeper.
@@ -162,7 +181,7 @@ impl Prompt {
             .filter(|h| h.level >= 2)
             .collect();
         let mut pos = 0;
-        let sections = build_sections(
+        let sections = sections::build_sections(
             shared,
             &section_headings,
             &mut pos,

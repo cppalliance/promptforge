@@ -55,7 +55,11 @@ fn the_map_form_of_a_plugin_entry_is_refused_naming_the_plain_name_form() {
                 .contains("expected a Plugin's plain name, such as `web`"),
             "the refusal names the plain-name form: {error}"
         );
-        assert_eq!(error.line(), Some(5), "the entry's own line: {error}");
+        assert_eq!(
+            error.line(),
+            NonZeroU32::new(5),
+            "the entry's own line: {error}"
+        );
     }
 }
 

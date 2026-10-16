@@ -25,25 +25,28 @@
 pub use promptforge_lua::LuaProgram;
 
 mod body_text;
-mod build;
 mod contract;
 pub mod detail;
 mod error;
 mod fence;
+mod frontmatter;
 mod list;
 mod parse;
 mod prompt;
+mod sections;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
 pub use body_text::BodyText;
-pub use build::{
-    FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
+pub use contract::{
+    ArgDecl, ArgType, ArgsDecl, ArgsDeclIter, ModelKeyword, ModelRole, ModelRoles, ModelRolesIter,
 };
-pub use contract::{ArgDecl, ArgType, ArgsDecl, ModelKeyword, ModelRole, ModelRoles};
 use error::Result;
 pub use error::{Error, ParseError, ParseErrorKind};
+pub use frontmatter::{
+    FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
+};
 pub use prompt::{Block, Prompt, Section};
 
 #[cfg(test)]

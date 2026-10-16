@@ -1,5 +1,7 @@
 //! Crate-wide parser tests: frontmatter, headings, fences, lists, breaks, and line mapping.
 
+use std::num::NonZeroU32;
+
 use promptforge_types::event::Event;
 
 use super::*;
@@ -33,15 +35,15 @@ const OPENER_MESSAGE: &str = "`lua` fence opening line must be exactly ```lua";
 const CLOSER_MESSAGE: &str = "`lua` fence closing line must be exactly ```";
 
 #[test]
-fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
-    // A malformed-YAML frontmatter must classify as `Frontmatter` and
-    // retain the underlying serde_yaml_ng failure as the public error's
-    // `source()`, instead of flattening it into a string.
+fn invalid_frontmatter_keeps_the_yaml_failure_as_its_cause() {
     let error = parse_err(&prompt(": : :", &[]));
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+    let cause = error
+        .cause()
+        .expect("the YAML decode failure stays reachable as the cause");
     assert!(
-        std::error::Error::source(&error).is_some(),
-        "the YAML decode failure must be preserved as the error source: {error}"
+        cause.is::<serde_yaml_ng::Error>(),
+        "required a YAML decode failure, actual {cause:?}"
     );
 }
 
@@ -52,7 +54,11 @@ fn frontmatter_syntax_errors_report_a_position_without_a_name() {
     // the prompt's name, so none is reported.
     let error = parse_err("---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n");
     assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
-    assert_eq!(error.line(), Some(4), "the malformed line: {error}");
+    assert_eq!(
+        error.line(),
+        NonZeroU32::new(4),
+        "the malformed line: {error}"
+    );
     assert!(
         error.column().is_some(),
         "a column accompanies the line: {error}"
@@ -74,12 +80,12 @@ fn structured_errors_report_the_prompt_name_and_source_position() {
     assert_eq!(error.name(), Some("dup"));
     assert_eq!(
         error.line(),
-        Some(12),
+        NonZeroU32::new(12),
         "the duplicate heading's line: {error}"
     );
     assert_eq!(
         error.column(),
-        Some(1),
+        NonZeroU32::new(1),
         "the duplicate heading's column: {error}"
     );
     assert!(
@@ -100,8 +106,8 @@ fn orphan_and_empty_heading_errors_report_a_line() {
             "---\nname: x\ndescription: d\n---\n\n# T\n\n{body}"
         ));
         assert_eq!(error.kind(), kind, "{error}");
-        assert_eq!(error.line(), Some(line), "{error}");
-        assert_eq!(error.column(), Some(1), "{error}");
+        assert_eq!(error.line(), NonZeroU32::new(line), "{error}");
+        assert_eq!(error.column(), NonZeroU32::new(1), "{error}");
         assert!(error.span().is_some(), "{error}");
     }
 }

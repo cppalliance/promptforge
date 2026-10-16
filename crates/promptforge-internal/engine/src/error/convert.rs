@@ -4,6 +4,7 @@
 //! variant it stands in for.
 
 use std::borrow::Cow;
+use std::num::NonZeroU32;
 
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::model::ModelSetError;
@@ -120,14 +121,14 @@ impl From<crate::parser::ParseError> for Error {
         match promptforge_parser::detail::parse_error_into_inner(error) {
             ParserError::ParseFrontmatter {
                 message,
-                source,
+                cause,
                 line,
                 column,
             } => Error::ParseFrontmatter {
                 message,
-                source,
-                line,
-                column,
+                source: cause,
+                line: line.map(NonZeroU32::get),
+                column: column.map(NonZeroU32::get),
             },
             ParserError::ParseStructured {
                 kind,
@@ -138,11 +139,11 @@ impl From<crate::parser::ParseError> for Error {
                 column,
             } => Error::ParseStructured {
                 kind,
-                span,
+                span: span.map(|span| (span.start, span.end)),
                 message,
                 name,
-                line,
-                column,
+                line: line.map(NonZeroU32::get),
+                column: column.map(NonZeroU32::get),
             },
             ParserError::Lua(lua) => Error::from(lua),
             ParserError::Internal(message) => Error::internal(message),
