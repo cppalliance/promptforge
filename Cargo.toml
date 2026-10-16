@@ -164,7 +164,7 @@ hmac = "0.13"
 subtle = "2.6"
 dotenvy = "0.15"
 tar = { version = "0.4.46", default-features = false }
-zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 # Loads the packaged whisper.cpp runtime without linking it into Cargo builds.
 libloading = "0.8"
 # WAV parsing for STT uploads and transcription test fixtures.
@@ -251,9 +251,13 @@ tauri-plugin-process = "2.3.1"
 # default would put `ring` into the Workshop binary. The plugin's reqwest
 # calls still get TLS: cargo unifies reqwest's features per binary and the
 # workspace pin above enables `rustls` (aws-lc-rs), so the Workshop links one
-# crypto backend. `system-proxy` and `zip` are the plugin's other defaults,
-# kept as they were.
-tauri-plugin-updater = { version = "2.11.0", default-features = false, features = ["system-proxy", "zip"] }
+# crypto backend. `system-proxy` is the plugin's other default, kept as it
+# was. The `zip` default stays off: it only unpacks the older v1Compatible
+# update bundles (the Windows `.zip` and the Linux `.AppImage.tar.gz`), and
+# the desktop app's `"createUpdaterArtifacts": true` ships the signed
+# installers themselves (the NSIS `-setup.exe` and the raw `.AppImage`). The
+# macOS `.app.tar.gz` path uses `tar` and `flate2` with no feature.
+tauri-plugin-updater = { version = "2.11.0", default-features = false, features = ["system-proxy"] }
 tauri-plugin-single-instance = "2.4.4"
 # Test-only Jinja2 compatibility oracle for bundled chat templates. Members
 # inherit these only from their dev-dependency tables.

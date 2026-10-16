@@ -364,9 +364,10 @@ fn full_synthetic_build_produces_manifest_zip_and_checksum() {
         "llama-server-cuda-blackwell-b10082-win-x64.zip"
     );
     let zip_file = std::fs::File::open(&outcome.zip).unwrap();
-    let mut archive = zip::ZipArchive::new(zip_file).unwrap();
-    let mut names: Vec<String> = (0..archive.len())
-        .map(|index| archive.by_index(index).unwrap().name().to_string())
+    let archive = zip::ZipArchive::new(zip_file).unwrap();
+    let mut names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
         .collect();
     names.sort();
     assert_eq!(

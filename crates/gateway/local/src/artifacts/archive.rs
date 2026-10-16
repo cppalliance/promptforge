@@ -179,23 +179,30 @@ fn extract_zip(
             archive: archive.display().to_string(),
             source: io::Error::other(source),
         })?;
+        let name = entry
+            .name()
+            .map_err(|source| LocalError::Archive {
+                archive: archive.display().to_string(),
+                source: io::Error::other(source),
+            })?
+            .into_owned();
         let Some(relative) = entry.enclosed_name() else {
             return Err(LocalError::UnsafeArchiveEntry {
                 archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
+                entry: name,
             });
         };
-        if !safe_archive_name(entry.name()) || !safe_relative_path(&relative) {
+        if !safe_archive_name(&name) || !safe_relative_path(&relative) {
             return Err(LocalError::UnsafeArchiveEntry {
                 archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
+                entry: name,
             });
         }
         let mode = entry.unix_mode();
         if !zip_entry_type_is_supported(mode, entry.is_dir()) {
             return Err(LocalError::UnsafeArchiveEntry {
                 archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
+                entry: name,
             });
         }
         let output = destination.join(relative);
