@@ -4,9 +4,12 @@
 use promptforge_parser::test_support::{PromptSource, one_section};
 use promptforge_types::emitter::DebugMode;
 
+use super::context::{arm_fanout, setup_prompt, with_writer};
+use super::fixtures::{echo_tool, failing_tool, scoped_tool};
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::test_support::recording::DebugEvent;
+use crate::test_support::scenario::EXECUTION;
 
 /// The prompt whose one section, `Only`, asks the `writer` role about its
 /// prose.

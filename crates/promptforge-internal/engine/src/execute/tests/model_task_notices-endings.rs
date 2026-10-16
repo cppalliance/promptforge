@@ -11,6 +11,7 @@ use promptforge_types::ids::AbandonReason;
 
 use super::*;
 use crate::execute::RunResult;
+use crate::execute::tests::context::task;
 use crate::test_support::scenario::{chat_answer, infer_prompt};
 
 /// Runs the two-section prompt with the model starting `Child` in round 1

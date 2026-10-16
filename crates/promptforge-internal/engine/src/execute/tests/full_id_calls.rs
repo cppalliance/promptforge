@@ -6,10 +6,12 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::fixtures::{echo_tool, scoped_tool};
 use super::models_loop::catalog_scenario;
 use super::*;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::test_support::rig::Rig;
+use crate::test_support::scenario::EXECUTION;
 
 /// The echo fixture's full id.
 const ECHO_ID: &str = "tools/echo";

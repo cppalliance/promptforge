@@ -8,6 +8,7 @@
 
 use promptforge_parser::test_support::prompt;
 
+use super::context::task;
 use super::model_task_notices::{
     NoticeRecorder, calls_delayed_tool, delayed_call_from, delayed_task_scenario, loop_owner,
 };

@@ -2,8 +2,9 @@
 //! `fanout`, and `jump` over the worker's visible set, the depth cap
 //! across the arm boundary, and an arm's text when it replies nothing.
 
-use super::super::super::arm_fanout;
 use super::*;
+use crate::RunErrorKind;
+use crate::execute::tests::context::arm_fanout;
 
 /// `prompt.list` inside a fanout arm reads a list section's items: the arm
 /// resolves like any section (the worker's siblings minus the worker, plus
@@ -194,7 +195,13 @@ fn jump_inside_a_fanout_arm_to_a_non_visible_heading_errors() {
         .section("### Worker", "jump('## Parent')")
         .prose("### Items", "- x");
     let trace = Scenario::new(source.build()).run();
-    let rendered = format!("{:?}", trace.error());
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Lua,
+        "the jump raises in Lua: {error}"
+    );
+    let rendered = error.to_string();
     assert!(
         rendered.contains("not found"),
         "a non-visible heading must not resolve: {rendered}"
@@ -249,7 +256,13 @@ fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
         .section("B", "return call('## A')")
         .prose("W", "---\n\n```lua\nreturn item\n```");
     let trace = Scenario::new(source.build()).run();
-    let rendered = trace.error().to_string();
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Quota,
+        "the cap is a quota: {error}"
+    );
+    let rendered = error.to_string();
     assert!(
         rendered.contains("tasks.fanout recursion exceeded cap of 8"),
         "expected the fanout recursion-cap error, got: {rendered}"
@@ -282,7 +295,13 @@ fn call_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
         .prose("W", "---\n\n```lua\nreturn call('## C')\n```")
         .prose("C", "---\n\n```lua\nreturn 'c-reply'\n```");
     let trace = Scenario::new(source.build()).run();
-    let rendered = trace.error().to_string();
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Quota,
+        "the cap is a quota: {error}"
+    );
+    let rendered = error.to_string();
     assert!(
         rendered.contains("call recursion exceeded cap of 8"),
         "expected the call recursion-cap error, got: {rendered}"

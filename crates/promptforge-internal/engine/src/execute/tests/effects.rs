@@ -9,13 +9,14 @@ use promptforge_parser::test_support::one_section;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::RoundId;
 
+use super::fixtures::echo_tool;
 use super::models_loop::loop_scenario;
 use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::execute::run::{EffectRecord, Round, ToolCallOrigin, ToolCaller};
 use crate::test_support::rig::Rig;
-use crate::test_support::scenario::round_trip;
+use crate::test_support::scenario::{EXECUTION, round_trip};
 
 /// Asserts every recorded effect survives the round trip unchanged.
 #[track_caller]
@@ -93,14 +94,14 @@ fn a_models_loop_round_issues_one_chat_effect_and_one_tool_call_effect_per_call(
         },
         "the model's call is one tool_call effect naming the bound identity and the model"
     );
-    let EffectRecord::Chat {
-        after,
-        keep,
-        messages,
-        ..
-    } = &records[2]
-    else {
-        panic!("the third effect is the second round: {:?}", records[2]);
+    let (after, keep, messages) = match &records[2] {
+        EffectRecord::Chat {
+            after,
+            keep,
+            messages,
+            ..
+        } => (after, keep, messages),
+        other => panic!("the third effect is the second round: {other:?}"),
     };
     assert_eq!(
         (*after, *keep),

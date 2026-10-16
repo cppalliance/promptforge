@@ -5,6 +5,7 @@
 //! but not finished.
 
 use super::*;
+use crate::execute::tests::context::sequence;
 
 #[test]
 fn jump_transfer_skips_the_jumpers_remaining_blocks() {
@@ -134,7 +135,11 @@ fn an_erroring_section_reports_started_but_not_finished() {
         ```lua\nerror('expected failure')\n```\n";
     let trace = scheduler_scenario(md).run();
 
-    assert!(matches!(trace.result(), RunResult::Failure(_)));
+    assert!(
+        matches!(trace.result(), RunResult::Failure(_)),
+        "the erroring section fails the run, got {:?}",
+        trace.result()
+    );
     let observed = sequence(&trace);
     assert!(
         observed.contains(&("Only".to_string(), detail::SECTION_STARTED.to_string())),

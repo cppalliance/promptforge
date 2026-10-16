@@ -7,13 +7,12 @@
 use std::num::NonZeroU32;
 
 use crate::RunErrorKind;
+use crate::execute::tests::context::test_context;
 use crate::test_support::scenario::Scenario;
-use crate::test_support::scripted_chat::ScriptedChat;
+use crate::test_support::scripted_chat::{ScriptedChat, text};
 use promptforge_parser::test_support::parse_ok;
 use promptforge_types::models::{ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_vfs::Origin;
-
-use super::super::{test_context, text};
 
 /// A prompt declaring no Plugins at all.
 const DECLARES_NOTHING: &str = concat!(

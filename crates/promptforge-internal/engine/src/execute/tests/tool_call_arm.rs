@@ -13,6 +13,7 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::fixtures::{echo_tool, failing_tool};
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::lua::ToolBinding;

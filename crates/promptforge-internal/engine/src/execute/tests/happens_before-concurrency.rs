@@ -3,8 +3,8 @@
 //! 12, an arm's `tasks.concurrency` limit gating its fanout within the
 //! caller's ceiling, and its clamping to that ceiling.
 
-use super::super::scheduler::ceiling;
 use super::*;
+use crate::execute::tests::scheduler::ceiling;
 
 /// Trace 6: nested tasks. An arm spawns sub-tasks and joins them, then
 /// the caller joins the arm and reads the sub-tasks' files - the

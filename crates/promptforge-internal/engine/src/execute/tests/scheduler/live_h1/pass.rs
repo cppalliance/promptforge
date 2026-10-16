@@ -5,6 +5,7 @@
 //! pass does not fire.
 
 use super::*;
+use crate::execute::tests::context::sequence;
 
 #[test]
 fn live_h1_infer_runs_once() {
@@ -98,8 +99,9 @@ fn a_failed_h1_assertion_ends_the_run_as_requirements_unmet() {
     let trace = h1_scenario(md).run();
 
     let error = trace.error();
-    let Error::RequirementsUnmet { notice, .. } = error.inner() else {
-        panic!("the failed assertion classifies as RequirementsUnmet: {error}");
+    let notice = match error.inner() {
+        Error::RequirementsUnmet { notice, .. } => notice,
+        other => panic!("the failed assertion classifies as RequirementsUnmet: {other:?}"),
     };
     let cause = error
         .cause()

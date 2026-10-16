@@ -9,6 +9,7 @@
 //! A slow member parks on a model round the rig holds while it answers the
 //! timer, then releases; a timer that must not win is held instead.
 
+use super::context::task;
 use super::scheduler::{asks, is_timer, scheduler_scenario};
 use super::tasks::TaskRecorder;
 use super::waits::tasks_prompt;

@@ -3,8 +3,11 @@
 use promptforge_parser::test_support::{one_section, prompt};
 use promptforge_types::event::Event;
 
+use super::context::{Recorder, sequence};
+use super::fixtures::{echo_tool, scoped_tool};
 use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
+use crate::test_support::scenario::{EXECUTION, TestStore};
 
 /// The prompt whose one section, `Only`, raises.
 fn failing_prompt() -> String {
@@ -156,7 +159,11 @@ fn a_run_refused_by_the_version_gate_reports_nothing() {
     // there is no RunStarted to pair a RunFinished with.
     let source = one_section("return \"ran\"").replacen("promptforge: 0", "promptforge: 2", 1);
     let trace = Scenario::new(source).run();
-    assert!(matches!(trace.result(), RunResult::Failure(_)));
+    assert!(
+        matches!(trace.result(), RunResult::Failure(_)),
+        "the version gate fails the run, got {:?}",
+        trace.result()
+    );
     let records = trace.run_records();
     assert!(
         records.is_empty(),
@@ -169,10 +176,14 @@ fn a_failing_run_still_reports_run_finished() {
     // The prologue fails, so the walk tears down its VM and the final
     // observation must report the run failure.
     let trace = Scenario::new(failing_prompt()).run();
-    assert!(matches!(
-        trace.error().inner(),
-        Error::Lua(_) | Error::LuaRuntime { .. }
-    ));
+    assert!(
+        matches!(
+            trace.error().inner(),
+            Error::Lua(_) | Error::LuaRuntime { .. }
+        ),
+        "the prologue fails as a Lua error, got {:?}",
+        trace.error()
+    );
 
     assert_eq!(
         sequence(&trace),
@@ -197,7 +208,11 @@ fn an_erroring_section_reports_started_but_not_finished() {
     // The absence half of the section-boundary contract: a section that
     // errors mid-walk must emit SECTION_STARTED and never SECTION_FINISHED.
     let trace = Scenario::new(failing_prompt()).run();
-    assert!(matches!(trace.result(), RunResult::Failure(_)));
+    assert!(
+        matches!(trace.result(), RunResult::Failure(_)),
+        "the erroring section fails the run, got {:?}",
+        trace.result()
+    );
 
     let observed = sequence(&trace);
     assert!(
@@ -218,7 +233,11 @@ fn an_erroring_section_tears_down_exactly_once_without_finishing() {
     // the teardown pair exactly once, and the disarmed completion flag
     // keeps SECTION_FINISHED from firing for the erroring section.
     let trace = Scenario::new(second_section_errors()).run();
-    assert!(matches!(trace.result(), RunResult::Failure(_)));
+    assert!(
+        matches!(trace.result(), RunResult::Failure(_)),
+        "the erroring section fails the run, got {:?}",
+        trace.result()
+    );
 
     let observed = sequence(&trace);
     for event in [

@@ -11,12 +11,13 @@
 use promptforge_types::event::Event;
 use promptforge_types::ids::{AbandonReason, TaskId};
 
+use super::context::{parse, test_context};
 use super::model_tasks::model_task_scenario;
 use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::run::{Effect, Run, Step};
 use crate::test_support::scenario::{
-    Batching, chat_answer, drive_batched, echo_chat, infer_prompt,
+    Batching, EXECUTION, chat_answer, drive_batched, echo_chat, infer_prompt, text_of,
 };
 use crate::test_support::{drive, perform_locally};
 
@@ -60,12 +61,15 @@ fn the_driver_runs_a_literal_prompt_with_no_effect() {
     let md = "---\nname: t\ndescription: d\npromptforge: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
     let run = Run::new(Arc::new(parse(md)), "", test_context(EXECUTION));
     let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
-    let RunResult::Ok(text) = result else {
-        panic!("the literal run succeeds: {result:?}");
-    };
-    assert_eq!(text, "hello");
-    assert!(matches!(events.first(), Some(Event::RunStarted { .. })));
-    assert!(matches!(events.last(), Some(Event::RunSucceeded { .. })));
+    assert_eq!(text_of(result), "hello");
+    assert!(
+        matches!(events.first(), Some(Event::RunStarted { .. })),
+        "the events open with the run's start: {events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(Event::RunSucceeded { .. })),
+        "the events close with the run's success: {events:?}"
+    );
 }
 
 #[test]
@@ -80,10 +84,7 @@ fn the_driver_performs_store_and_model_effects_and_keeps_the_events_in_order() {
     let (result, events) = drive(model_run(md), |_, effect| {
         perform_locally(effect, &mut echo_chat)
     });
-    let RunResult::Ok(text) = result else {
-        panic!("the run succeeds: {result:?}");
-    };
-    assert_eq!(text, "kept/r(ask)");
+    assert_eq!(text_of(result), "kept/r(ask)");
     let order: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
@@ -103,17 +104,19 @@ fn a_three_arm_fanout_fed_its_answers_in_reverse_order_packs_results_in_collecti
     // parent's results follow the collection, and every id is the
     // hierarchical one the arms would have under any order.
     let mut run = model_run(FANOUT);
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the fanout parks on its arms' rounds");
+    let mut effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the fanout parks on its arms' rounds: {other:?}"),
     };
-    let mut effects = effects;
-    let Effect::Vfs { .. } = &effects[0].2 else {
-        panic!("the parent's store write is issued first: {effects:?}");
-    };
+    assert!(
+        matches!(&effects[0].2, Effect::Vfs { .. }),
+        "the parent's store write is issued first: {effects:?}"
+    );
     let (id, _, store) = effects.remove(0);
     run.resume(id, perform_locally(&store, &mut echo_chat));
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the fanout parks on its arms' rounds");
+    let effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the fanout parks on its arms' rounds: {other:?}"),
     };
     let prompts: Vec<String> = effects
         .iter()
@@ -123,13 +126,13 @@ fn a_three_arm_fanout_fed_its_answers_in_reverse_order_packs_results_in_collecti
     for (id, _, effect) in effects.into_iter().rev() {
         run.resume(id, echo_chat(&effect));
     }
-    let Step::Done { result, events } = run.step() else {
-        panic!("every arm is answered, so the fanout completes");
+    let (result, events) = match run.step() {
+        Step::Done { result, events } => (result, events),
+        other @ Step::Pending { .. } => {
+            panic!("every arm is answered, so the fanout completes: {other:?}")
+        }
     };
-    let RunResult::Ok(text) = result else {
-        panic!("the fanout succeeds: {result:?}");
-    };
-    assert_eq!(text, "0.1|0.0.0=r(a)|0.1.0=r(b)|0.2.0=r(c)");
+    assert_eq!(text_of(result), "0.1|0.0.0=r(a)|0.1.0=r(b)|0.2.0=r(c)");
     assert_eq!(
         succeeded(&events),
         ["0.2", "0.1", "0.0"],
@@ -221,10 +224,7 @@ fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_no
             }
         })
     });
-    let RunResult::Ok(text) = result else {
-        panic!("the owner returns: {result:?}");
-    };
-    assert_eq!(text, "owner done");
+    assert_eq!(text_of(result), "owner done");
     let child: TaskId = "0.0".parse().expect("a task id parses");
     assert!(
         events.iter().any(|event| matches!(

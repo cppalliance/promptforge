@@ -2,10 +2,10 @@
 //! model, and tool calls while it loads, and prompt-wide state an H1
 //! `require` sets for every later section.
 
+use crate::execute::tests::fixtures::echo_tool;
 use crate::model::ToolSchema;
 use crate::test_support::scripted_chat::{ScriptedChat, text};
 
-use super::super::super::echo_tool;
 use super::*;
 
 /// A `require` case over `source` with the echo tool, the test model as

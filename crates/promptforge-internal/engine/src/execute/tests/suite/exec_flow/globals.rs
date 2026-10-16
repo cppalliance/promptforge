@@ -3,6 +3,7 @@
 //! metadata.
 
 use super::*;
+use crate::RunErrorKind;
 
 /// The `tasks` global is the task namespace (`tasks.spawn` and the
 /// waits), not a control-flow table: indexing it by a heading string reads
@@ -146,10 +147,17 @@ fn call_clones_var_in_and_discards_child_writes() {
 #[test]
 fn var_write_of_a_function_fails_the_run() {
     let trace = Scenario::new(one_section("var.f = function() end")).run();
-    let rendered = format!("{:?}", trace.error());
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Lua,
+        "the guard raises in Lua: {error}"
+    );
     assert!(
-        rendered.contains("var.f must be JSON data, got function"),
-        "the guard error must name the field and the type: {rendered}"
+        error
+            .to_string()
+            .contains("var.f must be JSON data, got function"),
+        "the guard error must name the field and the type: {error}"
     );
 }
 
@@ -192,10 +200,17 @@ fn missing_bare_global_in_prose_errors() {
         ```",
     );
     let trace = Scenario::new(source.build()).run();
-    let rendered = format!("{:?}", trace.error());
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Lua,
+        "the Lua read of `prose` raises the substitution failure: {error}"
+    );
     assert!(
-        rendered.contains("unknown namespace or global 'ghost'"),
-        "the error must name the missing global: {rendered}"
+        error
+            .to_string()
+            .contains("unknown namespace or global 'ghost'"),
+        "the error must name the missing global: {error}"
     );
 }
 

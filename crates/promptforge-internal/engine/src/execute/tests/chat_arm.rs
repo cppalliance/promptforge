@@ -10,6 +10,8 @@ use promptforge_parser::test_support::one_section;
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::metrics::{CallMetrics, Usage};
 
+use super::fixtures::echo_tool;
+use super::gateway::overflowing;
 use super::models_loop::loop_scenario;
 use super::*;
 

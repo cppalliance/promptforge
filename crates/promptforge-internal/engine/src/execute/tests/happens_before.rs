@@ -20,7 +20,7 @@
 use crate::RunErrorKind;
 use crate::execute::RunResult;
 use crate::test_support::rig::{Rig, RigTrace};
-use crate::test_support::scenario::{Batching, drive_batched};
+use crate::test_support::scenario::{Batching, TestStore, drive_batched};
 use crate::test_support::seeded::Seeded;
 
 use super::scheduler::{asks, scheduler_scenario};

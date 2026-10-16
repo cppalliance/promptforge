@@ -5,10 +5,7 @@ use promptforge_parser::test_support::PromptSource;
 use promptforge_types::ids::TaskId;
 
 use super::*;
-
-pub(super) use crate::test_support::scenario::{
-    EXECUTION, TEST_MODEL, TEST_SEED, TEST_STARTED_AT, TestStore, test_model,
-};
+use crate::test_support::scenario::{EXECUTION, TEST_SEED, TEST_STARTED_AT};
 
 /// Declares the `writer` role in `source`'s frontmatter and parks it as the
 /// prompt-wide default in its H1, so a bound scenario runs its sections
@@ -90,10 +87,6 @@ const fn _public_execution_types_are_send_sync_static() {
     assert_send_sync_static::<RunError>();
     assert_send_sync_static::<RunErrorKind>();
 }
-
-/// The runtime's default per-section tool-loop cap, mirrored for tests after the
-/// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
-pub(super) const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 pub(super) fn parse(md: &str) -> Prompt {

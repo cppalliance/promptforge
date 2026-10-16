@@ -7,9 +7,9 @@
 
 use promptforge_parser::test_support::{one_section, prompt};
 
-use super::super::model_task_notices::loop_owner;
-use super::super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
 use super::*;
+use crate::execute::tests::model_task_notices::loop_owner;
+use crate::execute::tests::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
 
 /// The list refusal both loop entries raise, as `kind:message`.
 const LIST_REFUSAL: &str = "lua:models.loop needs a messages.new() list; build one with \

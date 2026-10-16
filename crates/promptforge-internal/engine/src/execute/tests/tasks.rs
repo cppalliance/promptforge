@@ -7,6 +7,7 @@
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
+use super::context::task;
 use super::scheduler::scheduler_scenario;
 use super::*;
 use crate::execute::scheduler::test_hooks::TaskState;

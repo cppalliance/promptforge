@@ -3,8 +3,9 @@
 //! observations: started under the caller's section, the terminal under the
 //! worker's.
 
-use super::super::models_loop::loop_scenario;
 use super::*;
+use crate::execute::tests::fixtures::echo_tool;
+use crate::execute::tests::models_loop::loop_scenario;
 
 #[test]
 fn fanout_empty_collection_errors_before_any_scheduling() {
@@ -30,7 +31,7 @@ fn fanout_empty_collection_errors_before_any_scheduling() {
     );
     let recorder = recorded(&trace);
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(&trace, task_started),
         0,
         "no arm was ever started: {:?}",
         recorder.events()
@@ -164,25 +165,25 @@ fn an_exhausted_arm_becomes_the_incomplete_stub_and_its_sibling_still_lands() {
     );
     let recorder = recorded(&trace);
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(&trace, task_started),
         2,
         "both arms started: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_FAILED),
+        terminal_count(&trace, task_failed),
         1,
         "the exhausted arm reports its failure: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_SUCCEEDED),
+        terminal_count(&trace, task_succeeded),
         1,
         "the sibling reports its success: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_CANCELLED),
+        terminal_count(&trace, task_cancelled),
         0,
         "an exhausted arm cancels nothing: {:?}",
         recorder.events()
@@ -235,19 +236,19 @@ fn two_arms_writing_one_path_terminate_the_run_with_a_determinism_violation() {
     }
     let recorder = recorded(&trace);
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(&trace, task_started),
         2,
         "both arms started before the conflict: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_FAILED),
+        terminal_count(&trace, task_failed),
         0,
         "no arm fails on its own; the run ends at the answer boundary: {:?}",
         recorder.events()
     );
     assert!(
-        terminal_count(&recorder, TASK_SUCCEEDED) <= 1,
+        terminal_count(&trace, task_succeeded) <= 1,
         "at most the winner (whose answer landed first) reports a terminal: {:?}",
         recorder.events()
     );

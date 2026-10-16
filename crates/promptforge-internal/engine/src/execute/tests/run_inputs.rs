@@ -8,10 +8,11 @@ use promptforge_types::replay::Flags;
 use promptforge_types::seed::{RunSeed, RunUid};
 use promptforge_types::timestamp::Timestamp;
 
+use super::context::{parse, test_context};
 use super::*;
 use crate::execute::run::Run;
 use crate::test_support::drive;
-use crate::test_support::scenario::text_of;
+use crate::test_support::scenario::{EXECUTION, TEST_SEED, text_of};
 use crate::test_support::seeded::Seeded;
 
 /// A fixed instant with a millisecond fraction, so the rendering exercises
@@ -170,8 +171,9 @@ fn sys_now_is_absent_from_the_globals() {
         ```lua\n\
         return sys.now\n\
         ```\n";
-    let RunResult::Failure(error) = run_seeded(md, TEST_SEED) else {
-        panic!("reading sys.now fails the section");
+    let error = match run_seeded(md, TEST_SEED) {
+        RunResult::Failure(error) => error,
+        other => panic!("reading sys.now fails the section: {other:?}"),
     };
     assert!(
         error.to_string().contains("unknown sys field 'now'"),

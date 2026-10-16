@@ -9,6 +9,7 @@
 
 use promptforge_types::event::Event;
 
+use super::context::task;
 use super::scheduler::{asks, scheduler_scenario};
 use super::tasks::TaskRecorder;
 use super::*;

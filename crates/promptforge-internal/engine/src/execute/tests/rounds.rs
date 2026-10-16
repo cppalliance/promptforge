@@ -7,12 +7,14 @@ use promptforge_parser::test_support::one_section;
 use promptforge_types::event::{Event, ReplyOrigin};
 use promptforge_types::ids::RoundId;
 
+use super::fixtures::echo_tool;
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, Round};
 use crate::model::{Completion, CompletionResult, ToolCall};
 use crate::test_support::drive;
 use crate::test_support::rig::Rig;
+use crate::test_support::scenario::text_of;
 
 /// Offers `echo`, infers once, then loops over one tool round and its
 /// closing reply.
@@ -91,10 +93,7 @@ fn a_rounds_thinking_reply_and_tool_call_events_hold_the_id_its_chat_effect_held
         Effect::ToolCall { .. } => EffectAnswer::ToolCall(Ok(ToolOutput::trusted("echoed"))),
         other => panic!("only rounds and the echo call are issued: {other:?}"),
     });
-    let RunResult::Ok(text) = result else {
-        panic!("the run succeeds: {result:?}");
-    };
-    assert_eq!(text, "a|b");
+    assert_eq!(text_of(result), "a|b");
     assert_eq!(
         issued,
         vec![

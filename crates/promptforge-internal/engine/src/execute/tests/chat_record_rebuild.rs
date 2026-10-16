@@ -11,6 +11,7 @@ use std::rc::Rc;
 use promptforge_parser::test_support::one_section;
 use promptforge_types::ids::RoundId;
 
+use super::fixtures::echo_tool;
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectRecord};
@@ -27,16 +28,15 @@ struct Sent {
 impl Sent {
     /// The record's `after`, `keep`, and logged messages.
     fn shape(&self) -> (Option<RoundId>, u64, &[Value]) {
-        let EffectRecord::Chat {
-            after,
-            keep,
-            messages,
-            ..
-        } = &self.record
-        else {
-            panic!("a round records a chat record: {:?}", self.record);
-        };
-        (*after, *keep, messages)
+        match &self.record {
+            EffectRecord::Chat {
+                after,
+                keep,
+                messages,
+                ..
+            } => (*after, *keep, messages),
+            other => panic!("a round records a chat record: {other:?}"),
+        }
     }
 }
 
@@ -53,8 +53,9 @@ fn echo_rounds(lua: &str, replies: Vec<EffectAnswer>) -> (Scenario, SentLog) {
     let scenario = loop_scenario(one_section(&format!("tools.offer('tools/echo')\n{lua}")))
         .offer("echo", echo_tool())
         .chat_with(move |effect| {
-            let Effect::Chat { messages, .. } = effect else {
-                panic!("only model rounds reach the model: {effect:?}");
+            let messages = match effect {
+                Effect::Chat { messages, .. } => messages,
+                other => panic!("only model rounds reach the model: {other:?}"),
             };
             rounds.borrow_mut().push(Sent {
                 record: effect.record(),
@@ -87,8 +88,9 @@ fn assert_rebuilds(trace: &Trace, sent: &[Sent]) {
     );
     let mut requests: BTreeMap<RoundId, Vec<Value>> = BTreeMap::new();
     for one in sent {
-        let EffectRecord::Chat { round, .. } = &one.record else {
-            panic!("a round records a chat record: {:?}", one.record);
+        let round = match &one.record {
+            EffectRecord::Chat { round, .. } => round,
+            other => panic!("a round records a chat record: {other:?}"),
         };
         let (after, keep, messages) = one.shape();
         let base: &[Value] = match after {

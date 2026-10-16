@@ -7,6 +7,7 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::gateway::overflowing;
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::lua::OverflowReason;

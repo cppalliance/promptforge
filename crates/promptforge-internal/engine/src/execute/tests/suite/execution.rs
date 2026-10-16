@@ -5,6 +5,7 @@
 use std::collections::BTreeSet;
 
 use crate::RunErrorKind;
+use crate::test_support::recording::detail;
 use crate::test_support::scenario::{Record, Scenario};
 
 const LOG_EXECUTION: &str = "fixture-log-checkpoints";
@@ -169,7 +170,8 @@ fn concurrent_runs_keep_execution_ids_separate() {
         );
         assert!(
             records.iter().any(|record| {
-                record.section == "Store Fall-through" && record.detail == "Run succeeded"
+                record.section == "Store Fall-through"
+                    && record.detail == detail::RUN_SUCCEEDED.to_string()
             }),
             "{execution} must retain its own terminal run record"
         );

@@ -3,6 +3,7 @@
 //! unscoped only when the name is the wire name of a tool the run offers.
 
 use super::*;
+use crate::execute::tests::fixtures::{echo_tool, scoped_tool};
 
 /// A run of the loop section that offers `tools/scoped` (wire name
 /// `scoped`) and leaves `tools/global_tool` (wire name `global_tool`)

@@ -3,6 +3,7 @@
 //! self-address limits.
 
 use super::*;
+use crate::RunErrorKind;
 
 /// A jump transfers control and the jumper's remaining blocks never run.
 #[test]
@@ -351,10 +352,16 @@ fn call_recursion_is_capped() {
         &[("A", "return call('## B')"), ("B", "return call('## A')")],
     );
     let trace = Scenario::new(source).run();
-    let rendered = trace.error().to_string();
+    let error = trace.error();
+    assert_eq!(
+        error.kind(),
+        RunErrorKind::Quota,
+        "the cap is a quota: {error}"
+    );
+    let rendered = error.to_string();
     assert!(
-        rendered.contains("recursion exceeded cap"),
-        "expected a recursion-cap error, got: {rendered}"
+        rendered.contains("call recursion exceeded cap of 8"),
+        "expected the call recursion-cap error, got: {rendered}"
     );
 }
 

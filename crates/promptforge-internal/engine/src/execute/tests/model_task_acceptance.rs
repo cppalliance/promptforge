@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use promptforge_parser::test_support::prompt;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
+use super::context::task;
 use super::model_task_notices::{
     NoticeRecorder, delayed_call_from, delayed_task_scenario, loop_owner,
 };

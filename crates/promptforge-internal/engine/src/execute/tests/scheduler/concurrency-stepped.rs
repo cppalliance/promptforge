@@ -35,13 +35,10 @@ fn two_tasks_whose_call_children_finish_in_any_order_both_complete() {
     ] {
         let run = scheduler_scenario(md).limits(ceiling(2)).into_run();
         let outcome = drive_batched(run, batching);
-        let RunResult::Ok(text) = &outcome.result else {
-            panic!(
-                "both calls complete under {batching:?}: {:?}",
-                outcome.result
-            );
-        };
-        assert_eq!(text, "r(a)|r(b)", "under {batching:?}");
+        match &outcome.result {
+            RunResult::Ok(text) => assert_eq!(text, "r(a)|r(b)", "under {batching:?}"),
+            other => panic!("both calls complete under {batching:?}: {other:?}"),
+        }
     }
 }
 

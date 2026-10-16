@@ -5,6 +5,7 @@
 //! chain's owned tasks abort with it.
 
 use super::*;
+use crate::execute::tests::context::task;
 
 /// A child body that parks on a store write and never returns on its own,
 /// so the task stays live until something ends it.

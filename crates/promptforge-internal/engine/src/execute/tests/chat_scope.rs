@@ -4,6 +4,7 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::fixtures::echo_tool;
 use super::models_loop::loop_scenario;
 use super::*;
 

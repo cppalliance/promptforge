@@ -3,11 +3,12 @@
 
 use std::sync::Arc;
 
-use super::super::super::{echo_tool, test_context};
 use super::*;
 
 use crate::RunErrorKind;
 use crate::RunResult;
+use crate::execute::tests::context::test_context;
+use crate::execute::tests::fixtures::echo_tool;
 use crate::test_support::scenario::EXECUTION;
 use promptforge_vfs::{VfsError, VfsRef};
 

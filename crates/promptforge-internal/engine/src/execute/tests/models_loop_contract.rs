@@ -8,6 +8,8 @@
 
 use promptforge_parser::test_support::{one_section, prompt};
 
+use super::fixtures::structured_tool;
+use super::gateway::overflowing;
 use super::model_task_notices::loop_owner;
 use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
 use super::models_loop::loop_scenario;

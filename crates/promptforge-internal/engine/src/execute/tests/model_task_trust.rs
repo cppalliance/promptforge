@@ -12,6 +12,7 @@ use promptforge_types::event::Event;
 use super::model_task_notices::loop_owner;
 use super::model_tasks::model_task_scenario;
 use super::*;
+use crate::test_support::scenario::TEST_SEED;
 
 /// Runs `md` with the model played by `replies`, one per round in order.
 #[track_caller]

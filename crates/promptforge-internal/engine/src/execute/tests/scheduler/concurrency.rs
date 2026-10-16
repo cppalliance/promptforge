@@ -8,6 +8,7 @@
 //! `stepped`.
 
 use super::*;
+use crate::execute::tests::context::sequence;
 
 #[test]
 fn tasks_concurrency_clamps_to_the_callers_ceiling_and_reads_the_effective_limit_back() {
@@ -116,27 +117,25 @@ fn a_queued_task_reads_blocked_queued_and_its_start_event_fires_at_admission() {
         .run();
 
     assert_eq!(trace.text(), "done");
-    let events = sequence(&trace);
+    let events = trace.events();
+    let observed = sequence(&trace);
     assert_eq!(
-        events
-            .iter()
-            .filter(|(_, detail)| *detail == "Task started")
-            .count(),
+        terminal_count(&trace, task_started),
         2,
-        "both children start exactly once: {events:?}"
+        "both children start exactly once: {observed:?}"
     );
     let a_succeeded = events
         .iter()
-        .position(|(_, detail)| detail == "Task succeeded")
+        .position(task_succeeded)
         .expect("the first child succeeded");
     let b_started = events
         .iter()
-        .rposition(|(_, detail)| detail == "Task started")
+        .rposition(task_started)
         .expect("the second child started");
     assert!(
         a_succeeded < b_started,
         "the second child's start event fires at its admission, after the first child ends: \
-         {events:?}"
+         {observed:?}"
     );
 }
 
@@ -166,15 +165,18 @@ fn a_start_event_reports_the_spawning_section_not_the_admission_time_one() {
     let trace = scheduler_scenario(md).limits(ceiling(1)).run();
 
     assert_eq!(trace.text(), "done");
-    let events = sequence(&trace);
-    let started = events
+    let observed = sequence(&trace);
+    let started = trace
+        .events()
         .iter()
-        .filter(|(_, detail)| *detail == "Task started")
+        .filter(|event| task_started(event))
+        .map(Event::section)
         .collect::<Vec<_>>();
-    assert_eq!(started.len(), 1, "exactly one start event: {events:?}");
     assert_eq!(
-        started[0].0, "Main",
-        "the start event reports the spawning section, not the admission-time one: {events:?}"
+        started,
+        ["Main"],
+        "exactly one start event, reporting the spawning section, not the admission-time one: \
+         {observed:?}"
     );
 }
 

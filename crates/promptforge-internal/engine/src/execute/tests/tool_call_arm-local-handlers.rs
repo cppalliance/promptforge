@@ -9,6 +9,7 @@
 use promptforge_parser::test_support::prompt;
 
 use super::*;
+use crate::execute::tests::fixtures::{echo_tool, failing_tool, untrusted_echo_tool};
 
 /// The `grab` local tool registration every local-tool test opens with.
 const ADD_LOCAL_GRAB: &str = "tools.offer_local('grab', 'Grab a value', { value = 'string' }, \

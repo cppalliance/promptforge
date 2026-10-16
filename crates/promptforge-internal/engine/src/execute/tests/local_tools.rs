@@ -7,6 +7,8 @@
 
 use promptforge_parser::test_support::{one_section, prompt};
 
+use super::context::Recorder;
+use super::fixtures::scoped_tool;
 use super::models_loop::loop_scenario;
 use super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;

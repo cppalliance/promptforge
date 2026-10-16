@@ -22,6 +22,7 @@
 use promptforge_parser::test_support::prompt;
 use promptforge_types::ids::TaskId;
 
+use super::context::task;
 use super::model_tasks::{CHILD_PARKED_ON_SLOW_TOOL, model_task_scenario};
 use super::*;
 use crate::test_support::recording::TaskNoticeReport;

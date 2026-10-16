@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 
 use promptforge_types::ids::TaskId;
 
+use super::context::task;
+use super::fixtures::echo_tool;
 use super::model_task_acceptance::{task_lifecycle, terminals_per_started_task};
 use super::models_loop::loop_scenario;
 use super::scheduler::{asks, ceiling, issued_prompts, request_prompts, scheduler_scenario};

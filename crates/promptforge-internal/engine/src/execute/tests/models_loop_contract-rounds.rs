@@ -5,10 +5,12 @@
 
 use promptforge_parser::test_support::{PromptSource, one_section};
 
-use super::super::models_loop::loop_events;
-use super::super::tool_call_arm::{ToolRecorder, tool_result_lines};
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, Step};
+use crate::execute::tests::context::Recorder;
+use crate::execute::tests::fixtures::{echo_tool, failing_tool};
+use crate::execute::tests::models_loop::loop_events;
+use crate::execute::tests::tool_call_arm::{ToolRecorder, tool_result_lines};
 use crate::test_support::recording::{
     ReplyReport, TaskNoticeReport, ThinkingReport, ToolCallsReport, ToolResultReport,
 };
@@ -234,8 +236,9 @@ fn a_dropped_model_issued_call_raises_cancelled_at_the_loop_call_site() {
         "the model's call: {effect:?}"
     );
     run.resume(call, EffectAnswer::Dropped);
-    let Step::Done { result, .. } = run.step() else {
-        panic!("the caught drop ends the section");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("the caught drop ends the section: {other:?}"),
     };
     assert_eq!(text_of(result), "false:cancelled|1|user");
 }

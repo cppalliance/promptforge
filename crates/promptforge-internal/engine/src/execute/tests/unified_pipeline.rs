@@ -5,6 +5,8 @@
 
 use promptforge_parser::test_support::PromptSource;
 
+use super::context::with_writer;
+use super::fixtures::echo_tool;
 use super::*;
 
 #[test]

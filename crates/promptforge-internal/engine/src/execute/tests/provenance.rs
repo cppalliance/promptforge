@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use promptforge_types::event::Event;
 use promptforge_types::ids::TaskId;
 
+use super::context::{sequence, task};
 use super::scheduler::scheduler_scenario;
 use super::*;
 

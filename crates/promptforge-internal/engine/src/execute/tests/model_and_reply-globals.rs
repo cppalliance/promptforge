@@ -8,6 +8,8 @@
 use promptforge_parser::test_support::one_section;
 
 use super::*;
+use crate::execute::tests::context::{setup_prompt, with_writer};
+use crate::execute::tests::fixtures::echo_tool;
 
 /// The prompt `source` builds over the fixture tools Plugin, run under the
 /// test model with the echo tool: the scope install the first

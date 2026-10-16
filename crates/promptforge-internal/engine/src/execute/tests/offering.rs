@@ -4,11 +4,13 @@
 
 use promptforge_parser::test_support::{PromptSource, one_section, prompt};
 
+use super::fixtures::echo_tool;
 use super::models_loop::catalog_scenario;
 use super::*;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
 use crate::execute::scope::{DispatchTarget, prepare_scoped_tools};
 use crate::test_support::rig::Rig;
+use crate::test_support::scenario::EXECUTION;
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_types::plugins::PluginId;
 

@@ -2,8 +2,11 @@
 
 use promptforge_parser::test_support::{PromptSource, parse_ok};
 
+use super::context::test_context;
+use super::fixtures::echo_tool;
 use super::*;
 use crate::cancel::CancelHandle;
+use crate::test_support::scenario::{EXECUTION, TEST_MODEL, test_model};
 
 /// The prompt declaring the `writer` role, with no default parked.
 fn writer_role() -> PromptSource {
@@ -19,18 +22,6 @@ fn h1_handle_infer() -> String {
             var.answer = writer:infer('answer once')")
         .section("Result", "return var.answer")
         .build()
-}
-
-#[test]
-fn live_h1_infer_runs_once() {
-    let gateway = ScriptedChat::new(vec![text("h1 answer")]);
-    let trace = Scenario::new(h1_handle_infer())
-        .bound()
-        .chat(&gateway)
-        .run();
-
-    assert_eq!(trace.text(), "h1 answer");
-    assert_eq!(gateway.call_count(), 1);
 }
 
 #[test]
@@ -174,44 +165,6 @@ fn tool_objects_and_roles_reach_section_call_and_fanout_vms() {
 }
 
 #[test]
-fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
-    // The live H1 `models.infer` resolves the current model from the
-    // producer's bindings-so-far and runs the one infer shape: a single
-    // tool-free round on a fresh conversation that leaves `sys` untouched.
-    let gateway = ScriptedChat::new(vec![text("h1 answer")]);
-    let source = writer_role()
-        .h1("
-            models.default('writer')
-            var.answer = models.infer('answer once')
-            var.sys_untouched = not pcall(function() return sys.reply_finish_reason end)")
-        .section(
-            "Result",
-            "return var.answer .. ':' .. tostring(var.sys_untouched)",
-        );
-    let trace = Scenario::new(source.build()).bound().chat(&gateway).run();
-
-    assert_eq!(trace.text(), "h1 answer:true");
-    assert_eq!(gateway.call_count(), 1);
-    let body = gateway
-        .last_request()
-        .expect("infer must reach the gateway");
-    assert_eq!(
-        body.options.model(),
-        "claude-sonnet-4-6",
-        "models.infer must use the section's current model"
-    );
-    assert!(
-        body.tools.is_empty(),
-        "models.infer advertises no tools: {body:?}"
-    );
-    assert_eq!(
-        body.messages.len(),
-        1,
-        "models.infer runs on a fresh context: {body:?}"
-    );
-}
-
-#[test]
 fn nested_lua_infer_emits_a_model_turn_observation() {
     // A nested Lua infer must surface its model-turn observation to the
     // run's observer, proving owned-observer propagation reaches the nested
@@ -232,14 +185,16 @@ fn nested_lua_infer_emits_a_model_turn_observation() {
         .collect();
     let model_turns = details
         .iter()
-        .filter(|d| d.as_str() == "Model turn completed")
+        .filter(|d| **d == detail::MODEL_TURN_COMPLETED.to_string())
         .count();
     assert_eq!(
         model_turns, 1,
         "the nested infer drives exactly one model round trip: {details:?}"
     );
     assert!(
-        details.iter().all(|d| d.as_str() != "Tool call succeeded"),
+        details
+            .iter()
+            .all(|d| *d != detail::TOOL_CALL_SUCCEEDED.to_string()),
         "infer advertises no tools, so no tool call can be observed: {details:?}"
     );
 }
@@ -361,21 +316,4 @@ fn h1_and_h2_prose_each_infer_explicitly_in_source_order() {
         second_prose.contains("h2 prose turn"),
         "the second completion is the H2 prose: {second_prose}"
     );
-}
-
-#[test]
-fn live_h1_chunk_takes_root_entry_zero_and_the_first_walked_section_takes_root_entry_one() {
-    // The H1 pass is the root chain's entry 0, so the first walked section
-    // takes entry 1 of the same chain.
-    let source = writer_role()
-        .h1("assert(sys.id == '0.0', 'the live H1 chunk takes the root chain entry 0')")
-        .section(
-            "Result",
-            "
-            assert(sys.id == '0.1', 'the first walked section takes entry 1')
-            return 'ok'",
-        );
-    let trace = Scenario::new(source.build()).bound().run();
-
-    assert_eq!(trace.text(), "ok");
 }

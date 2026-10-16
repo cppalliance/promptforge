@@ -12,6 +12,7 @@
 use promptforge_parser::test_support::one_section;
 use promptforge_types::event::{Event, ReplyOrigin};
 
+use super::fixtures::echo_tool;
 use super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::{Effect, EffectAnswer, EffectId, Step};
@@ -21,11 +22,11 @@ use crate::test_support::scenario::{chat_answer, only_effect, text_of};
 /// The effects one step issued, in issue order, and the events it
 /// reported. Panics when the run is over.
 fn pending(step: Step) -> (Vec<(EffectId, Effect)>, Vec<Event>) {
-    let Step::Pending {
-        effects, events, ..
-    } = step
-    else {
-        panic!("the run is still going: {step:?}");
+    let (effects, events) = match step {
+        Step::Pending {
+            effects, events, ..
+        } => (effects, events),
+        other @ Step::Done { .. } => panic!("the run is still going: {other:?}"),
     };
     let effects = effects
         .into_iter()
@@ -55,16 +56,17 @@ fn tool_text(text: &str) -> EffectAnswer {
 /// The `value` argument of a `ToolCall` effect, which names the call in
 /// these tests.
 fn call_value(effect: &Effect) -> &str {
-    let Effect::ToolCall { args, .. } = effect else {
-        panic!("a tool call: {effect:?}");
-    };
-    args["value"].as_str().expect("the call names its value")
+    match effect {
+        Effect::ToolCall { args, .. } => args["value"].as_str().expect("the call names its value"),
+        other => panic!("a tool call: {other:?}"),
+    }
 }
 
 /// The tool messages of a `Chat` effect's request, in order.
 fn tool_messages(effect: &Effect) -> Vec<String> {
-    let Effect::Chat { messages, .. } = effect else {
-        panic!("a model round: {effect:?}");
+    let messages = match effect {
+        Effect::Chat { messages, .. } => messages,
+        other => panic!("a model round: {other:?}"),
     };
     messages
         .iter()
@@ -118,8 +120,9 @@ fn a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order() {
         "the records hold c1's result before c2's"
     );
     run.resume(next[0].0, chat_answer(&text("done")));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("the reply ends the section");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("the reply ends the section: {other:?}"),
     };
     assert_eq!(text_of(result), "c1=first|c2=second");
     let batch_turn = events
@@ -189,8 +192,9 @@ fn a_local_call_or_a_task_builtin_runs_alone_between_its_neighbors() {
         "all four results reach the round"
     );
     run.resume(next, chat_answer(&text("done")));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("the reply ends the section");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("the reply ends the section: {other:?}"),
     };
     assert_eq!(text_of(result), "c1,c2,c3,c4|grabbed b");
 }
@@ -225,8 +229,11 @@ fn a_call_the_round_cannot_bind_stops_the_batch_and_raises_once_the_issued_calls
     let (issued, effect) = only_effect(run.step());
     assert_eq!(call_value(&effect), "one", "only c1 issues");
     run.resume(issued, tool_text("first"));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("the caught raise ends the section, and c3 never issues");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => {
+            panic!("the caught raise ends the section, and c3 never issues: {other:?}")
+        }
     };
     assert_eq!(text_of(result), "false:unbound_tool|1");
 }
@@ -281,8 +288,9 @@ fn cancelling_a_task_parked_on_a_batch_orphans_every_call() {
     let (issued, _) = pending(run.step());
     assert!(issued.is_empty(), "both orphans are discarded: {issued:?}");
     run.resume(linger, chat_answer(&text("done")));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("Main's second round ends the run");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("Main's second round ends the run: {other:?}"),
     };
     assert_eq!(text_of(result), "cancelled");
 }

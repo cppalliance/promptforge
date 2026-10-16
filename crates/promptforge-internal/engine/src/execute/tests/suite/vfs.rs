@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::execute::RunResult;
 use crate::execute::run::{Effect, EffectId, Run, Step};
+use crate::execute::tests::context::{parse, test_context};
 use crate::parser::Prompt;
 use crate::test_support::perform_locally;
 use crate::test_support::scenario::{EXECUTION, Scenario};
@@ -18,8 +19,6 @@ use crate::test_support::temp_root::TempRoot;
 use promptforge_parser::test_support::{parse_ok, prompt};
 use promptforge_types::ids::Provenance;
 use promptforge_vfs::{Access, Origin, RealBackend, VfsError, VfsRef};
-
-use super::super::context::{parse, test_context};
 
 const ROUND_TRIP_PROMPT: &str = concat!(
     "---\n",
@@ -295,8 +294,9 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
 -> Result<(), VfsError> {
     let vfs = VfsRef::default();
     let (run, _, held) = drive_holding_effects(&vfs);
-    let Some(Effect::Vfs { access, .. }) = held.first() else {
-        panic!("the run's first effect is its store write: {held:?}");
+    let access = match held.first() {
+        Some(Effect::Vfs { access, .. }) => access,
+        other => panic!("the run's first effect is its store write: {other:?}"),
     };
     match access.write("kept.txt", b"after the run") {
         Err(VfsError::ScopeEnded { path }) => {
@@ -317,12 +317,14 @@ fn dropping_a_run_before_done_ends_its_scope_while_the_caller_still_holds_its_st
     let vfs = VfsRef::default();
     let mut run = held_store_run(&vfs);
     let mut held = Vec::new();
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the run parks on its store write");
+    let effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the run parks on its store write: {other:?}"),
     };
     answer_holding(&mut run, effects, &mut held);
-    let Step::Pending { effects, .. } = run.step() else {
-        panic!("the run parks on its store read");
+    let effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the run parks on its store read: {other:?}"),
     };
     held.extend(effects.into_iter().map(|(_, _, effect)| effect));
     drop(run);

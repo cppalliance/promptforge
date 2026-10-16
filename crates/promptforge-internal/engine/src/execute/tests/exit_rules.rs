@@ -6,6 +6,8 @@
 
 use promptforge_parser::test_support::{PromptSource, one_section, prompt};
 
+use super::context::Recorder;
+use super::fixtures::echo_tool;
 use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
 use crate::model::CompletionErrorKind;
@@ -86,20 +88,22 @@ fn unsupported_major_one_is_refused() {
     // Major 1 is unsupported: the gate refuses it and names the
     // declared version rather than silently degrading to major 0.
     let trace = Scenario::new(ran_under("promptforge: 1\n")).run();
-    assert!(matches!(
-        trace.error().inner(),
-        Error::UnsupportedVersion(1)
-    ));
+    assert!(
+        matches!(trace.error().inner(), Error::UnsupportedVersion(1)),
+        "the gate refuses major 1 by name, got {:?}",
+        trace.error()
+    );
 }
 
 #[test]
 fn unsupported_major_is_refused() {
     // Any major other than 0 is refused, never silently degraded to major 0.
     let trace = Scenario::new(ran_under("promptforge: 2\n")).run();
-    assert!(matches!(
-        trace.error().inner(),
-        Error::UnsupportedVersion(2)
-    ));
+    assert!(
+        matches!(trace.error().inner(), Error::UnsupportedVersion(2)),
+        "the gate refuses major 2 by name, got {:?}",
+        trace.error()
+    );
 }
 
 #[test]

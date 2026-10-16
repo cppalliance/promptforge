@@ -10,6 +10,8 @@ use promptforge_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use promptforge_vfs::{Access, VfsError};
 use serde_json::{Value, json};
 
+use self::context::setup_prompt;
+use self::fixtures::untrusted_echo_tool;
 use super::scope::prepare_scoped_tools;
 use super::turn::advance_turn;
 use super::*;
@@ -30,12 +32,6 @@ use crate::untrusted::GuardNonce;
 mod context;
 mod fixtures;
 mod gateway;
-
-// The seam modules are glob-imported here (not re-exported) so every suite's
-// existing `use super::*` keeps resolving the shared helpers.
-use self::context::*;
-use self::fixtures::*;
-use self::gateway::*;
 
 /// A tool whose calls the scenario holds, so the test can prove the
 /// tool-call loop honors cancellation mid-call rather than waiting the call

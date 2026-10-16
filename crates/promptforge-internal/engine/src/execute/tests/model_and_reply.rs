@@ -4,8 +4,9 @@
 
 use promptforge_parser::test_support::{PromptSource, parse_ok};
 
-use crate::test_support::scenario::Trace;
+use crate::test_support::scenario::{Trace, test_model};
 
+use super::context::{bind_role, with_writer};
 use super::*;
 
 /// The run's observations as section and detail pairs, from its start on:

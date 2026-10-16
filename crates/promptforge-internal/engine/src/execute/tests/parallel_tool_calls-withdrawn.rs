@@ -3,17 +3,18 @@
 //! included, in effect-id order however many tasks it cancels, and a
 //! decided run's step lists none.
 
-use super::super::models_loop::loop_scenario;
 use super::*;
+use crate::execute::tests::fixtures::echo_tool;
+use crate::execute::tests::models_loop::loop_scenario;
 
 /// The effects one step issued, in issue order, and the tool calls it
 /// withdrew. Panics when the run is over.
 fn withdrawals(step: Step) -> (Vec<(EffectId, Effect)>, Vec<EffectId>) {
-    let Step::Pending {
-        effects, withdrawn, ..
-    } = step
-    else {
-        panic!("the run is still going: {step:?}");
+    let (effects, withdrawn) = match step {
+        Step::Pending {
+            effects, withdrawn, ..
+        } => (effects, withdrawn),
+        other @ Step::Done { .. } => panic!("the run is still going: {other:?}"),
     };
     let effects = effects
         .into_iter()
@@ -113,8 +114,9 @@ fn cancelling_a_task_withdraws_its_unanswered_tool_calls() {
         run.resume(id, EffectAnswer::Dropped);
     }
     run.resume(linger, chat_answer(&text("done")));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("Main's second round ends the run");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("Main's second round ends the run: {other:?}"),
     };
     assert_eq!(text_of(result), "cancelled");
 }
@@ -139,8 +141,9 @@ fn a_call_issued_and_withdrawn_in_one_step_is_listed_twice() {
         };
         run.resume(*id, answer);
     }
-    let Step::Done { result, .. } = run.step() else {
-        panic!("Main's second round ends the run");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("Main's second round ends the run: {other:?}"),
     };
     assert_eq!(text_of(result), "cancelled");
 }
@@ -166,8 +169,11 @@ fn a_decided_run_lists_no_withdrawn_calls() {
     for id in calls.into_iter().chain([infer]) {
         run.resume(id, EffectAnswer::Dropped);
     }
-    let Step::Done { result, .. } = run.step() else {
-        panic!("every orphan is answered, so the run is done");
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => {
+            panic!("every orphan is answered, so the run is done: {other:?}")
+        }
     };
     assert!(
         matches!(result, RunResult::Cancelled),
@@ -236,12 +242,14 @@ fn one_step_lists_every_tasks_withdrawn_calls_in_effect_id_order() {
     for (id, _) in &issued {
         run.resume(*id, EffectAnswer::Dropped);
     }
-    let [(linger, _)] = linger.as_slice() else {
-        panic!("the cancels issue only Main's next round: {linger:?}");
+    let linger = match linger.as_slice() {
+        [(linger, _)] => *linger,
+        other => panic!("the cancels issue only Main's next round: {other:?}"),
     };
-    run.resume(*linger, chat_answer(&text("done")));
-    let Step::Done { result, .. } = run.step() else {
-        panic!("Main's second round ends the run");
+    run.resume(linger, chat_answer(&text("done")));
+    let result = match run.step() {
+        Step::Done { result, .. } => result,
+        other @ Step::Pending { .. } => panic!("Main's second round ends the run: {other:?}"),
     };
     assert_eq!(text_of(result), "cancelled");
 }

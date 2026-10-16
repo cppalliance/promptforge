@@ -11,6 +11,7 @@
 use promptforge_parser::test_support::prompt;
 use promptforge_types::ids::{AbandonReason, TaskId, TaskOrigin};
 
+use super::context::task;
 use super::models_loop::loop_models;
 use super::tasks::TaskRecorder;
 use super::*;

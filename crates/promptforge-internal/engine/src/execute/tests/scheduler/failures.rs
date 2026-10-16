@@ -4,6 +4,7 @@
 use super::*;
 use crate::execute::run::{EffectAnswer, EffectId};
 use crate::execute::scheduler::test_hooks::TaskState;
+use crate::execute::tests::context::task;
 use crate::test_support::rig::Rig;
 
 #[test]
@@ -116,19 +117,19 @@ fn fatal_arm_aborts_queued_siblings() {
     assert_eq!(log, "boom\n", "blocked siblings must never run: {log:?}");
     let recorder = recorded(&trace);
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(&trace, task_started),
         1,
         "only the fatal arm was ever started: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_FAILED),
+        terminal_count(&trace, task_failed),
         1,
         "the fatal arm reports failed: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_SUCCEEDED),
+        terminal_count(&trace, task_succeeded),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
@@ -169,37 +170,38 @@ fn fatal_arm_aborts_an_in_flight_sibling() {
     );
     let recorder = recorded(rig.trace());
     assert_eq!(
-        terminal_count(&recorder, TASK_FAILED),
+        terminal_count(rig.trace(), task_failed),
         1,
         "the fatal arm reports failed: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_CANCELLED),
+        terminal_count(rig.trace(), task_cancelled),
         1,
         "the in-flight sibling reports cancelled: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_SUCCEEDED),
+        terminal_count(rig.trace(), task_succeeded),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
     );
-    let events = recorder.events();
+    let events = rig.trace().events();
     let cancelled_at = events
         .iter()
-        .position(|(_, event)| event == TASK_CANCELLED)
+        .position(task_cancelled)
         .expect("the sibling's cancelled event fired");
     let parent_failed_at = events
         .iter()
-        .position(|(section, event)| {
-            section == "Parent" && event == &detail::LUA_CHUNK_FAILED.to_string()
+        .position(|event| {
+            matches!(event, Event::LuaChunkFailed { .. }) && event.section() == "Parent"
         })
         .expect("the parent's chunk failed on the fanout error");
     assert!(
         cancelled_at < parent_failed_at,
-        "the sibling abort precedes the parent's resume with the error: {events:?}"
+        "the sibling abort precedes the parent's resume with the error: {:?}",
+        recorder.events()
     );
 }
 
@@ -274,25 +276,25 @@ fn cancellation_while_suspended_in_a_fanout_arm_interrupts_the_run() {
     );
     let recorder = recorded(rig.trace());
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(rig.trace(), task_started),
         2,
         "both arms started: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_CANCELLED) + terminal_count(&recorder, TASK_FAILED),
+        terminal_count(rig.trace(), task_cancelled) + terminal_count(rig.trace(), task_failed),
         0,
         "a stranded arm reports no cancel or failure of its own: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_SUCCEEDED),
+        terminal_count(rig.trace(), task_succeeded),
         0,
         "no arm succeeded: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_ABANDONED_BY_RUN_END),
+        terminal_count(rig.trace(), task_abandoned_by_run_end),
         2,
         "the run's end settles each stranded arm once: {:?}",
         recorder.events()
@@ -340,19 +342,19 @@ fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
     );
     let recorder = recorded(rig.trace());
     assert_eq!(
-        terminal_count(&recorder, TASK_STARTED),
+        terminal_count(rig.trace(), task_started),
         0,
         "the arm was never admitted, so no start fired: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_CANCELLED),
+        terminal_count(rig.trace(), task_cancelled),
         0,
         "a task that never started reports no terminal: {:?}",
         recorder.events()
     );
     assert_eq!(
-        terminal_count(&recorder, TASK_SUCCEEDED),
+        terminal_count(rig.trace(), task_succeeded),
         0,
         "no arm ran to completion: {:?}",
         recorder.events()
@@ -361,7 +363,8 @@ fn a_spawn_failure_mid_fanout_cancels_the_queued_arms() {
         !recorder
             .events()
             .iter()
-            .any(|(section, event)| section == "Worker" && event == "Lua chunk started"),
+            .any(|(section, event)| section == "Worker"
+                && event == &detail::LUA_CHUNK_STARTED.to_string()),
         "the cancelled arm never ran its block: {:?}",
         recorder.events()
     );

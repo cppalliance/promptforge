@@ -4,6 +4,7 @@
 //! wrapping, and the model install around a call.
 
 use super::*;
+use crate::execute::tests::fixtures::{echo_tool, structured_tool, untrusted_echo_tool};
 
 #[test]
 fn a_script_tools_call_dispatches_and_resumes_as_a_string() {

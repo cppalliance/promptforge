@@ -7,9 +7,9 @@
 use promptforge_types::plugins::Prelude;
 
 use crate::RunErrorKind;
+use crate::execute::tests::preludes::prelude;
 use crate::test_support::scenario::Trace;
 
-use super::super::super::preludes::prelude;
 use super::*;
 
 /// Runs `source` with `preludes` installed in every section VM.

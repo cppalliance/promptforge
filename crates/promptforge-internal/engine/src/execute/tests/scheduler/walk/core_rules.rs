@@ -4,6 +4,7 @@
 //! fires.
 
 use super::*;
+use crate::execute::tests::context::sequence;
 
 #[test]
 fn sections_run_in_fall_through_order() {

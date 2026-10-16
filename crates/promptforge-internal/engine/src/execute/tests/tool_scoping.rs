@@ -2,9 +2,11 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::fixtures::scoped_tool;
 use super::models_loop::{LOOP_TO_TEXT, loop_scenario};
 use super::*;
 use crate::lua::{ToolBinding, ToolSet};
+use crate::test_support::scenario::TEST_SEED;
 
 /// The tool set offering `tool` under the wire name `alias`, described as
 /// `description`, for a test that reads the offering without a run.

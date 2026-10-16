@@ -882,7 +882,7 @@ Paths starting `E/` are under `crates/promptforge-internal/engine/src/`.
 </step-8>
 <step-9>
 
-### Step 9: engine execute tests
+### Step 9: engine execute tests [completed]
 
 - Component: `engine`
 - Tests: Verify runs these from the repository root in PowerShell, in this order. A search passes only when it prints nothing.

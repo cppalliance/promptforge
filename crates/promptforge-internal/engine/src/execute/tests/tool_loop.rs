@@ -10,10 +10,12 @@
 use promptforge_parser::test_support::{one_section, prompt};
 use promptforge_types::event::Event;
 
+use super::context::Recorder;
+use super::fixtures::{echo_tool, failing_tool, untrusted_echo_tool};
 use super::models_loop::{LOOP_TO_TEXT, loop_events, loop_scenario};
 use super::*;
 use crate::model::CompletionErrorKind;
-use crate::test_support::scenario::assert_model_failure;
+use crate::test_support::scenario::{EXECUTION, assert_model_failure};
 
 /// The one-section loop prompt running `lua` under an explicit
 /// frontmatter round cap.
@@ -84,8 +86,9 @@ fn tool_loop_exhaustion_is_readable_at_the_call_site_after_whole_exchanges() {
 #[test]
 fn tool_loop_uses_the_default_cap_when_unspecified() {
     // A prompt declaring no budget runs the limits default: exactly
-    // `DEFAULT_MAX_TOOL_ITERATIONS` round trips.
-    let gateway = ScriptedChat::new(never_converging_script(DEFAULT_MAX_TOOL_ITERATIONS));
+    // `RunLimits::tool_iterations` round trips.
+    let default_cap = RunLimits::new().tool_iterations().get() as usize;
+    let gateway = ScriptedChat::new(never_converging_script(default_cap));
     let source = one_section(&format!("tools.offer('tools/echo')\n{LOOP_TO_TEXT}"));
     let trace = loop_scenario(source)
         .offer("echo", echo_tool())
@@ -93,29 +96,27 @@ fn tool_loop_uses_the_default_cap_when_unspecified() {
         .run();
     let error = trace.error().inner();
     assert!(matches!(error, Error::ToolLoopExhausted), "got {error:?}");
-    assert_eq!(gateway.call_count(), DEFAULT_MAX_TOOL_ITERATIONS);
-    assert_eq!(DEFAULT_MAX_TOOL_ITERATIONS, 24);
+    assert_eq!(gateway.call_count(), default_cap);
 }
 
 #[test]
 fn run_resolves_cap_from_frontmatter_else_default() {
     // Mirrors the resolution in `run`: a declared budget wins, an absent
     // one falls back to the raised default.
+    let default_cap = RunLimits::new().tool_iterations().get() as usize;
     let declared =
         "---\nname: t\ndescription: d\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(declared, EXECUTION).0.unwrap();
     assert_eq!(
-        promptforge_parser::detail::max_tool_iterations(p.frontmatter())
-            .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
+        promptforge_parser::detail::max_tool_iterations(p.frontmatter()).resolve(default_cap),
         5
     );
 
     let absent = "---\nname: t\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(absent, EXECUTION).0.unwrap();
     assert_eq!(
-        promptforge_parser::detail::max_tool_iterations(p.frontmatter())
-            .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
-        DEFAULT_MAX_TOOL_ITERATIONS
+        promptforge_parser::detail::max_tool_iterations(p.frontmatter()).resolve(default_cap),
+        default_cap
     );
 }
 

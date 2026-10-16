@@ -4,9 +4,9 @@
 
 use promptforge_types::ids::RoundId;
 
-use super::super::models_loop::loop_scenario;
 use super::*;
 use crate::execute::run::EffectRecord;
+use crate::execute::tests::models_loop::loop_scenario;
 use crate::test_support::rig::Rig;
 
 #[test]

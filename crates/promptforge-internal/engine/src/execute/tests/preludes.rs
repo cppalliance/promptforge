@@ -9,9 +9,11 @@
 
 use promptforge_types::plugins::{PluginId, Prelude};
 
+use super::fixtures::echo_tool;
 use super::*;
 use crate::execute::protocol::VfsOp;
 use crate::execute::run::{EffectRecord, ToolCallOrigin, ToolCaller};
+use crate::test_support::scenario::EXECUTION;
 
 /// A prelude contributed by the Plugin `id`.
 pub(super) fn prelude(id: &str, source: &str) -> Prelude {
@@ -196,11 +198,11 @@ fn a_prelude_write_across_two_arms_ends_the_run_with_determinism_caught_or_not()
         "pcall(function() store.write('seeded.txt', 'seed') end)",
     ] {
         let trace = prelude_run(md, vec![prelude("seeder", source)]);
-        let RunResult::Failure(error) = trace.result() else {
-            panic!(
-                "the second arm's install-time write ends the run: `{source}`: {:?}",
-                trace.result()
-            );
+        let error = match trace.result() {
+            RunResult::Failure(error) => error,
+            other => {
+                panic!("the second arm's install-time write ends the run: `{source}`: {other:?}")
+            }
         };
         assert_eq!(
             error.kind(),

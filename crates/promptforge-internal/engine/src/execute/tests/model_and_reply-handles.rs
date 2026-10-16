@@ -5,6 +5,8 @@
 //! through a handle, and a handle's `provider` reads the catalog's.
 
 use super::*;
+use crate::execute::tests::context::{bind_role, with_writer};
+use crate::test_support::scenario::test_model;
 
 /// The prompt declaring the `writer` and `analyst` roles and parking
 /// `writer` as the prompt-wide default.

@@ -9,6 +9,7 @@
 
 use promptforge_parser::test_support::prompt;
 
+use super::context::task;
 use super::model_tasks::model_task_scenario;
 use super::tasks::TaskRecorder;
 use super::*;

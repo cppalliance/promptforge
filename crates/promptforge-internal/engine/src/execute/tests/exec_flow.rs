@@ -2,6 +2,7 @@
 
 use promptforge_parser::test_support::{PromptSource, synthetic_section};
 
+use super::context::{arm_fanout, with_writer};
 use super::*;
 
 /// Alternating lua/prose blocks run in order; each Lua block that wants the
@@ -128,7 +129,7 @@ fn duplicate_top_level_section_names_error_loudly() {
         synthetic_section("Dup", 2, Vec::new()),
         synthetic_section("Dup", 2, Vec::new()),
     ];
-    let error = super::super::walk_target::resolve_jump_target("## Dup", &sections, 0)
+    let error = crate::execute::walk_target::resolve_jump_target("## Dup", &sections, 0)
         .expect_err("two visible sections with one name must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");

@@ -12,6 +12,8 @@
 
 use promptforge_parser::test_support::one_section;
 
+use super::context::Recorder;
+use super::fixtures::echo_tool;
 use super::*;
 use crate::test_support::scenario::test_binding;
 

@@ -5,6 +5,7 @@
 use promptforge_parser::test_support::PromptSource;
 
 use super::*;
+use crate::execute::tests::context::setup_prompt;
 use crate::test_support::recording::{ReplyReport, ThinkingReport};
 
 /// Records an infer round's boundary observations and content hooks as one
@@ -108,7 +109,7 @@ fn infer_round_reports_model_turn_completed_then_an_infer_origin_assistant_reply
     let (out, lines) = run_infer_round(text("pong"));
     assert_eq!(out, "pong");
 
-    let completed = line_index(&lines, "Model turn completed");
+    let completed = line_index(&lines, &detail::MODEL_TURN_COMPLETED.to_string());
     let reply = line_index(&lines, "assistant_reply");
     assert_eq!(
         reply,
@@ -139,7 +140,7 @@ fn infer_round_reports_thinking_between_the_completed_turn_and_the_reply() {
     let (out, lines) = run_infer_round(text_with_reasoning("pong", "let me think"));
     assert_eq!(out, "pong");
 
-    let completed = line_index(&lines, "Model turn completed");
+    let completed = line_index(&lines, &detail::MODEL_TURN_COMPLETED.to_string());
     let thinking = line_index(&lines, "thinking");
     let reply = line_index(&lines, "assistant_reply");
     assert_eq!(
