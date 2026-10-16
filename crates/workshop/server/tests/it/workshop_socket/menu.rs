@@ -215,7 +215,7 @@ async fn a_selection_served_without_a_restart_completes_after_one_step() {
     // so the settled snapshot recomputes chat_ready to true. The seed
     // matches the refetched catalog so the reconcile stays a no-op.
     state.catalog().publish(vec![serde_json::json!(
-        {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        {"id": "test-model", "object": "model", "owned_by": "runvil"}
     )]);
     state.menu().set_gateway_reachable(true);
     let (mut socket, _) = tokio_tungstenite::connect_async(&url)
@@ -301,7 +301,7 @@ async fn a_null_name_selects_no_profile_and_converges_on_a_null_active_profile()
     let base_url = spawn_gateway(switch.merge(profile_routes(None))).await;
     let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     state.catalog().publish(vec![serde_json::json!(
-        {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        {"id": "test-model", "object": "model", "owned_by": "runvil"}
     )]);
     state.menu().set_gateway_reachable(true);
     state.menu().set_profiles(
@@ -370,7 +370,7 @@ async fn a_declined_selection_restores_the_menu_and_reports_the_gateway_message(
     .await;
     let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     state.catalog().publish(vec![serde_json::json!(
-        {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        {"id": "test-model", "object": "model", "owned_by": "runvil"}
     )]);
     state.menu().set_gateway_reachable(true);
     state.menu().set_profiles(

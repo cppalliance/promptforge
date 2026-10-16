@@ -280,7 +280,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
         frame,
         serde_json::json!({
             "type": "models",
-            "models": [{"id": "test-model", "object": "model", "owned_by": "promptforge"}],
+            "models": [{"id": "test-model", "object": "model", "owned_by": "runvil"}],
         }),
         "the refreshed catalog arrives as one models frame"
     );

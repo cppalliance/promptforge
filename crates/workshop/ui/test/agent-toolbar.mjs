@@ -51,7 +51,7 @@ globalThis.Element = dom.window.Element;
 globalThis.Node = dom.window.Node;
 globalThis.CustomEvent = dom.window.CustomEvent;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-toolbar-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-toolbar-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { AgentToolbar, ModelService, lifecycle } = await import(
   pathToFileURL(bundlePath).href

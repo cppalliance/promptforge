@@ -11,12 +11,12 @@ use std::time::Duration;
 
 use harness_runner::HostContext;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, CompletionResult, Message,
     ModelBinding, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
-use promptforge_plugin::{
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ServiceKey, ToolContext, ToolDescriptor,
     ToolError, ToolId, ToolOutput,
 };

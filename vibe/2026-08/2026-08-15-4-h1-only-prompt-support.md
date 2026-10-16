@@ -58,16 +58,16 @@ Read the diff for the commit named by the step. Apply each check as yes-or-no. F
 
 **Code:**
 
-- [`crates/promptforge-core/src/parser/build.rs`](crates/promptforge-core/src/parser/build.rs): Remove `default_return: Option<String>` and its `#[serde(default)]` from the `Frontmatter` struct.
-- [`crates/promptforge-core/src/execute/engine.rs`](crates/promptforge-core/src/execute/engine.rs) line 194-200: Replace `prompt.frontmatter.default_return.clone().or(last_reply).unwrap_or_else(|| "done".to_string())` with `last_reply.unwrap_or_else(|| "done".to_string())`.
+- [`crates/runvil-core/src/parser/build.rs`](crates/runvil-core/src/parser/build.rs): Remove `default_return: Option<String>` and its `#[serde(default)]` from the `Frontmatter` struct.
+- [`crates/runvil-core/src/execute/engine.rs`](crates/runvil-core/src/execute/engine.rs) line 194-200: Replace `prompt.frontmatter.default_return.clone().or(last_reply).unwrap_or_else(|| "done".to_string())` with `last_reply.unwrap_or_else(|| "done".to_string())`.
 - Fix every compile error the removal causes. Follow the compiler; do not guess.
 
 **Tests:**
 
 - Remove `default_return_precedes_the_last_model_reply` in `execute/tests/model_and_reply.rs`.
 - Remove `runs_off_end_to_default_return` in `execute/tests/exit_rules.rs`.
-- Check `crates/promptforge-core-tests/prompts/valid/prologue-prose-epilog.md` - remove `default_return` from the frontmatter if present.
-- Check `crates/promptforge-core-tests/src/suite/parsing.rs` for any fixture referencing `default_return`.
+- Check `crates/runvil-core-tests/prompts/valid/prologue-prose-epilog.md` - remove `default_return` from the frontmatter if present.
+- Check `crates/runvil-core-tests/src/suite/parsing.rs` for any fixture referencing `default_return`.
 
 **Verify:** `cargo test --workspace` passes. No mention of `default_return` remains in `src/` (the research file is exempt).
 
@@ -77,7 +77,7 @@ Read the diff for the commit named by the step. Apply each check as yes-or-no. F
 
 **Code:**
 
-- [`crates/promptforge-core/src/execute/engine.rs`](crates/promptforge-core/src/execute/engine.rs) line 182-183: Delete `last_reply = None;` from the `SectionFlow::Jumped` arm.
+- [`crates/runvil-core/src/execute/engine.rs`](crates/runvil-core/src/execute/engine.rs) line 182-183: Delete `last_reply = None;` from the `SectionFlow::Jumped` arm.
 - Update the module doc comment at lines 9-10 (says "clearing it on a jump") to say "preserving it across a jump".
 
 **Tests:**
@@ -93,11 +93,11 @@ Read the diff for the commit named by the step. Apply each check as yes-or-no. F
 
 **Code:**
 
-- [`crates/promptforge-core/src/execute/engine.rs`](crates/promptforge-core/src/execute/engine.rs): Rename `last_reply` to `reply` at lines 164, 175, 188, 199 (line numbers approximate after steps 1-2). Keep `incoming_reply` as the parameter name on `run_one_section`.
+- [`crates/runvil-core/src/execute/engine.rs`](crates/runvil-core/src/execute/engine.rs): Rename `last_reply` to `reply` at lines 164, 175, 188, 199 (line numbers approximate after steps 1-2). Keep `incoming_reply` as the parameter name on `run_one_section`.
 
 **Tests:** No new tests. Existing tests must pass unchanged.
 
-**Verify:** `cargo check --workspace` and `cargo test --workspace` pass. `rg last_reply crates/promptforge-core/src/execute/engine.rs` returns zero matches.
+**Verify:** `cargo check --workspace` and `cargo test --workspace` pass. `rg last_reply crates/runvil-core/src/execute/engine.rs` returns zero matches.
 
 ## Step 4: H1-only prompts
 
@@ -105,10 +105,10 @@ Read the diff for the commit named by the step. Apply each check as yes-or-no. F
 
 **Code:**
 
-- [`crates/promptforge-core/src/parser.rs`](crates/promptforge-core/src/parser.rs) line ~413: Delete the `section_headings.is_empty()` check that returns `Error::Parse("prompt has no ## sections")`. Allow `prompt.sections` to be an empty `Vec<Section>`.
-- [`crates/promptforge-core/src/parser.rs`](crates/promptforge-core/src/parser.rs) `Prompt::entry()` (~line 436): This method assumes `sections` is non-empty. Change to return `Option<&Section>`, or guard callers. Search all call sites in the workspace with `rg "\.entry\(\)"` and update each one.
-- [`crates/promptforge-core/src/execute/h1.rs`](crates/promptforge-core/src/execute/h1.rs): Add `pub(crate) reply: Option<String>` to `LiveH1State`. Populate it from the last H1 prose block's model output (the `reply` variable already tracks this in the H1 execution loop).
-- [`crates/promptforge-core/src/execute.rs`](crates/promptforge-core/src/execute.rs) ~line 238: After `execute_live_h1`, before `run_sections`, add:
+- [`crates/runvil-core/src/parser.rs`](crates/runvil-core/src/parser.rs) line ~413: Delete the `section_headings.is_empty()` check that returns `Error::Parse("prompt has no ## sections")`. Allow `prompt.sections` to be an empty `Vec<Section>`.
+- [`crates/runvil-core/src/parser.rs`](crates/runvil-core/src/parser.rs) `Prompt::entry()` (~line 436): This method assumes `sections` is non-empty. Change to return `Option<&Section>`, or guard callers. Search all call sites in the workspace with `rg "\.entry\(\)"` and update each one.
+- [`crates/runvil-core/src/execute/h1.rs`](crates/runvil-core/src/execute/h1.rs): Add `pub(crate) reply: Option<String>` to `LiveH1State`. Populate it from the last H1 prose block's model output (the `reply` variable already tracks this in the H1 execution loop).
+- [`crates/runvil-core/src/execute.rs`](crates/runvil-core/src/execute.rs) ~line 238: After `execute_live_h1`, before `run_sections`, add:
 
 ```rust
 if prompt.sections.is_empty() {
@@ -131,17 +131,17 @@ if prompt.sections.is_empty() {
 
 **Files to update (check each one):**
 
-- [`promptforge.md`](promptforge.md) - remove `default_return` from frontmatter table, change "One or more H2 sections" to "Zero or more", update example
+- [`runvil.md`](runvil.md) - remove `default_return` from frontmatter table, change "One or more H2 sections" to "Zero or more", update example
 - [`guide/src/prompt-files.md`](guide/src/prompt-files.md) - remove `default_return`, update structure rules for optional H2
 - [`guide/src/execution.md`](guide/src/execution.md) - remove `default_return` from fall-through chain, document reply preservation across jump, document H1-only execution path
 - [`guide/src/lua.md`](guide/src/lua.md) - update `jump()` docs: reply is preserved, author clears with `reply = nil` before jumping
-- [`guide/promptforge-user-guide.md`](guide/promptforge-user-guide.md) - same changes as above where duplicated
-- [`crates/promptforge-core/user-guide-promptforge-core.md`](crates/promptforge-core/user-guide-promptforge-core.md) - same
-- [`crates/promptforge-core/design-core.md`](crates/promptforge-core/design-core.md) - remove `default_return` from invariant 10, update execution model
-- [`crates/promptforge-core/design-core-residue.md`](crates/promptforge-core/design-core-residue.md) - update mentions
-- [`research/2026-08-03-recover-rationale-promptforge-core.md`](research/2026-08-03-recover-rationale-promptforge-core.md) - annotate the `default_return` rationale entries as resolved/removed
-- [`guide/promptforge-report.md`](guide/promptforge-report.md) - update if it documents jump/reply behavior
-- [`crates/promptforge-core-tests/prompts/valid/prologue-prose-epilog.md`](crates/promptforge-core-tests/prompts/valid/prologue-prose-epilog.md) - test fixture, remove `default_return` if not already handled in step 1
+- [`guide/runvil-user-guide.md`](guide/runvil-user-guide.md) - same changes as above where duplicated
+- [`crates/runvil-core/user-guide-runvil-core.md`](crates/runvil-core/user-guide-runvil-core.md) - same
+- [`crates/runvil-core/design-core.md`](crates/runvil-core/design-core.md) - remove `default_return` from invariant 10, update execution model
+- [`crates/runvil-core/design-core-residue.md`](crates/runvil-core/design-core-residue.md) - update mentions
+- [`research/2026-08-03-recover-rationale-runvil-core.md`](research/2026-08-03-recover-rationale-runvil-core.md) - annotate the `default_return` rationale entries as resolved/removed
+- [`guide/runvil-report.md`](guide/runvil-report.md) - update if it documents jump/reply behavior
+- [`crates/runvil-core-tests/prompts/valid/prologue-prose-epilog.md`](crates/runvil-core-tests/prompts/valid/prologue-prose-epilog.md) - test fixture, remove `default_return` if not already handled in step 1
 
 **New examples to add (use 4-tick outer fences when the example contains triple-backtick Lua blocks):**
 
@@ -151,7 +151,7 @@ H1-only prompt example - add to `guide/src/prompt-files.md` and `guide/src/execu
 ---
 name: summarize
 description: Summarize the input
-promptforge: 1
+runvil: 1
 ---
 
 # Summarize

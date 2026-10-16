@@ -87,7 +87,7 @@ async fn save_workspace_as_answers_only_on_the_hyphenated_route() {
     let registry = Registry::new();
     let workspace = Workspace::new();
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("Name.pfwork");
+    let file = home.path().join("Name.rvwork");
     let _guards = register(&registry, &workspace);
     let router = registry.routes()[0].routes();
 

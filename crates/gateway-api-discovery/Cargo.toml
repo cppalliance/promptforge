@@ -26,7 +26,7 @@ windows-sys = { workspace = true, features = [
 
 [features]
 # Cross-crate test seam: exposes `resolve_for_test`, so a consumer's test
-# binary (never named `promptforge-gateway`) can run the full liveness
+# binary (never named `runvil-gateway`) can run the full liveness
 # gauntlet against its own process image.
 test-fixtures = []
 

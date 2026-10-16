@@ -175,7 +175,7 @@ fn workspace_file_failures_map_to_their_wire_codes() {
     );
 
     let alien = WorkspaceError::from(WorkspaceFileError::NotAWorkspace {
-        path: std::path::PathBuf::from("alien.pfwork"),
+        path: std::path::PathBuf::from("alien.rvwork"),
     });
     assert_eq!(alien.status(), StatusCode::BAD_REQUEST);
     assert_eq!(alien.code(), "workspace_file_refused");

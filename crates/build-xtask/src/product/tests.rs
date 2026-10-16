@@ -132,39 +132,39 @@ fn an_outside_crate_reaching_past_the_one_public_crate_is_reported() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge-lua\" }\npromptforge = { path = \"../promptforge\" }\n",
+        "[dependencies]\nrunvil-lua = { path = \"../runvil-lua\" }\nrunvil = { path = \"../runvil\" }\n",
     );
-    write_crate(root.path(), "promptforge-lua", "promptforge-lua", "");
-    write_crate(root.path(), "promptforge", "promptforge", "");
+    write_crate(root.path(), "runvil-lua", "runvil-lua", "");
+    write_crate(root.path(), "runvil", "runvil", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("workshop-sessions") && violations[0].contains("promptforge-lua"),
+        violations[0].contains("workshop-sessions") && violations[0].contains("runvil-lua"),
         "the violation names the crate and the forbidden dep: {violations:?}"
     );
 }
 
 #[test]
-fn an_outside_crate_depending_on_a_root_promptforge_crate_other_than_the_facade_is_reported() {
+fn an_outside_crate_depending_on_a_root_runvil_crate_other_than_the_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-extra = { path = \"../promptforge-extra\" }\n\
-         promptforge-spare = { path = \"../promptforge-spare\" }\n",
+        "[dependencies]\nrunvil-extra = { path = \"../runvil-extra\" }\n\
+         runvil-spare = { path = \"../runvil-spare\" }\n",
     );
-    for name in ["promptforge-extra", "promptforge-spare"] {
+    for name in ["runvil-extra", "runvil-spare"] {
         write_crate(root.path(), name, name, "");
     }
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
-        violations.iter().all(
-            |v| v.starts_with("workshop-sessions depends on promptforge-")
-                && v.ends_with("only through promptforge or promptforge-plugin")
-        ),
-        "promptforge and promptforge-plugin are the public crates, wherever the others sit: {violations:?}"
+        violations
+            .iter()
+            .all(|v| v.starts_with("workshop-sessions depends on runvil-")
+                && v.ends_with("only through runvil or runvil-plugin")),
+        "runvil and runvil-plugin are the public crates, wherever the others sit: {violations:?}"
     );
 }
 
@@ -175,23 +175,23 @@ fn an_outside_crate_depending_on_the_plugin_contract_passes() {
         root.path(),
         "outside-tool",
         "outside-tool",
-        "[dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\" }\n",
+        "[dependencies]\nrunvil-plugin = { path = \"../runvil-plugin\" }\n",
     );
-    write_crate(root.path(), "promptforge-plugin", "promptforge-plugin", "");
+    write_crate(root.path(), "runvil-plugin", "runvil-plugin", "");
     let violations = product_boundary_violations(root.path());
     assert!(violations.is_empty(), "{violations:?}");
 }
 
 #[test]
-fn a_gateway_crate_depending_on_the_promptforge_facade_is_reported() {
+fn a_gateway_crate_depending_on_the_runvil_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "gateway-routing",
         "gateway-routing",
-        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n",
+        "[dependencies]\nrunvil = { path = \"../runvil\" }\n",
     );
-    write_crate(root.path(), "promptforge", "promptforge", "");
+    write_crate(root.path(), "runvil", "runvil", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
@@ -225,10 +225,10 @@ fn dev_build_and_target_dependencies_are_checked() {
         root.path(),
         "workshop-server",
         "workshop-server",
-        "[dev-dependencies]\npromptforge-parser = { path = \"../promptforge-parser\" }\n\
+        "[dev-dependencies]\nrunvil-parser = { path = \"../runvil-parser\" }\n\
          [target.'cfg(windows)'.dependencies]\ngateway-protocol = { path = \"../gateway-protocol\" }\n",
     );
-    write_crate(root.path(), "promptforge-parser", "promptforge-parser", "");
+    write_crate(root.path(), "runvil-parser", "runvil-parser", "");
     write_crate(root.path(), "gateway-protocol", "gateway-protocol", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(
@@ -245,24 +245,24 @@ fn package_renames_are_resolved_before_classification() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npf = { package = \"promptforge-store\", path = \"../promptforge-store\" }\n",
+        "[dependencies]\npf = { package = \"runvil-store\", path = \"../runvil-store\" }\n",
     );
-    write_crate(root.path(), "promptforge-store", "promptforge-store", "");
+    write_crate(root.path(), "runvil-store", "runvil-store", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(
         violations.len(),
         1,
-        "the renamed dependency on promptforge-store is reported: {violations:?}"
+        "the renamed dependency on runvil-store is reported: {violations:?}"
     );
 }
 
 #[test]
-fn a_promptforge_crate_depending_on_gateway_or_workshop_is_reported() {
+fn a_runvil_crate_depending_on_gateway_or_workshop_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
+        "runvil-internal/engine",
+        "runvil-engine",
         "[dependencies]\ngateway-protocol = { path = \"../../gateway-protocol\" }\nworkshop-protocol = { path = \"../../workshop-protocol\" }\n",
     );
     write_crate(root.path(), "gateway-protocol", "gateway-protocol", "");
@@ -270,8 +270,8 @@ fn a_promptforge_crate_depending_on_gateway_or_workshop_is_reported() {
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
-        violations.iter().all(|v| v.contains("promptforge-engine")),
-        "the violations name the promptforge crate: {violations:?}"
+        violations.iter().all(|v| v.contains("runvil-engine")),
+        "the violations name the runvil crate: {violations:?}"
     );
 }
 
@@ -282,13 +282,13 @@ fn an_outside_crate_depending_on_the_facade_passes() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge = { path = \"../promptforge\" }\n",
+        "[dependencies]\nrunvil = { path = \"../runvil\" }\n",
     );
-    write_crate(root.path(), "promptforge", "promptforge", "");
+    write_crate(root.path(), "runvil", "runvil", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the facade is the one legal promptforge dependency for outside crates: {violations:?}"
+        "the facade is the one legal runvil dependency for outside crates: {violations:?}"
     );
 }
 
@@ -335,19 +335,19 @@ fn a_workshop_crate_depending_on_the_public_gateway_pair_passes() {
 }
 
 #[test]
-fn a_harness_crate_depending_on_the_promptforge_facade_passes() {
+fn a_harness_crate_depending_on_the_runvil_facade_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "harness-internal/runner",
         "harness-runner",
-        "[dependencies]\npromptforge = { path = \"../../promptforge\" }\n",
+        "[dependencies]\nrunvil = { path = \"../../runvil\" }\n",
     );
-    write_crate(root.path(), "promptforge", "promptforge", "");
+    write_crate(root.path(), "runvil", "runvil", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "the promptforge facade is legal for harness crates: {violations:?}"
+        "the runvil facade is legal for harness crates: {violations:?}"
     );
 }
 
@@ -390,19 +390,19 @@ fn a_harness_crate_depending_on_a_private_gateway_crate_is_reported() {
 }
 
 #[test]
-fn a_harness_crate_reaching_past_the_promptforge_facade_is_reported() {
+fn a_harness_crate_reaching_past_the_runvil_facade_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
         "harness-internal/runner",
         "harness-runner",
-        "[dependencies]\npromptforge-lua = { path = \"../../promptforge-lua\" }\n",
+        "[dependencies]\nrunvil-lua = { path = \"../../runvil-lua\" }\n",
     );
-    write_crate(root.path(), "promptforge-lua", "promptforge-lua", "");
+    write_crate(root.path(), "runvil-lua", "runvil-lua", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("harness-runner depends on promptforge-lua:"),
+        violations[0].starts_with("harness-runner depends on runvil-lua:"),
         "the single-public-crate rule binds harness crates: {violations:?}"
     );
 }
@@ -444,16 +444,16 @@ fn a_workshop_crate_depending_on_a_harness_crate_other_than_the_facade_is_report
 }
 
 #[test]
-fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
+fn runvil_gateway_and_shared_crates_depending_on_harness_are_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     let dep = "[dependencies]\nharness = { path = \"../harness\" }\n";
     write_crate(root.path(), "harness", "harness", "");
-    write_crate(root.path(), "promptforge", "promptforge", dep);
+    write_crate(root.path(), "runvil", "runvil", dep);
     write_crate(root.path(), "gateway-routing", "gateway-routing", dep);
     write_crate(root.path(), "shared-loopback", "shared-loopback", dep);
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 3, "{violations:?}");
-    for package in ["promptforge", "gateway-routing", "shared-loopback"] {
+    for package in ["runvil", "gateway-routing", "shared-loopback"] {
         assert!(
             violations
                 .iter()
@@ -465,7 +465,7 @@ fn promptforge_gateway_and_shared_crates_depending_on_harness_are_reported() {
 
 #[test]
 fn family_classification_follows_the_naming_rules() {
-    assert_eq!(family("promptforge-engine"), Family::Promptforge);
+    assert_eq!(family("runvil-engine"), Family::Runvil);
     assert_eq!(family("gateway"), Family::Gateway);
     assert_eq!(family("gateway-config"), Family::Gateway);
     assert_eq!(family("workshop"), Family::Workshop);
@@ -483,7 +483,7 @@ fn the_bare_harness_package_belongs_to_the_harness_family() {
 }
 
 #[test]
-fn the_bare_promptforge_package_belongs_to_the_promptforge_family() {
-    assert_eq!(family("promptforge"), Family::Promptforge);
-    assert_eq!(family("promptforger"), Family::Unaffiliated);
+fn the_bare_runvil_package_belongs_to_the_runvil_family() {
+    assert_eq!(family("runvil"), Family::Runvil);
+    assert_eq!(family("runvilr"), Family::Unaffiliated);
 }

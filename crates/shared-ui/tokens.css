@@ -1,5 +1,5 @@
 /* ==========================================================================
-   PromptForge shared Cursor Dark token sheet
+   Runvil shared Cursor Dark token sheet
 
    The single source of truth for every visual value both UIs (the gateway
    config UI and the workshop) share: palette, type, spacing, radius, and
@@ -8,7 +8,7 @@
 
    The surface, text, border, spacing, radius, shadow, and motion values
    mirror Cursor's dark theme (extracted from its workbench tokens); the
-   accent stays PromptForge gold. The --cursor-* values are exact copies
+   accent stays Runvil gold. The --cursor-* values are exact copies
    from Cursor's installed theme - never approximate them, and keep the
    color-mix() formulas intact (never encode premultiplied RGB as
    straight-alpha hex).
@@ -291,7 +291,7 @@
   /* ------------------------------------------------------------------
      Generic aliases: the token names the gateway config UI's components
      consume, mapped onto the Cursor Dark values above so both UIs read
-     one sheet. The accent stays PromptForge gold in both products.
+     one sheet. The accent stays Runvil gold in both products.
      ------------------------------------------------------------------ */
   --bg-primary: var(--cursor-editor);
   --bg-secondary: var(--cursor-chrome);

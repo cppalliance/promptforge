@@ -12,15 +12,15 @@ use std::time::Duration;
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, ToolPerformer};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
-use promptforge::cancel::CancelHandle;
-use promptforge::effect::ToolCallOrigin;
-use promptforge::model::{
+use runvil::cancel::CancelHandle;
+use runvil::effect::ToolCallOrigin;
+use runvil::model::{
     Completion, CompletionError, CompletionResult, ModelDescriptor, ModelId, ThinkingMode, ToolCall,
 };
-use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
-use promptforge::vfs::Access;
-use promptforge::{Prompt, Run, RunContext};
+use runvil::timestamp::Timestamp;
+use runvil::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
+use runvil::vfs::Access;
+use runvil::{Prompt, Run, RunContext};
 use serde_json::{Value, json};
 use tokio::sync::{Notify, Semaphore};
 
@@ -39,7 +39,7 @@ const WIRE: &str = "tests_cap_park";
 
 /// The frontmatter and setup every run here shares: one model role bound
 /// as the default.
-const PREAMBLE: &str = "---\nname: runner-cap\ndescription: caps tool calls\npromptforge: 0\n\
+const PREAMBLE: &str = "---\nname: runner-cap\ndescription: caps tool calls\nrunvil: 0\n\
     models:\n  writer: {}\n---\n\n\
     # Cap\n\n```lua\nmodels.default('writer')\n```\n\n";
 

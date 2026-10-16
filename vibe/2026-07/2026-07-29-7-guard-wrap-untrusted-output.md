@@ -37,10 +37,10 @@ flowchart TD
 
 ## Level 2 and 3: the pieces
 
-- **Tool property** ([tools.rs](promptforge/crates/promptforge-core/src/tools.rs)): add a defaulted trait method `fn untrusted_output(&self) -> bool { false }` to `Tool`, documented. Everything is trusted unless it says otherwise.
-- **web_fetch opts in** ([promptforge-webfetch/src/lib.rs](promptforge/crates/promptforge-webfetch/src/lib.rs)): override `untrusted_output()` to return `true`.
-- **Wrapping in the loop** ([execute.rs](promptforge/crates/promptforge-core/src/execute.rs), `run_tool_loop`): generate one random nonce per section (loop invocation). At the append site - currently `conversation.push(Message::tool(call.id, result))` - if `tool.untrusted_output()` is true, replace `result` with the guard block: a fixed rule sentence, then an XML-style open tag carrying the nonce in the tag name `<untrusted_input_{nonce}>`, the content (with any literal occurrence of that tag or its close escaped), then the matching `</untrusted_input_{nonce}>`. XML-style because the models this routes to (Claude) are trained to respect XML delimiting of untrusted data; the nonce lives in the tag name (not just an attribute) so the close tag is unguessable and cannot be forged by the page. Trusted tools append verbatim as today.
-- **Random nonce** ([Cargo.toml](promptforge/Cargo.toml)): add `fastrand` (the lean no-tree choice from the Rust guide) to generate an unpredictable hex nonce. It need only be unguessable by the fetched content, not cryptographic.
+- **Tool property** ([tools.rs](runvil/crates/runvil-core/src/tools.rs)): add a defaulted trait method `fn untrusted_output(&self) -> bool { false }` to `Tool`, documented. Everything is trusted unless it says otherwise.
+- **web_fetch opts in** ([runvil-webfetch/src/lib.rs](runvil/crates/runvil-webfetch/src/lib.rs)): override `untrusted_output()` to return `true`.
+- **Wrapping in the loop** ([execute.rs](runvil/crates/runvil-core/src/execute.rs), `run_tool_loop`): generate one random nonce per section (loop invocation). At the append site - currently `conversation.push(Message::tool(call.id, result))` - if `tool.untrusted_output()` is true, replace `result` with the guard block: a fixed rule sentence, then an XML-style open tag carrying the nonce in the tag name `<untrusted_input_{nonce}>`, the content (with any literal occurrence of that tag or its close escaped), then the matching `</untrusted_input_{nonce}>`. XML-style because the models this routes to (Claude) are trained to respect XML delimiting of untrusted data; the nonce lives in the tag name (not just an attribute) so the close tag is unguessable and cannot be forged by the page. Trusted tools append verbatim as today.
+- **Random nonce** ([Cargo.toml](runvil/Cargo.toml)): add `fastrand` (the lean no-tree choice from the Rust guide) to generate an unpredictable hex nonce. It need only be unguessable by the fetched content, not cryptographic.
 - **Escaping**: before wrapping, replace any literal occurrence of the open or close tag in the content so a page cannot inject a fake closing tag and break out of the data block.
 
 ## Rust conventions for this change
@@ -85,7 +85,7 @@ Read the diff for the commit. Apply each as yes-or-no; append failures to vibe-r
 
 ## Verification
 
-`cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo doc` green. Live: gateway with `BRAVE_API_KEY`, `promptforge run prompts/research-person.md "Tell me about <person>"` still returns a coherent summary.
+`cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo doc` green. Live: gateway with `BRAVE_API_KEY`, `runvil run prompts/research-person.md "Tell me about <person>"` still returns a coherent summary.
 
 ## Decisions and confidence
 

@@ -6,7 +6,7 @@
 import { isRecord } from "./json-request";
 
 /** Fired on window after grants change, so open panels can refresh. */
-export const WORKSPACE_CHANGED_EVENT = "promptforge:workspace-changed";
+export const WORKSPACE_CHANGED_EVENT = "runvil:workspace-changed";
 
 /**
  * The optional detail of a workspace-changed event. A plain event means

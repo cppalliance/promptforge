@@ -3,8 +3,8 @@
 //! and the `test-support` leak guard runs over the whole workspace, as
 //! part of `cargo test -p build-xtask` and `cargo xtask tidy`.
 //!
-//! The Engine is the `promptforge` facade, the `promptforge-plugin`
-//! contract, and every crate under the `crates/promptforge-internal/`
+//! The Engine is the `runvil` facade, the `runvil-plugin`
+//! contract, and every crate under the `crates/runvil-internal/`
 //! container. The root crates are named, so a missing manifest is
 //! reported rather than skipped; the container's members are discovered,
 //! so a new Engine crate is covered the moment it lands.
@@ -13,10 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The Engine crates that live directly under `crates/`.
-const ENGINE_ROOT_CRATES: [&str; 2] = ["promptforge", "promptforge-plugin"];
+const ENGINE_ROOT_CRATES: [&str; 2] = ["runvil", "runvil-plugin"];
 
 /// The private container whose every member is an Engine crate.
-pub(crate) const ENGINE_CONTAINER: &str = "promptforge-internal";
+pub(crate) const ENGINE_CONTAINER: &str = "runvil-internal";
 
 /// Every Engine crate directory: the named root crates first, whether or
 /// not they exist, then every crate under the container in path order.

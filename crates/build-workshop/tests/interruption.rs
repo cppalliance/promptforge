@@ -16,14 +16,14 @@ const TARGET: &str = "x86_64-pc-windows-msvc";
 const TARGET: &str = "x86_64-unknown-linux-gnu";
 
 #[cfg(windows)]
-const GATEWAY_NAME: &str = "promptforge-gateway.exe";
+const GATEWAY_NAME: &str = "runvil-gateway.exe";
 #[cfg(not(windows))]
-const GATEWAY_NAME: &str = "promptforge-gateway";
+const GATEWAY_NAME: &str = "runvil-gateway";
 
 #[cfg(windows)]
-const SIDECAR_NAME: &str = "promptforge-gateway-x86_64-pc-windows-msvc.exe";
+const SIDECAR_NAME: &str = "runvil-gateway-x86_64-pc-windows-msvc.exe";
 #[cfg(not(windows))]
-const SIDECAR_NAME: &str = "promptforge-gateway-x86_64-unknown-linux-gnu";
+const SIDECAR_NAME: &str = "runvil-gateway-x86_64-unknown-linux-gnu";
 
 struct StagingGuard {
     path: PathBuf,

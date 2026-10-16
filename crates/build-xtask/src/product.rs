@@ -5,32 +5,32 @@
 //! family, and its dependencies of every kind (normal, dev, build, and
 //! target-specific) are checked against the matrix:
 //!
-//! - `promptforge`/`promptforge-*` crates must not depend on gateway,
+//! - `runvil`/`runvil-*` crates must not depend on gateway,
 //!   workshop, or Harness crates.
-//! - `gateway`/`gateway-*` crates must not depend on promptforge,
+//! - `gateway`/`gateway-*` crates must not depend on runvil,
 //!   workshop, or Harness crates.
 //! - `workshop`/`workshop-*` crates must not depend on gateway crates,
 //!   except the family's public pair (`gateway-api-types`,
 //!   `gateway-api-discovery`).
 //! - `harness`/`harness-*` crates must not depend on gateway, shared, or
 //!   workshop crates; outside their own family they may name only
-//!   `promptforge` and `promptforge-plugin`, which rules out `build-*`
+//!   `runvil` and `runvil-plugin`, which rules out `build-*`
 //!   and other unaffiliated crates.
-//! - `plugin-*` crates may depend only on `promptforge-plugin`, `shared-*`
-//!   crates, and outside libraries. `promptforge`, gateway, and Harness
+//! - `plugin-*` crates may depend only on `runvil-plugin`, `shared-*`
+//!   crates, and outside libraries. `runvil`, gateway, and Harness
 //!   crates must not depend on `plugin-*` crates, except
 //!   `harness-gateway-client`, which implements web's `SearchProvider`.
 //! - `shared-*` crates must not depend on any product crate.
-//! - Public API: a crate outside the promptforge family may depend on
-//!   the family only through its two public crates, `promptforge` and
-//!   `promptforge-plugin`, and a crate outside the Harness family on that
+//! - Public API: a crate outside the runvil family may depend on
+//!   the family only through its two public crates, `runvil` and
+//!   `runvil-plugin`, and a crate outside the Harness family on that
 //!   family only through its two public crates, `harness` and
 //!   `harness-gateway-client`. The `build-*` crates are bound too.
-//! - Container privacy: the manifestless `crates/promptforge-internal/`,
+//! - Container privacy: the manifestless `crates/runvil-internal/`,
 //!   `crates/gateway/`, `crates/workshop/`, and `crates/harness-internal/`
 //!   directories are private to their families; only the crates inside a
-//!   container and the container's named outside exceptions (`promptforge`
-//!   and `promptforge-plugin` for `crates/promptforge-internal/`, `harness`
+//!   container and the container's named outside exceptions (`runvil`
+//!   and `runvil-plugin` for `crates/runvil-internal/`, `harness`
 //!   for `crates/harness-internal/`; the gateway and workshop containers
 //!   name none) may depend on the crates it holds. Containers nest:
 //!   `crates/gateway/stt/` is a subsystem private to the gateway family,
@@ -50,7 +50,7 @@ const DEP_KINDS: [&str; 3] = ["dependencies", "dev-dependencies", "build-depende
 /// The product family a package name belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Family {
-    Promptforge,
+    Runvil,
     Gateway,
     Workshop,
     Harness,
@@ -63,8 +63,8 @@ enum Family {
 
 /// Classifies a package name into its product family.
 fn family(package: &str) -> Family {
-    if package == "promptforge" || package.starts_with("promptforge-") {
-        Family::Promptforge
+    if package == "runvil" || package.starts_with("runvil-") {
+        Family::Runvil
     } else if package == "gateway" || package.starts_with("gateway-") {
         Family::Gateway
     } else if package == "workshop" || package.starts_with("workshop-") {
@@ -138,9 +138,9 @@ const DESKTOP: &str = "workshop";
 const SERVER_API: &str = "workshop-server-api";
 /// The server crate: the one workshop crate the facade may name.
 const SERVER: &str = "workshop-server";
-/// The promptforge-family crates outside crates may depend on directly:
+/// The runvil-family crates outside crates may depend on directly:
 /// the Engine facade and the Plugin contract.
-const PUBLIC_PROMPTFORGE: [&str; 2] = ["promptforge", "promptforge-plugin"];
+const PUBLIC_RUNVIL: [&str; 2] = ["runvil", "runvil-plugin"];
 /// The gateway family's public pair: the only gateway crates workshop
 /// crates may name.
 const PUBLIC_GATEWAY: [&str; 2] = ["gateway-api-types", "gateway-api-discovery"];
@@ -153,8 +153,8 @@ const GATEWAY_CLIENT: &str = "harness-gateway-client";
 /// The Harness family's two public root crates, the facade and the gateway
 /// client: the only Harness crates outside crates may name.
 const PUBLIC_HARNESS: [&str; 2] = [HARNESS_FACADE, GATEWAY_CLIENT];
-/// The Plugin contract: the one promptforge crate Plugin crates may name.
-const PLUGIN_CONTRACT: &str = "promptforge-plugin";
+/// The Plugin contract: the one runvil crate Plugin crates may name.
+const PLUGIN_CONTRACT: &str = "runvil-plugin";
 
 /// The reason a dependency from `package` to `dep` breaches the matrix,
 /// or `None` when the edge is legal.
@@ -206,11 +206,11 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
     let (from, to) = (family(&package.package), family(&dep.package));
     let public_gateway = PUBLIC_GATEWAY.contains(&dep.package.as_str());
     let family_rule = match (from, to) {
-        (Family::Promptforge, Family::Gateway | Family::Workshop | Family::Harness) => {
-            Some("promptforge crates must not depend on gateway, workshop, or harness crates")
+        (Family::Runvil, Family::Gateway | Family::Workshop | Family::Harness) => {
+            Some("runvil crates must not depend on gateway, workshop, or harness crates")
         }
-        (Family::Gateway, Family::Promptforge | Family::Workshop | Family::Harness) => {
-            Some("gateway crates must not depend on promptforge, workshop, or harness crates")
+        (Family::Gateway, Family::Runvil | Family::Workshop | Family::Harness) => {
+            Some("gateway crates must not depend on runvil, workshop, or harness crates")
         }
         (Family::Workshop, Family::Gateway) if !public_gateway => {
             Some("workshop crates must not depend on gateway crates")
@@ -225,28 +225,24 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
             Some("harness crates must not depend on shared crates")
         }
         (Family::Harness, Family::Build) => Some(
-            "harness crates must not depend on build-* crates; outside their family they may name only promptforge and promptforge-plugin",
+            "harness crates must not depend on build-* crates; outside their family they may name only runvil and runvil-plugin",
         ),
         (Family::Harness, Family::Unaffiliated) => Some(
-            "harness crates must not depend on unaffiliated crates; outside their family they may name only promptforge and promptforge-plugin",
+            "harness crates must not depend on unaffiliated crates; outside their family they may name only runvil and runvil-plugin",
         ),
         (
             Family::Shared,
-            Family::Promptforge
-            | Family::Gateway
-            | Family::Workshop
-            | Family::Harness
-            | Family::Plugin,
+            Family::Runvil | Family::Gateway | Family::Workshop | Family::Harness | Family::Plugin,
         ) => Some("shared crates must not depend on product crates"),
         _ => None,
     };
     family_rule.map(str::to_owned).or_else(|| {
-        if from != Family::Promptforge
-            && to == Family::Promptforge
-            && !PUBLIC_PROMPTFORGE.contains(&dep.package.as_str())
+        if from != Family::Runvil
+            && to == Family::Runvil
+            && !PUBLIC_RUNVIL.contains(&dep.package.as_str())
         {
             Some(
-                "outside crates may depend on the promptforge family only through promptforge or promptforge-plugin"
+                "outside crates may depend on the runvil family only through runvil or runvil-plugin"
                     .to_owned(),
             )
         } else if from != Family::Harness
@@ -265,7 +261,7 @@ fn boundary_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<String> {
 
 /// The reason an edge from `package` to `dep` breaches the Plugin family's
 /// rules, or `None` when they allow it: a Plugin crate names only its
-/// allow-list, and no promptforge, gateway, or Harness crate but the
+/// allow-list, and no runvil, gateway, or Harness crate but the
 /// gateway client names a Plugin crate.
 fn plugin_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<&'static str> {
     let (from, to) = (family(&package.package), family(&dep.package));
@@ -273,13 +269,13 @@ fn plugin_breach(package: &CrateInfo, dep: &CrateInfo) -> Option<&'static str> {
         || [PLUGIN_CONTRACT, package.package.as_str()].contains(&dep.package.as_str());
     match (from, to) {
         (Family::Plugin, _) if !allowed => Some(
-            "plugin crates may depend only on promptforge-plugin, shared-* crates, and outside libraries",
+            "plugin crates may depend only on runvil-plugin, shared-* crates, and outside libraries",
         ),
-        (Family::Promptforge | Family::Gateway | Family::Harness, Family::Plugin)
+        (Family::Runvil | Family::Gateway | Family::Harness, Family::Plugin)
             if package.package != GATEWAY_CLIENT =>
         {
             Some(
-                "promptforge, gateway, and harness crates must not depend on plugin crates; only harness-gateway-client may",
+                "runvil, gateway, and harness crates must not depend on plugin crates; only harness-gateway-client may",
             )
         }
         _ => None,
@@ -325,7 +321,7 @@ fn parent_scope(container: &str) -> Option<&str> {
 /// the container names none.
 fn container_named_exception(container: &str) -> &'static [&'static str] {
     match container {
-        "promptforge-internal" => &["promptforge", "promptforge-plugin"],
+        "runvil-internal" => &["runvil", "runvil-plugin"],
         "harness-internal" => &[HARNESS_FACADE],
         _ => &[],
     }

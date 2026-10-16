@@ -23,7 +23,7 @@ isProject: false
 ## Product Requirements
 
 - Problem and users:
-  - PromptForge maintainers are paying recurring costs for structural tests that constrain repository shape without proving product behavior.
+  - Runvil maintainers are paying recurring costs for structural tests that constrain repository shape without proving product behavior.
   - Gateway users can encounter duplicate-launch side effects before one process owns canonical state.
   - Workshop dictation can reject a server item identifier reused after reconnect.
   - Workshop shutdown can exceed its promised bound when the Gateway supervisor does not cooperate.
@@ -39,7 +39,7 @@ isProject: false
   - Use net line deletion as proof of correctness.
   - Rewrite dated plans or historical acceptance logs.
 - Success criteria:
-  - Only four approved structural rules remain: Gateway cannot depend on Workshop, PromptForge cannot depend on Gateway or Workshop, Gateway cannot depend on PromptForge, and Workshop cannot depend on Gateway.
+  - Only four approved structural rules remain: Gateway cannot depend on Workshop, Runvil cannot depend on Gateway or Workshop, Gateway cannot depend on Runvil, and Workshop cannot depend on Gateway.
   - Product and behavior suites remain green after structural enforcement is removed.
   - The Gateway build script passes warnings-denied Clippy on non-Windows machines without a lint exemption.
   - Direct-launch races produce one process owner and no losing-process canonical log mutation.
@@ -67,7 +67,7 @@ isProject: false
   - Release operators dispatch unsigned build and installer-test matrices without signing or publication.
 - Inputs and outputs:
   - Cargo metadata supplies workspace package names and direct local dependency edges for the four approved product-boundary rules.
-  - `PROMPTFORGE_RUST_1_89_0_BIN` supplies one absolute directory containing `cargo.exe` and `rustc.exe`.
+  - `RUNVIL_RUST_1_89_0_BIN` supplies one absolute directory containing `cargo.exe` and `rustc.exe`.
   - Realtime service callbacks and client request results carry a typed connection generation.
   - Supervisor shutdown returns `Joined`, `Panicked`, or `Detached`.
   - Publication after revocation returns `GatewayPublicationError::PublicationClosed`.
@@ -115,8 +115,8 @@ isProject: false
   - Keep UI layering and shared-package ownership as human guidance without walkers or source-text pinning.
 - `crates/gateway-stt/tests/it/architecture.rs` retains one Cargo metadata test with four approved rules:
   - Gateway packages are `gateway` or names beginning with `gateway-`; they cannot directly depend on Workshop packages.
-  - PromptForge packages are `promptforge` or names beginning with `promptforge-`; they cannot directly depend on Gateway or Workshop packages.
-  - Gateway packages cannot directly depend on PromptForge packages.
+  - Runvil packages are `runvil` or names beginning with `runvil-`; they cannot directly depend on Gateway or Workshop packages.
+  - Gateway packages cannot directly depend on Runvil packages.
   - Workshop packages are `workshop` and `workshop-server`; they cannot directly depend on Gateway packages.
   - Inspect normal, development, build, renamed, and target-specific local dependencies without enumerating allowed edges or package counts.
 - Remove every other `architecture.rs` family:
@@ -152,17 +152,17 @@ isProject: false
 - `crates/shared-sidecar/AGENTS.md`: keep sole connection-file ownership, synchronous runtime independence, unsafe confinement, loopback probe authority, and stale-deletion ownership.
 - `crates/shared-protocol/AGENTS.md`: keep OpenAI wire and upstream abstraction ownership apart from local inference, routing, handlers, and Gateway-local concepts.
 - `crates/shared-progress/AGENTS.md`: keep bottom-of-graph placement, caller-owned forwarding, producer and renderer separation, lossy intermediate versus terminal delivery, time-based weights, and additive serialization.
-- `crates/promptforge/AGENTS.md`: keep the facade-only dependency and API vocabulary boundary.
-- `crates/promptforge-core/AGENTS.md`: keep verbatim historical re-exports, provider ownership, private write scope, and dependency direction.
-- `crates/promptforge-core-support/AGENTS.md`: keep report-only observation, explicit read-side history, bottom-of-graph placement, byte-identical run envelopes, and closed control-markup inventory.
-- `crates/promptforge-agent/AGENTS.md`: keep sibling-executor independence, absent legacy globals, shared tool dispatch, and stable observer section labels.
-- `crates/promptforge-model-client/AGENTS.md`: keep transport ownership, executor independence, canonical metrics vocabulary, and hidden executor seams.
-- `crates/promptforge-parser/AGENTS.md`: keep prompt-document parsing, Lua dependency direction, and executor independence; remove feature and test-topology guidance.
-- `crates/promptforge-store/AGENTS.md`: keep the virtual-filesystem boundary and hidden fanout seams without enumerating internal symbols.
-- `crates/promptforge-tools/AGENTS.md`: keep the vocabulary-only dependency firewall and remove implementation inventories.
-- `crates/promptforge-web-search/AGENTS.md`: keep provider ownership, cause-preserving errors, bounded requests, overflow rejection, and secret-free diagnostics.
-- `crates/promptforge-webfetch/AGENTS.md`: keep caller-supplied URL scope and per-hop guarded resolver, redirect, and body-bound SSRF defenses.
-- `crates/promptforge-lua/AGENTS.md`: keep the parser-cycle boundary, executor independence, single tool-dispatch body, and hidden executor seams; remove the unimplemented markdown dependency claim.
+- `crates/runvil/AGENTS.md`: keep the facade-only dependency and API vocabulary boundary.
+- `crates/runvil-core/AGENTS.md`: keep verbatim historical re-exports, provider ownership, private write scope, and dependency direction.
+- `crates/runvil-core-support/AGENTS.md`: keep report-only observation, explicit read-side history, bottom-of-graph placement, byte-identical run envelopes, and closed control-markup inventory.
+- `crates/runvil-agent/AGENTS.md`: keep sibling-executor independence, absent legacy globals, shared tool dispatch, and stable observer section labels.
+- `crates/runvil-model-client/AGENTS.md`: keep transport ownership, executor independence, canonical metrics vocabulary, and hidden executor seams.
+- `crates/runvil-parser/AGENTS.md`: keep prompt-document parsing, Lua dependency direction, and executor independence; remove feature and test-topology guidance.
+- `crates/runvil-store/AGENTS.md`: keep the virtual-filesystem boundary and hidden fanout seams without enumerating internal symbols.
+- `crates/runvil-tools/AGENTS.md`: keep the vocabulary-only dependency firewall and remove implementation inventories.
+- `crates/runvil-web-search/AGENTS.md`: keep provider ownership, cause-preserving errors, bounded requests, overflow rejection, and secret-free diagnostics.
+- `crates/runvil-webfetch/AGENTS.md`: keep caller-supplied URL scope and per-hop guarded resolver, redirect, and body-bound SSRF defenses.
+- `crates/runvil-lua/AGENTS.md`: keep the parser-cycle boundary, executor independence, single tool-dispatch body, and hidden executor seams; remove the unimplemented markdown dependency claim.
 
 ### Gateway ownership, logging, and runner contract
 - `shared-sidecar` adds `GatewayInstanceLease` as an operating-system-backed, nonblocking lock on a dedicated run-directory file:
@@ -180,7 +180,7 @@ isProject: false
   - Preserve pre-format field classification, final-output redaction, queue and shutdown accounting, bounded settlement, detached loss, stall handling, rename rotation, crash recovery, segment naming, pruning, and disk limits.
   - Any consolidated fault-injection support must retain direct write, flush, rename, sync, crash, recovery, and release injection.
 - Native runner provisioning is external to the repository:
-  - One checked-in PowerShell script validates only `PROMPTFORGE_RUST_1_89_0_BIN`; it performs no discovery or installation.
+  - One checked-in PowerShell script validates only `RUNVIL_RUST_1_89_0_BIN`; it performs no discovery or installation.
   - The workflow invokes the script before cache restoration.
   - Controlled fake executables test script behavior directly without extracting workflow text.
 
@@ -273,7 +273,7 @@ isProject: false
 
 - Decisions:
   - Reject structural ratchets by default because history showed recurring refactor coupling without demonstrated product-defect prevention.
-  - Retain exactly four narrow Cargo metadata rules. The user said, "promptforge* crates must never depend on gateway or workshop crates," "Gateway product crates cannot depend on PromptForge product crates," and "Workshop product crates cannot depend on Gateway product crates."
+  - Retain exactly four narrow Cargo metadata rules. The user said, "runvil* crates must never depend on gateway or workshop crates," "Gateway product crates cannot depend on Runvil product crates," and "Workshop product crates cannot depend on Gateway product crates."
   - Prune all repository guidance under a material-benefit test. The user said, "I would like to cut from them whatever is not of significant material benefit."
   - Preserve valuable behavior selectively rather than reverting mixed commits wholesale.
   - Keep `LaunchLock` for parent election and add a separate process-lifetime `GatewayInstanceLease`.
@@ -339,22 +339,22 @@ isProject: false
   - `design/`: current product and protocol design contracts.
   - `guide/`: mdBook sources, generated guides, and the checked-in rendered book.
   - `images/`: repository and guide artwork.
-  - `prompts/`: shipped PromptForge prompt programs.
+  - `prompts/`: shipped Runvil prompt programs.
   - `tools/`: Node and PowerShell build, staging, architecture, and verification utilities.
   - `vibe/`: architecture records and active planning material. `vibe/archdoc.md` exists and is the architecture anchor for this survey.
   - Root manifests and policy files: Cargo workspace and lock files, Rust toolchain and lint configuration, repository policy, licensing, distribution configuration, and the example Gateway configuration.
 - Component boundaries:
   - Shared substrate: `shared-progress`, `shared-loopback`, `shared-protocol`, and `shared-sidecar` provide bottom-of-graph facilities used by multiple products.
-  - Store: `promptforge-store` owns the run-scoped virtual filesystem boundary and has no product dependency.
-  - Executor and library: the `promptforge-*` crates parse Markdown, run sandboxed Lua and model turns, dispatch tools, observe runs, and expose the `promptforge` facade. They consume store and shared abstractions and remain independent of Gateway and Workshop product crates.
-  - Gateway: the `gateway*` crates form a separate server process that owns credentials, configuration, routing, remote providers, local inference, logging, speech, and Gateway UI serving. Gateway product crates do not depend on PromptForge or Workshop product crates.
+  - Store: `runvil-store` owns the run-scoped virtual filesystem boundary and has no product dependency.
+  - Executor and library: the `runvil-*` crates parse Markdown, run sandboxed Lua and model turns, dispatch tools, observe runs, and expose the `runvil` facade. They consume store and shared abstractions and remain independent of Gateway and Workshop product crates.
+  - Gateway: the `gateway*` crates form a separate server process that owns credentials, configuration, routing, remote providers, local inference, logging, speech, and Gateway UI serving. Gateway product crates do not depend on Runvil or Workshop product crates.
   - Workshop: `workshop` is the Tauri shell, `workshop-server` serves the in-process API, and `crates/workshop-server/ui` is the authoring UI. Workshop attaches to the Gateway through shared protocol and sidecar facilities; Workshop product crates do not depend on Gateway product crates.
   - UI substrate: `crates/shared-ui` supplies TypeScript and CSS primitives to both embedded UIs without becoming a Rust workspace member.
   - Build tooling: `build-*` crates and `tools/` support compilation, guide generation, sidecar staging, packaging, and CI and are linked into no shipped runtime except during build.
   - Dependency direction is therefore build tooling into build outputs, product crates into shared substrate, and product-specific shells into their internal components, with the four cross-product prohibitions defined by this plan.
 - Conventions summary:
   - The workspace uses Rust 2024, Cargo resolver 3, pinned MSRV 1.89, Node.js 22, and locked dependency resolution in CI.
-  - Crate prefixes declare ownership: `gateway*`, `promptforge*`, bare `workshop*`, `shared-*`, and `build-*`.
+  - Crate prefixes declare ownership: `gateway*`, `runvil*`, bare `workshop*`, `shared-*`, and `build-*`.
   - Public Rust items require documentation; behavior changes carry tests; production library and serve paths return errors rather than exiting or installing process-global state.
   - Unsafe Rust is forbidden workspace-wide except at the explicitly owned FFI boundary, and external or platform workarounds require an upstream issue URL in the explanatory comment.
   - Long-running operations report through `shared-progress`; model and tool loops are explicitly bounded; security-sensitive network destinations and file paths are revalidated at their owning boundaries.
@@ -372,17 +372,17 @@ isProject: false
   - `crates/gateway-stt-engine/AGENTS.md` governs `crates/gateway-stt-engine/`.
   - `crates/gateway-web-search/AGENTS.md` governs `crates/gateway-web-search/`.
   - `crates/gateway-whisper-ffi/AGENTS.md` governs `crates/gateway-whisper-ffi/`.
-  - `crates/promptforge/AGENTS.md` governs `crates/promptforge/`.
-  - `crates/promptforge-agent/AGENTS.md` governs `crates/promptforge-agent/`.
-  - `crates/promptforge-core/AGENTS.md` governs `crates/promptforge-core/`.
-  - `crates/promptforge-core-support/AGENTS.md` governs `crates/promptforge-core-support/`.
-  - `crates/promptforge-lua/AGENTS.md` governs `crates/promptforge-lua/`.
-  - `crates/promptforge-model-client/AGENTS.md` governs `crates/promptforge-model-client/`.
-  - `crates/promptforge-parser/AGENTS.md` governs `crates/promptforge-parser/`.
-  - `crates/promptforge-store/AGENTS.md` governs `crates/promptforge-store/`.
-  - `crates/promptforge-tools/AGENTS.md` governs `crates/promptforge-tools/`.
-  - `crates/promptforge-web-search/AGENTS.md` governs `crates/promptforge-web-search/`.
-  - `crates/promptforge-webfetch/AGENTS.md` governs `crates/promptforge-webfetch/`.
+  - `crates/runvil/AGENTS.md` governs `crates/runvil/`.
+  - `crates/runvil-agent/AGENTS.md` governs `crates/runvil-agent/`.
+  - `crates/runvil-core/AGENTS.md` governs `crates/runvil-core/`.
+  - `crates/runvil-core-support/AGENTS.md` governs `crates/runvil-core-support/`.
+  - `crates/runvil-lua/AGENTS.md` governs `crates/runvil-lua/`.
+  - `crates/runvil-model-client/AGENTS.md` governs `crates/runvil-model-client/`.
+  - `crates/runvil-parser/AGENTS.md` governs `crates/runvil-parser/`.
+  - `crates/runvil-store/AGENTS.md` governs `crates/runvil-store/`.
+  - `crates/runvil-tools/AGENTS.md` governs `crates/runvil-tools/`.
+  - `crates/runvil-web-search/AGENTS.md` governs `crates/runvil-web-search/`.
+  - `crates/runvil-webfetch/AGENTS.md` governs `crates/runvil-webfetch/`.
   - `crates/shared-loopback/AGENTS.md` governs `crates/shared-loopback/`.
   - `crates/shared-progress/AGENTS.md` governs `crates/shared-progress/`.
   - `crates/shared-protocol/AGENTS.md` governs `crates/shared-protocol/`.
@@ -440,9 +440,9 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 - Rewrite `crates/gateway-stt/tests/it/architecture.rs` around Cargo metadata. Retain exactly the four product rules from the Technical Design across normal, development, build, renamed, and target-specific direct local dependencies. Remove exact allowlists, counts, ceilings, source scans, reference-count scans, ownership-shape checks, and parser-only helpers.
 - Before deleting the profile parser, add deterministic direct tests around `crates/gateway/src/profile_switch.rs`, `crates/gateway/tests/it/profiles.rs`, and `crates/gateway-stt/src/generation.rs`. Prove durable persistence before publication, local and speech rollback reconstruction, fatal indeterminate handling with cause retention, and dropped or aborted `SpeechReplacement` rollback without leaked admission.
 - Run those profile tests green in the worktree, then delete the profile source parser. The final `architecture.rs` contains only the four Cargo metadata rules.
-- Remove the Rust module-ceiling tests and manifests under `crates/gateway-stt*`, `crates/workshop`, and `crates/workshop-server`; structural cases in `crates/workshop-server/tests/it/ratchet.rs`; the manifest parser in `crates/gateway-logging/tests/it/main.rs`; Gateway cfg source assertions in `crates/gateway/src/main.rs`; and exact counts and symbol scans from `crates/promptforge-core/tests/suite/shipped.rs` while preserving shipped-prompt parsing.
+- Remove the Rust module-ceiling tests and manifests under `crates/gateway-stt*`, `crates/workshop`, and `crates/workshop-server`; structural cases in `crates/workshop-server/tests/it/ratchet.rs`; the manifest parser in `crates/gateway-logging/tests/it/main.rs`; Gateway cfg source assertions in `crates/gateway/src/main.rs`; and exact counts and symbol scans from `crates/runvil-core/tests/suite/shipped.rs` while preserving shipped-prompt parsing.
 - Replace unsafe-lint manifest inspection with compiler checks that deny unsafe code in the three safe STT crates and retain the explicit `gateway-whisper-ffi` policy. Remove Rust parser dependencies, test registrations, and CI consumers with their final use.
-- Run focused Cargo metadata adversarial fixtures, profile and STT generation tests, safe-crate compiler lanes, Workshop structural-test replacements, Gateway logging behavior tests, Gateway tests, and PromptForge shipped-prompt tests. Commit all Rust cleanup and direct replacement evidence together.
+- Run focused Cargo metadata adversarial fixtures, profile and STT generation tests, safe-crate compiler lanes, Workshop structural-test replacements, Gateway logging behavior tests, Gateway tests, and Runvil shipped-prompt tests. Commit all Rust cleanup and direct replacement evidence together.
 
 </step-3>
 
@@ -517,7 +517,7 @@ Preserve the scope exclusions throughout: no `ValidatedConnection` revalidation 
 
 ### Step 9: Migrate the native runner to one PowerShell contract [completed]
 
-- External gate: under the actual native Whisper service account, verify that `PROMPTFORGE_RUST_1_89_0_BIN` is an absolute directory containing regular `cargo.exe` and `rustc.exe` files and that both report exactly Rust 1.89.0. If unavailable, leave this step incomplete with the account and failure boundary. Do not infer success or block the completed local Steps 1 through 8.
+- External gate: under the actual native Whisper service account, verify that `RUNVIL_RUST_1_89_0_BIN` is an absolute directory containing regular `cargo.exe` and `rustc.exe` files and that both report exactly Rust 1.89.0. If unavailable, leave this step incomplete with the account and failure boundary. Do not infer success or block the completed local Steps 1 through 8.
 - Add `tools/validate-rust-1.89.0.ps1`. It reads only that environment contract, performs no discovery or installation, and rejects unset, relative, nonexistent, mixed-version, malformed, missing, or wrong-version inputs.
 - Rewrite `tools/check-stt-native-workflow.test.mjs` to execute the script with controlled fake executables, removing all YAML extraction and workflow-text assertions.
 - Update the `native-whisper` job in `.github/workflows/stt-miri.yml` to run the script before cache restoration and use only the validated directory. Preserve the Miri matrix and explicit native FFI lint policy.

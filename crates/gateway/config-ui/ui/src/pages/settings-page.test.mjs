@@ -104,7 +104,7 @@ test("the System metric tiles render from the snapshot with the vendor chip", as
   );
 
   const storage = root.querySelector(".settings-card .field-row[data-key='cache_dir']");
-  assert.equal(storage.querySelector("input").value, "~/.promptforge");
+  assert.equal(storage.querySelector("input").value, "~/.runvil");
   assert.match(
     root.querySelector(".storage-warning").textContent,
     /does not move existing files/,
@@ -168,13 +168,13 @@ test("the About panel renders the medallion, version, and license link", async (
   await settle();
   const medallion = root.querySelector("img.about-medallion");
   assert.ok(medallion, "the medallion renders");
-  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon.png");
+  assert.equal(medallion.getAttribute("src"), "icons/runvil-icon.png");
   assert.equal(
     medallion.getAttribute("srcset"),
-    "icons/promptforge-icon.png 1x, icons/promptforge-icon@2x.png 2x",
+    "icons/runvil-icon.png 1x, icons/runvil-icon@2x.png 2x",
     "the About medallion names the @2x render for high-DPI displays",
   );
-  assert.match(root.querySelector(".about-name").textContent, /PromptForge Gateway/);
+  assert.match(root.querySelector(".about-name").textContent, /Runvil Gateway/);
   assert.match(
     root.querySelector(".about-version").textContent,
     /^Version (\d+\.\d+\.\d+|dev)$/,

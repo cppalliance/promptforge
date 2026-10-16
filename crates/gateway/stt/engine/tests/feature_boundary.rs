@@ -9,13 +9,13 @@
 use std::path::Path;
 
 #[cfg(feature = "test-fixtures")]
-const CHILD_FALLBACK_ROOT: &str = "PROMPTFORGE_RESOLVER_CHILD_FALLBACK_ROOT";
+const CHILD_FALLBACK_ROOT: &str = "RUNVIL_RESOLVER_CHILD_FALLBACK_ROOT";
 #[cfg(feature = "test-fixtures")]
-const CHILD_FALLBACK_NAME: &str = "PROMPTFORGE_RESOLVER_CHILD_FALLBACK_NAME";
+const CHILD_FALLBACK_NAME: &str = "RUNVIL_RESOLVER_CHILD_FALLBACK_NAME";
 #[cfg(feature = "test-fixtures")]
-const CHILD_EXPECTED: &str = "PROMPTFORGE_RESOLVER_CHILD_EXPECTED";
+const CHILD_EXPECTED: &str = "RUNVIL_RESOLVER_CHILD_EXPECTED";
 #[cfg(feature = "test-fixtures")]
-const RESOLVER_OVERRIDE: &str = "PROMPTFORGE_RESOLVER_TEST_OVERRIDE";
+const RESOLVER_OVERRIDE: &str = "RUNVIL_RESOLVER_TEST_OVERRIDE";
 
 #[cfg(not(feature = "test-fixtures"))]
 #[test]

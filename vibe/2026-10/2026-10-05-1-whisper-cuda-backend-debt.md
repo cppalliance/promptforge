@@ -23,7 +23,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 
 - Problem and users:
   - The users are gateway operators on Windows x86-64, and anyone, person or model, who reads the gateway's log after a stop.
-  - The whisper CUDA backend work, branch `whisper-cuda-backend` at `356e3dc7` (pull request #91 against cppalliance/promptforge `master` at `b845508c`), left two defects that its own review of its 19 commits found:
+  - The whisper CUDA backend work, branch `whisper-cuda-backend` at `356e3dc7` (pull request #91 against cppalliance/runvil `master` at `b845508c`), left two defects that its own review of its 19 commits found:
     - DB-1: under the default `auto` on Windows, a `CUDA_VISIBLE_DEVICES` whose first entry is a `GPU-` or `MIG-` identifier naming no GPU still selects the published CUDA build. CUDA then sees no device, the build decodes on the CPU with OpenMP, and the graceful-stop retirement that unloads it crashes the gateway with `0xC0000005`.
     - DB-2: when a command ignores its cancellation token for the whole 5 s join, the speech retirement logs `speech did not retire within 5s; abandoning it` without having run. It does so even when nothing is published, so the warning reports a failure that never happened.
 - Goals:
@@ -47,7 +47,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Selection is the only guard against the runtime's process-ending failures, and its inputs stay arguments, so tests run on any machine.
   - Error and status messages are written for model consumption: concise, factual, self-contained, and naming what is unmet against what was required.
   - The shared shutdown deadline and its documented bounds stay as they are.
-  - The work lands on `whisper-cuda-backend`, in pull request #91, with no push to cppalliance/promptforge.
+  - The work lands on `whisper-cuda-backend`, in pull request #91, with no push to cppalliance/runvil.
 - Open questions:
   - None.
 
@@ -133,7 +133,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - Changed: `crates/gateway/local/src/artifacts/assets.rs` and `crates/gateway/app/src/runner.rs`, with their tests and doc comments.
   - Docs:
     - `guide/src/gateway/05-speech.md`, the `whisper_backend` row of `crates/gateway/app/README.md`, and the commented `whisper_backend` lines of `gateway.local.example.toml` state the Windows identifier rule.
-    - `guide/promptforge-gateway-guide.md` is regenerated with `cargo run -p build-user-guide`.
+    - `guide/runvil-gateway-guide.md` is regenerated with `cargo run -p build-user-guide`.
     - `vibe/2026-09-28-2-whisper-cuda-backend.md` corrects its statements on identifiers and on a stop during a long load.
   - No public API changes. The touched functions are crate-private.
 - Data, persistence, failure, security, and privacy constraints:
@@ -200,7 +200,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - Headless shape: `cargo build --locked -p gateway --no-default-features`; the Windows end-to-end build is `cargo build --release --locked --offline -p gateway --no-default-features --features local,stt`. Desktop app: `cargo workshop` (alias of `run -p build-workshop --`) after `npm ci --prefix crates/workshop`, whose `node_modules` is absent here.
   - Toolchain: `rust-toolchain.toml` pins channel `stable`; edition 2024, resolver 3, no `rust-version`. Windows has cargo and rustc 1.98.0 (also 1.89 installed), WSL has 1.98.1. CI takes the current stable through `dtolnay/rust-toolchain`, and the merge `e1d58405` brought master's Rust 1.99.0 clippy fixes, so local clippy 1.98 can miss lints CI raises. Windows links with `rust-lld` and `+crt-static` (`.cargo/config.toml`).
   - Two forms on this machine:
-    - WSL: `bash vibe/scratch/wsl-cargo.sh <cargo args>` runs `cargo <args>` in WSL Ubuntu-24.04 at `/mnt/d/_cppalliance/promptforge`, with `CARGO_TARGET_DIR=~/promptforge-verify-target` and `RUSTFLAGS` and `RUSTDOCFLAGS` passed through `WSLENV`. It is for `cargo test`, `check`, `doc`, and any build of the config UI. The WSL toolchain has only cargo, rustc, and rust-std: no clippy, rustfmt, nextest, or mdbook.
+    - WSL: `bash vibe/scratch/wsl-cargo.sh <cargo args>` runs `cargo <args>` in WSL Ubuntu-24.04 at `/mnt/d/_cppalliance/runvil`, with `CARGO_TARGET_DIR=~/runvil-verify-target` and `RUSTFLAGS` and `RUSTDOCFLAGS` passed through `WSLENV`. It is for `cargo test`, `check`, `doc`, and any build of the config UI. The WSL toolchain has only cargo, rustc, and rust-std: no clippy, rustfmt, nextest, or mdbook.
     - Windows (plain `cargo` from Git Bash or PowerShell): `cargo clippy`, `cargo fmt`, `cargo xtask site --books-only` (mdBook 0.4.44 on PATH at `C:\Users\Will\.cargo\bin\mdbook`, CI's pinned version, so `MDBOOK` need not be set), `cargo deny` 0.20.2, and the end-to-end scripts. No `cargo nextest` and no `cargo audit` on either side.
 - Focused test command pattern:
   - CI form: `cargo nextest run --locked -p <package> --all-features [<filter>]`. Here: `bash vibe/scratch/wsl-cargo.sh test --locked -p <package> [--all-features] [--lib | --test it] [<module-path filter>]`.
@@ -209,9 +209,9 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
     - `bash vibe/scratch/wsl-cargo.sh test --locked -p gateway --lib drain_tests::` (the module is `runner::drain_tests`; its speech tests are `#[cfg(feature = "stt")]`, a default feature).
     - `bash vibe/scratch/wsl-cargo.sh test --locked -p gateway --test it --all-features realtime_stt::` (`mod realtime_stt` is `#[cfg(feature = "stt")]` in `tests/it/main.rs`, with twelve submodules under `tests/it/realtime_stt/`).
   - One crate's doctests: `cargo test --locked --doc -p <package>`.
-  - Native whisper tests are `#[ignore]`d and run as `-- --ignored --test-threads=1` with `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO` set, as `.github/workflows/stt-miri.yml` does on the self-hosted Windows CUDA runner; this plan needs no rerun.
+  - Native whisper tests are `#[ignore]`d and run as `-- --ignored --test-threads=1` with `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL`, and `RUNVIL_WHISPER_AUDIO` set, as `.github/workflows/stt-miri.yml` does on the self-hosted Windows CUDA runner; this plan needs no rerun.
   - Windows end to end, from Git Bash, with the scratch scripts in `vibe/scratch/run-36900875610/scripts/`:
-    - `win-env.sh` is sourced by each step: clone `vibe/scratch/pf-e2e`, target `vibe/scratch/pf-e2e-target`, `CARGO_NET_OFFLINE=true`, logs under `run-36900875610/logs/`, and a HEAD guard that still names `36409119`.
+    - `win-env.sh` is sourced by each step: clone `vibe/scratch/rv-e2e`, target `vibe/scratch/rv-e2e-target`, `CARGO_NET_OFFLINE=true`, logs under `run-36900875610/logs/`, and a HEAD guard that still names `36409119`.
     - `win-prepare.sh` runs `git checkout -- .` in the clone, applies `STEP_PATCH` with `core.autocrlf=false`, points the Windows CPU row at `http://127.0.0.1:18741` through `patch-assets.py` (the CUDA row keeps its pin), copies both archives to `serve-windows/`, and builds the headless release gateway and the native test targets.
     - `python win_gateway.py <section>...` takes `boots`, `stops`, `soak`, `hidden`, `jit`, and `long`, and `WIN_GATEWAY_LABEL` labels its log. `hidden` sets `CUDA_VISIBLE_DEVICES` to `-1` today, and its docstring says so.
     - The clone sits at `36409119` with an earlier step's patch still in its working tree; `win-prepare.sh` discards it. The Windows machine has two RTX 3090 GPUs on driver 591.86.
@@ -227,7 +227,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - Here, Windows only: `cargo clippy --locked -p gateway-local --all-targets --all-features -- -D warnings`, and for `gateway`, which cannot build the config UI on Windows, `cargo clippy --locked -p gateway --no-default-features --features local,stt,web-search --all-targets -- -D warnings`.
   - Formatter: `cargo fmt --all --check` on Windows (`rustfmt.toml`: `style_edition = "2024"`).
   - Headless gate: `bash vibe/scratch/wsl-cargo.sh check --locked -p gateway --no-default-features`.
-  - Docs: `RUSTDOCFLAGS="-D warnings" bash vibe/scratch/wsl-cargo.sh doc --locked --no-deps --all-features --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api`. CI's docs job also runs `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`.
+  - Docs: `RUSTDOCFLAGS="-D warnings" bash vibe/scratch/wsl-cargo.sh doc --locked --no-deps --all-features --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api`. CI's docs job also runs `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`.
   - Books: `cargo xtask site --books-only` on Windows. The single-file guide exports come from `cargo run --locked -p build-user-guide`, which depends on no workspace crate and so runs with either toolchain.
   - CI's speech gates, with `RUSTFLAGS=-D warnings`: `cargo rustc --locked -p <crate> --lib -- -F unsafe-code` for `gateway-stt-engine`, `gateway-stt-backend-whisper`, and `gateway-stt`, and `cargo check --locked -p gateway-whisper-ffi --lib`.
   - Supply chain: `cargo deny check` (Windows), `cargo audit` (CI only). Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (`PINNED` in `crates/build-xtask/src/api/toolchain.rs`), needed only when a facade changes; that nightly is not installed, and this plan touches no facade.
@@ -237,34 +237,34 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - Unit tests sit with their module in one of three forms: an inline `#[cfg(test)] mod tests { ... }` at the file's end (`artifacts/assets.rs` at line 620), a kebab sibling `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;`, sometimes under a descriptive module name (`staging-tests.rs` as `tests`, `boot-speech-tests.rs` as `boot_speech_tests` under `#[cfg(all(test, feature = "stt"))]`, `main-logging-tests.rs` as `logging_tests`), or `mod tests;` in the module directory (`config/tests.rs` with `config/tests/{schema,serialize,validation}.rs`).
   - `runner.rs` holds two inline test modules: `#[cfg(test)] mod drain_tests` (line 574, with `park_a_command`, `scripted_speech`, `speech_gateway`, `both_workers_drop`, and the four `serve_*` speech tests) and `mod tests` (line 1539).
   - Log capture in unit tests: the tests of `crates/gateway/protocol/src/upstream.rs` define `LogBuffer` (a `MakeWriter` over `Arc<Mutex<Vec<u8>>>`), `capture_logs(max_level)`, and `capture_warnings()`, installed with `tracing::subscriber::set_default`. `tracing-subscriber` (with `env-filter`) is a normal dependency of `gateway`.
-  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/` in the `promptforge` and `harness` facades), with helpers in `tests/it/support.rs` for `gateway` and `tests/common/` for `gateway-stt`, and data in `tests/fixtures/`. A few targets stand alone, such as `crates/gateway/stt/backend-whisper/tests/native_whisper.rs` and the speech engine's `tests/engine_contract.rs`.
+  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/` in the `runvil` and `harness` facades), with helpers in `tests/it/support.rs` for `gateway` and `tests/common/` for `gateway-stt`, and data in `tests/fixtures/`. A few targets stand alone, such as `crates/gateway/stt/backend-whisper/tests/native_whisper.rs` and the speech engine's `tests/engine_contract.rs`.
   - Names are snake_case sentences stating the behavior (`gpus_hidden_from_cuda_select_the_cpu_whisper_build`, `serve_retires_speech_before_it_returns`). `clippy.toml` allows `unwrap` and `expect` in tests; product code may not use them.
   - Test-only hooks sit behind `test-fixtures` (gateway family, workshop crates), `test-support` (Engine and Harness crates), or `test-helpers` (`gateway-routing`). `gateway` and `gateway-stt` dev-depend on themselves with `test-fixtures`; public `gateway-config` types carry `# Examples` doctests.
   - TypeScript and JavaScript tests are `node --test` `.mjs` files: `src/**/*.test.mjs` in the config UI, `test/*.mjs` in the Workshop `ui`, `look`, and `platform` packages, and `tools/*.test.mjs` beside their scripts.
 - Directory map:
-  - Languages seen: Rust, TypeScript, CSS, JavaScript (`.mjs` and `.js`), Python (`tools/cicerone/scripts/`, plus untracked scratch scripts), Lua (`crates/promptforge-internal/lua/src/__impl_*.lua` and prompt code fences), Jinja (`crates/gateway/local/src/chat_templates/assets/`), NSIS (`crates/workshop/desktop/installer.nsi`), bash (hooks, workflows), PowerShell (four workflows), TOML, YAML, JSON, HTML, Markdown.
-  - `crates/` root, the public layer: `promptforge` (Engine facade), `harness` (Harness facade), `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (a TypeScript and CSS package, not a crate), `workspace-hack` (cargo-hakari), and the `build-*` tools: `build-xtask`, `build-user-guide`, `build-ui`, `build-workshop`, `build-llama-cuda`.
+  - Languages seen: Rust, TypeScript, CSS, JavaScript (`.mjs` and `.js`), Python (`tools/cicerone/scripts/`, plus untracked scratch scripts), Lua (`crates/runvil-internal/lua/src/__impl_*.lua` and prompt code fences), Jinja (`crates/gateway/local/src/chat_templates/assets/`), NSIS (`crates/workshop/desktop/installer.nsi`), bash (hooks, workflows), PowerShell (four workflows), TOML, YAML, JSON, HTML, Markdown.
+  - `crates/` root, the public layer: `runvil` (Engine facade), `harness` (Harness facade), `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (a TypeScript and CSS package, not a crate), `workspace-hack` (cargo-hakari), and the `build-*` tools: `build-xtask`, `build-user-guide`, `build-ui`, `build-workshop`, `build-llama-cuda`.
   - Private manifestless family containers:
-    - `crates/promptforge-internal/`: `engine`, `lua`, `parser`, `model-client`, `types`, `vfs`.
-    - `crates/gateway/`: `app` (package `gateway`, bin `promptforge-gateway`), `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/`: `api` (package `gateway-stt`), `engine` (`gateway-stt-engine`), `backend-whisper`, `whisper-ffi` (`gateway-whisper-ffi`).
+    - `crates/runvil-internal/`: `engine`, `lua`, `parser`, `model-client`, `types`, `vfs`.
+    - `crates/gateway/`: `app` (package `gateway`, bin `runvil-gateway`), `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/`: `api` (package `gateway-stt`), `engine` (`gateway-stt-engine`), `backend-whisper`, `whisper-ffi` (`gateway-whisper-ffi`).
     - `crates/workshop/`: `desktop` (package `workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, the TypeScript packages `ui`, `look`, `platform`, and `binaries/`.
     - `crates/harness-internal/`: `log`, `models`, `plugins`, `runner`, `sessions`, `web`, `webfetch`, `web-search`.
     - `Cargo.toml` lists `crates/*` and every container member explicitly, excludes the containers and `crates/shared-ui`, and sets `default-members = ["crates/gateway/app"]`.
-  - `guide/`: hand-edited mdBook chapters in `guide/src/{gateway,workshop,language}/` (numbered, such as `gateway/05-speech.md`) and `guide/src/introduction.md`, plus `books/`, `chrome/`, `landing/`, `CONTRIBUTING.md`; `guide/promptforge-<set>-guide.md` are the generated single-file exports.
-  - `.github/workflows/`: `ci.yml` (jobs fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface, ci-green), `stt-miri.yml`, `whisper-lib.yml`, `llama-cuda-blackwell.yml`, `nightly.yml`, `promptforge-gateway-v-release.yml`, `gateway-release-test.yml`, `release-workshop.yml`, `workshop-installer-smoke.yml`, `site.yml`, `dist-ci/`.
+  - `guide/`: hand-edited mdBook chapters in `guide/src/{gateway,workshop,language}/` (numbered, such as `gateway/05-speech.md`) and `guide/src/introduction.md`, plus `books/`, `chrome/`, `landing/`, `CONTRIBUTING.md`; `guide/runvil-<set>-guide.md` are the generated single-file exports.
+  - `.github/workflows/`: `ci.yml` (jobs fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface, ci-green), `stt-miri.yml`, `whisper-lib.yml`, `llama-cuda-blackwell.yml`, `nightly.yml`, `runvil-gateway-v-release.yml`, `gateway-release-test.yml`, `release-workshop.yml`, `workshop-installer-smoke.yml`, `site.yml`, `dist-ci/`.
   - Tooling: `.config/` (`nextest.toml`, `hakari.toml`), `.cargo/config.toml` (aliases `xtask`, `workshop`), `.githooks/`, `.cursor/rules/`, and `tools/`: the Node sidecar staging and TTS scripts, and `tools/cicerone.md` with `tools/cicerone/` for facade pages.
   - Other trees: `prompts/` (example prompt documents), `images/`, `vibe/` (exported plans, `archdoc.md`, analyses, monthly archives `vibe/YYYY-MM/`, and the ignored `vibe/scratch/`), `target/` (ignored).
   - Root files: `gateway.local.example.toml` (the sample gateway config; `whisper_backend` at line 52), `deny.toml`, `dist-workspace.toml` (cargo-dist gateway packaging), `rust-toolchain.toml`, `rustfmt.toml`, `clippy.toml`, `.gitattributes`, `AGENTS.md`, `README.md`, `LICENSE` (BSL-1.0).
 - Component boundaries (archdoc components; arrows are Cargo normal edges from `cargo metadata`, `workspace-hack` omitted):
-  - Engine, Lua VM boundary, VFS layer: `promptforge` -> `promptforge-engine`, `promptforge-lua`, `promptforge-model-client`, `promptforge-parser`, `promptforge-types`, `promptforge-vfs`; `promptforge-engine` -> `promptforge-lua`, `promptforge-model-client`, `promptforge-parser`, `promptforge-types`, `promptforge-vfs`; `promptforge-parser` -> `promptforge-lua`, `promptforge-types`; `promptforge-lua` -> `promptforge-model-client`, `promptforge-types`, `promptforge-vfs`; `promptforge-model-client` -> `promptforge-types`. `promptforge-types` and `promptforge-vfs` have no dependencies. Outside crates name only `promptforge`.
-  - Harness: `harness` -> `harness-log`, `harness-plugins`, `harness-runner`, `harness-sessions`, `promptforge`; `harness-sessions` -> `harness-log`, `harness-models`, `harness-plugins`, `harness-runner`, `harness-web`; `harness-web` -> `harness-plugins`, `harness-web-search`, `harness-webfetch`; `harness-runner` -> `harness-log`, `harness-plugins`. Each reaches the Engine only through `promptforge` and names no gateway, shared, or workshop crate.
+  - Engine, Lua VM boundary, VFS layer: `runvil` -> `runvil-engine`, `runvil-lua`, `runvil-model-client`, `runvil-parser`, `runvil-types`, `runvil-vfs`; `runvil-engine` -> `runvil-lua`, `runvil-model-client`, `runvil-parser`, `runvil-types`, `runvil-vfs`; `runvil-parser` -> `runvil-lua`, `runvil-types`; `runvil-lua` -> `runvil-model-client`, `runvil-types`, `runvil-vfs`; `runvil-model-client` -> `runvil-types`. `runvil-types` and `runvil-vfs` have no dependencies. Outside crates name only `runvil`.
+  - Harness: `harness` -> `harness-log`, `harness-plugins`, `harness-runner`, `harness-sessions`, `runvil`; `harness-sessions` -> `harness-log`, `harness-models`, `harness-plugins`, `harness-runner`, `harness-web`; `harness-web` -> `harness-plugins`, `harness-web-search`, `harness-webfetch`; `harness-runner` -> `harness-log`, `harness-plugins`. Each reaches the Engine only through `runvil` and names no gateway, shared, or workshop crate.
   - Gateway:
     - `gateway` -> config, logging, progress, protocol, routing, `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, and the optional `gateway-local`, `gateway-stt`, `gateway-web-search`, `gateway-config-ui`.
     - Speech: `gateway-stt` -> `gateway-local`, `gateway-config`, `gateway-progress`, `gateway-stt-engine`, `gateway-stt-backend-whisper`; backend-whisper -> `gateway-whisper-ffi`, the speech engine crate, progress.
     - Below speech: `gateway-local` -> config, progress, protocol, routing, `shared-error-source`; routing -> config, protocol; web-search -> config, protocol; protocol -> config, `gateway-api-types`; progress -> `gateway-api-types`; `gateway-config` -> `gateway-api-types` only; `gateway-config-ui` -> `shared-loopback`.
     - `gateway-cloud-providers` -> `gateway-api-types`, `shared-error-source`, and no crate depends on it; it carries the `shared-cloud-providers` sheet binary.
-    - Leaves: `gateway-whisper-ffi`, `gateway-stt-engine`, `gateway-logging`. No gateway crate names a promptforge, Harness, or workshop crate.
-  - Workshop: `workshop` (desktop) -> `workshop-server-api`, `gateway-api-discovery`; `workshop-server-api` -> `workshop-server` -> features (`workspace`, `user-state`) -> services (`gateway`, `menu`, `status`) -> vocabulary (`protocol`, `registry`, `support`). The server also names `harness`, `promptforge`, `gateway-api-discovery`, `shared-loopback`.
+    - Leaves: `gateway-whisper-ffi`, `gateway-stt-engine`, `gateway-logging`. No gateway crate names a runvil, Harness, or workshop crate.
+  - Workshop: `workshop` (desktop) -> `workshop-server-api`, `gateway-api-discovery`; `workshop-server-api` -> `workshop-server` -> features (`workspace`, `user-state`) -> services (`gateway`, `menu`, `status`) -> vocabulary (`protocol`, `registry`, `support`). The server also names `harness`, `runvil`, `gateway-api-discovery`, `shared-loopback`.
   - Shared: `gateway-api-types`, `shared-error-source`, `shared-loopback` have no workspace dependencies; `gateway-api-discovery` -> `shared-error-source`. The `build-*` crates have no workspace normal dependencies; `build-ui` is a build-dependency of `workshop-server` and `gateway-config-ui`.
   - This plan's two owners: whisper selection in `gateway-local` (`crates/gateway/local/src/artifacts/assets.rs`, 1326 lines, with the probe in `artifacts.rs`, which queries `--query-gpu=compute_cap,driver_version`), and the graceful stop in `gateway`'s `Gateway::serve` (`crates/gateway/app/src/runner.rs`, 1816 lines). `serve` reaches speech through `gateway_stt::SpeechService::status()` (`crates/gateway/stt/api/src/service.rs`), whose `SpeechStatus::ready()` is in `status.rs`. Neither change crosses a crate edge.
   - Runtime: Workshop and the Harness reach the gateway over HTTP and WebSocket through the discovery file. Archdoc A1 (bind and report readiness before provisioning through the command queue) and A5 (local model set fixed for the process lifetime) govern speech provisioning; both now sit in the `## Invariants` crate doc of `crates/gateway/app/src/lib.rs`, since `vibe/archdoc.md` was retired.
@@ -280,13 +280,13 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - Terms: AGENTS.md's Host, Engine, Harness, and Plugin rules bind code comments, docs, and plans; the machine is "machine", the gateway's speech engine is named as such, and checks are "structural checks" or "test support". `crates/workshop/ui/test/docs-claims.mjs` enforces them in AGENTS.md files, `## Invariants` docs, and `.cursor/rules`.
   - Commits: imperative subject with no prefix, a prose paragraph on the behavior, then bullets naming the touched symbols and tests. Trailers are `Design: ...`, `Repairs: <what> @ <path>::<symbol> - <symptom>`, `Uncertain: ...`, `Deferred: ...`, and `Plan: vibe/<plan>.md`. A plan's first step commit adds the exported plan and a `vibe/ACTIVE` file naming it; a final `Close plan: <words>` commit deletes `vibe/ACTIVE`.
   - Run state: the ledger is `vibe/scratch/vibe-ledger.md` and verification logs go under `vibe/scratch/logs/`, both ignored through `vibe/.gitignore` (`/scratch`); review findings go to the repository-root `vibe-review.md`, ignored by the root `.gitignore`.
-  - Remotes: `origin` is the fork `wpak-ai/promptforge`; `upstream` is `cppalliance/promptforge`, never pushed to.
+  - Remotes: `origin` is the fork `wpak-ai/runvil`; `upstream` is `cppalliance/runvil`, never pushed to.
   - Machine: `gh`, Python 3.12, WSL2 Ubuntu-24.04, and `nvidia-smi` with two RTX 3090 GPUs; free space is 242 GB on C:, 94 GB on D:, and 182 GB on F:.
 - Rules manifest (22 tracked `AGENTS.md`, each governing its own directory's subtree):
   - `AGENTS.md`: the whole repository.
   - Root crates: `crates/gateway-api-discovery/AGENTS.md`, `crates/harness-gateway-client/AGENTS.md`, `crates/shared-loopback/AGENTS.md`, `crates/shared-ui/AGENTS.md`.
   - Gateway: `crates/gateway/{app,config,logging,progress}/AGENTS.md` and `crates/gateway/stt/{engine,whisper-ffi}/AGENTS.md`; `cloud-providers`, `config-ui`, `local`, `protocol`, `routing`, `web-search`, `stt/api`, and `stt/backend-whisper` have none. This plan's code falls under `crates/gateway/app/AGENTS.md`; `gateway-local` has none.
-  - Engine: `crates/promptforge-internal/{engine,lua,types,vfs}/AGENTS.md`.
+  - Engine: `crates/runvil-internal/{engine,lua,types,vfs}/AGENTS.md`.
   - Harness: no harness-internal crate has an `AGENTS.md`; `harness-plugins` and `harness-runner` state their rules in their `lib.rs` `## Invariants` blocks.
   - Workshop: `crates/workshop/AGENTS.md` (the whole family and its npm workspace), `crates/workshop/{desktop,server,ui,look,platform}/AGENTS.md`, and `crates/workshop/desktop/icons/AGENTS.md`.
   - Scoped rules outside AGENTS.md: `.cursor/rules/workshop-architecture.mdc` (`crates/workshop*/**`) and `.cursor/rules/workshop-spa.mdc` (`crates/workshop/{ui,look,platform}/**`).
@@ -306,7 +306,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
     - The whisper CUDA backend plan's statements on a stop during a long load join the step, because they follow its final wording.
 - Landing:
   - The work starts after the whisper CUDA backend plan, `vibe/2026-09-28-2-whisper-cuda-backend.md`, closes.
-  - It lands on branch `whisper-cuda-backend`, in pull request #91, with no push to cppalliance/promptforge.
+  - It lands on branch `whisper-cuda-backend`, in pull request #91, with no push to cppalliance/runvil.
   - `/export-vibe-plan` runs before Step 1, and the plan's repository copy rides in Step 1's commit.
   - Both steps edit `vibe/2026-09-28-2-whisper-cuda-backend.md`, in disjoint passages, one after another.
   - Each step is one commit carrying its code, tests, and docs, and runs its focused tests from the Testing Plan before that commit.
@@ -330,7 +330,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - `guide/src/gateway/05-speech.md`, under "The runtime", says that on Windows `auto` counts a first entry that is not a device index, a `GPU-` or `MIG-` identifier included, as hiding every GPU, and that `cuda` restores GPU decoding for a valid identifier.
   - The same paragraph keeps the Linux rule, where an identifier counts as visible without being matched, and its Windows crash sentence names only an explicit `cuda`.
   - The `whisper_backend` row of `crates/gateway/app/README.md` and the commented `whisper_backend` lines of `gateway.local.example.toml` say the same.
-  - `guide/promptforge-gateway-guide.md` is regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md` is regenerated with `cargo run -p build-user-guide`.
   - In `vibe/2026-09-28-2-whisper-cuda-backend.md`, three statements take the Windows rule, and its completed steps stay as recorded:
     - the success criterion on `CUDA_VISIBLE_DEVICES` hiding every GPU;
     - the Functional Specification bullet on when `CUDA_VISIBLE_DEVICES` leaves a GPU visible;
@@ -346,7 +346,7 @@ Surveyed at `a13f1ed2` (`Close plan: whisper-cuda-backend`) on `whisper-cuda-bac
   - `cargo test --locked -p gateway-local --lib artifacts::` passes.
   - With the Windows toolchain, `cargo clippy --locked -p gateway-local --all-targets --all-features -- -D warnings`, `cargo fmt --all --check`, and `cargo xtask site --books-only` pass.
   - Windows end to end, before the commit, on this Windows NVIDIA machine with the scratch scripts in `vibe/scratch/run-36900875610/scripts/`:
-    - The Windows scratch clone `vibe/scratch/pf-e2e` moves to the branch head, and `win-env.sh`'s HEAD guard, now `36409119`, names that commit.
+    - The Windows scratch clone `vibe/scratch/rv-e2e` moves to the branch head, and `win-env.sh`'s HEAD guard, now `36409119`, names that commit.
     - `win-prepare.sh`, with `STEP_PATCH` set to this step's diff, points the Windows CPU row at run 36900875610's archive and builds the headless release gateway.
     - `win_gateway.py`'s `hidden` section sets `CUDA_VISIBLE_DEVICES` to `GPU-00000000` in place of `-1`, and its docstring line says so.
     - `win_gateway.py hidden`, with `WIN_GATEWAY_LABEL=db1` so earlier logs stay, boots `b4938-windows-x86_64`, and every stop exits 0, the visible-GPU control stops included.

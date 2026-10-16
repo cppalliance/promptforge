@@ -4,8 +4,8 @@
 //!
 //! Clippy reads the nearest `.clippy.toml` or `clippy.toml` walking up from
 //! a crate's manifest directory and never merges it with the root file. So
-//! `crates/promptforge-internal/clippy.toml` binds the six internal crates,
-//! `crates/promptforge/clippy.toml` and `crates/promptforge-plugin/clippy.toml`
+//! `crates/runvil-internal/clippy.toml` binds the six internal crates,
+//! `crates/runvil/clippy.toml` and `crates/runvil-plugin/clippy.toml`
 //! bind the two root crates, and each repeats the root file's settings and
 //! `disallowed-methods` entries before banning the std calls that sleep,
 //! read the clock, wait with a timeout, or seed a hasher from the OS. The
@@ -31,9 +31,9 @@ use proc_macro2::TokenStream;
 
 /// The Engine `clippy.toml` files, relative to the workspace root.
 const ENGINE_CLIPPY_TOMLS: [&str; 3] = [
-    "crates/promptforge-internal/clippy.toml",
-    "crates/promptforge/clippy.toml",
-    "crates/promptforge-plugin/clippy.toml",
+    "crates/runvil-internal/clippy.toml",
+    "crates/runvil/clippy.toml",
+    "crates/runvil-plugin/clippy.toml",
 ];
 
 /// The file names clippy looks for in each directory, in its order.

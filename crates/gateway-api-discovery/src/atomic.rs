@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The suffix on every atomic-write temp file.
-const TEMP_SUFFIX: &str = ".pf-tmp";
+const TEMP_SUFFIX: &str = ".rv-tmp";
 
 /// Process-wide counter making each temp name unique, so two concurrent
 /// writes to the same target never interleave inside one temp file: each

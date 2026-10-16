@@ -13,9 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use serde::{Deserialize, Serialize};
 
-use promptforge::Prompt;
-use promptforge::plugins::PluginId;
-use promptforge::prompt::{ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole};
+use runvil::Prompt;
+use runvil::plugins::PluginId;
+use runvil::prompt::{ArgDecl, ArgsDecl, FileDecl, Frontmatter, ModelKeyword, ModelRole};
 
 use crate::error::AppError;
 
@@ -43,8 +43,8 @@ struct ContractResponse {
     name: String,
     /// The one-line description shown in listings.
     description: String,
-    /// The Engine major the `promptforge:` key declares; `null` when absent.
-    promptforge: Option<u32>,
+    /// The Engine major the `runvil:` key declares; `null` when absent.
+    runvil: Option<u32>,
     /// The declared tool-loop cap; `null` for the runtime default.
     max_tool_iterations: Option<u32>,
     /// The declared input file; `null` when absent.
@@ -189,7 +189,7 @@ impl From<&Frontmatter> for ContractResponse {
         Self {
             name: frontmatter.name().to_owned(),
             description: frontmatter.description().to_owned(),
-            promptforge: frontmatter.promptforge(),
+            runvil: frontmatter.runvil(),
             max_tool_iterations: frontmatter
                 .max_tool_iterations()
                 .map(std::num::NonZeroU32::get),

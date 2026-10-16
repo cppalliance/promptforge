@@ -62,14 +62,14 @@ const WORKER_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 pub struct ServeOptions {
     /// Path to the single global configuration file. `None` runs boot
     /// discovery (beside the executable, the working directory, the user
-    /// profile's `.promptforge` directory) and, when nothing is found,
+    /// profile's `.runvil` directory) and, when nothing is found,
     /// first-run generation into the profile location.
     pub config_path: Option<PathBuf>,
     /// Optional command-line profile override.
     pub profile: Option<ProfileName>,
     /// Directory the `gateway.json` gateway discovery file is written to after a
     /// successful bind; `None` uses the default run directory under the
-    /// user profile's `.promptforge` directory.
+    /// user profile's `.runvil` directory.
     pub run_dir: Option<PathBuf>,
     /// Opens the Settings handoff URL in the default browser once the
     /// listener is bound - the binary's `--browser`, used by the
@@ -97,7 +97,7 @@ impl ServeOptions {
     }
 
     /// Sets the gateway discovery file's run directory, for tests and portable
-    /// installs; the default is the user profile's `.promptforge/run`.
+    /// installs; the default is the user profile's `.runvil/run`.
     #[must_use]
     pub fn with_run_dir(mut self, run_dir: PathBuf) -> ServeOptions {
         self.run_dir = Some(run_dir);
@@ -309,7 +309,7 @@ fn load_startup(options: &ServeOptions) -> Result<(Config, ProfilesContext), Sta
     let config_path = crate::boot::resolve_boot_config(options.config_path.clone())
         .map_err(StartupError::boot)?;
     load_env_file(&config_path.with_extension("env"));
-    let environment = std::env::var("PROMPTFORGE_PROFILE").ok();
+    let environment = std::env::var("RUNVIL_PROFILE").ok();
     load_startup_with_environment(&config_path, options, environment.as_deref())
 }
 

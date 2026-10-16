@@ -24,7 +24,7 @@ use axum::http::header::COOKIE;
 use axum::http::{HeaderMap, HeaderName};
 
 /// The cookie holding the session proof for browser sessions.
-pub(crate) const AUTH_COOKIE: &str = "promptforge-gateway-session";
+pub(crate) const AUTH_COOKIE: &str = "runvil-gateway-session";
 
 /// The `Sec-Fetch-Site` header name; the locked `http` crate has no
 /// constant for it.

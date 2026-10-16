@@ -209,7 +209,7 @@ test("the README keeps safe inline HTML and sanitizes XSS after rendering", asyn
 });
 
 test("README frontmatter cannot select gray-matter's JavaScript engine", async () => {
-  const marker = "__promptforgeFrontmatterExecuted";
+  const marker = "__runvilFrontmatterExecuted";
   delete globalThis[marker];
   const stub = discoverStub({
     readme: [

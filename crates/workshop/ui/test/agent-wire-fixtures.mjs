@@ -38,7 +38,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-wire-fixtures-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-wire-fixtures-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, AgentSocket, AGENT_FRAME_GUARDS } = await import(
   pathToFileURL(bundlePath).href

@@ -9,8 +9,8 @@ use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use plugin_user_input::{INPUT_BROKER, InputBroker};
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use tokio::sync::broadcast;
@@ -226,7 +226,7 @@ async fn a_registry_cancel_fails_the_broker_call_and_emits_cancelled() {
     assert_eq!(error.to_string(), "the user-input wait was cancelled");
     assert_eq!(
         error.kind(),
-        promptforge::tools::ToolErrorKind::Backend,
+        runvil::tools::ToolErrorKind::Backend,
         "the ask call fails as a backend failure"
     );
     let frame = socket.recv().await.expect("the cancellation frame arrives");
@@ -264,7 +264,7 @@ async fn an_ask_is_answered_when_the_registry_receives_the_text() {
     // calls the user-input Plugin's ask tool, the tool waits on the
     // conversation's broker, the registry completes the wait with the
     // operator's text, and the answer resumes the run to its result.
-    let source = "---\nname: ask\ndescription: asks the operator\npromptforge: 0\n\
+    let source = "---\nname: ask\ndescription: asks the operator\nrunvil: 0\n\
                   plugins:\n  - user-input\n---\n\n\
                   # Ask\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
     let mut packages = PackageRegistry::new();

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use harness_runner::effect_loop::drive_run;
 use harness_runner::prepare::prepare;
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
-use promptforge::cancel::CancelHandle;
-use promptforge_plugin::{
+use runvil::cancel::CancelHandle;
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
     ToolId, ToolOutput,
 };
@@ -22,7 +22,7 @@ const WRITTEN: &str = "written through the context";
 
 /// A prompt calling the fixture tool by id from the section's script and
 /// returning its answer beside the file it wrote.
-const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\npromptforge: 0\n\
+const CALLS_RECORD: &str = "---\nname: calls-record\ndescription: d\nrunvil: 0\n\
     plugins:\n  - context\n---\n\n\
     # Title\n\n## Only\n\n```lua\nlocal caller = tools.call('context/record')\n\
     return caller .. '|' .. store.read('from-tool.md')\n```\n";

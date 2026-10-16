@@ -1,5 +1,5 @@
 //! workshop-gateway - the gateway subsystem: the bearer-authenticated
-//! HTTP client for the PromptForge gateway's OpenAI-compatible API
+//! HTTP client for the Runvil gateway's OpenAI-compatible API
 //! (`client`), the replaceable endpoint binding (`binding`) and
 //! discovery-file resolution (`resolve`), the reachability heartbeat
 //! (`heartbeat`), the catalog and profile refresh the heartbeat and the

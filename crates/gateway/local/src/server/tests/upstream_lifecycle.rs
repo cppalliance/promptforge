@@ -145,7 +145,7 @@ fn recover_if_dead_is_a_noop_for_a_live_but_unreachable_child() {
 
 #[test]
 fn local_upstream_shutdown_kills_child_and_disables_respawn() {
-    // PFGL-MOD-001/PF-GW-SERVER-004: an explicit shutdown terminates the child
+    // RVGL-MOD-001/RV-GW-SERVER-004: an explicit shutdown terminates the child
     // and prevents any later transport failure from respawning it.
     use crate::upstream::LocalUpstream;
     use gateway_protocol::upstream::Upstream;
@@ -236,7 +236,7 @@ fn local_upstream_shutdown_kills_child_and_disables_respawn() {
 
 #[test]
 fn switch_shutdown_terminates_an_in_flight_respawned_child() {
-    // PFGL-MOD-001/PF-GW-SERVER-004: a shutdown concurrent with an in-flight
+    // RVGL-MOD-001/RV-GW-SERVER-004: a shutdown concurrent with an in-flight
     // recovery/respawn must cancel the respawn and terminate the freshly spawned
     // child, so no old child can outlive a profile switch.
     use crate::upstream::LocalUpstream;

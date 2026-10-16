@@ -1,0 +1,407 @@
+//! The yield shims installed on a scheduler-mode section VM produce
+//! well-formed protocol requests: `models.infer`, `call`, `tasks.fanout`, and
+//! `tools.call` in their id and tool-object forms, the local tool
+//! handshake, the loop's batch and its requesting turn, a model handle's
+//! `infer` method, and the `infer` and `loop` methods a model handle
+//! carries.
+
+use runvil_types::ids::TaskOrigin;
+use runvil_types::metrics::ToolCallEvent;
+use serde_json::json;
+
+use crate::execute::protocol::{
+    Answer, ChatOutcome, ChatResult, LocalToolOutcome, Request, SpawnVia, ToolCallOutcome, VfsOp,
+    VfsOutcome, YieldParse,
+};
+use crate::model::ModelSet;
+
+use super::{
+    parse_request, resume_with, scheduler_vm, scheduler_vm_with_tools, start, test_models,
+    test_tools, yielded_request,
+};
+
+#[test]
+fn models_infer_yields_a_well_formed_request() {
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    match yielded_request(&vm, r#"return models.infer("summarize this")"#) {
+        Request::Infer { prompt, binding } => {
+            assert_eq!(prompt, "summarize this");
+            assert_eq!(binding, None);
+        }
+        other => panic!("expected an infer request, got {other:?}"),
+    }
+}
+
+#[test]
+fn call_yields_target_input_and_the_var_snapshot() {
+    let var = json!({ "k": 1 });
+    let vm = scheduler_vm(&ModelSet::default(), Some(&var));
+    match yielded_request(&vm, r###"return call("## Child", "override")"###) {
+        Request::Call { target, input, var } => {
+            assert_eq!(target, "## Child");
+            assert_eq!(input.as_deref(), Some("override"));
+            assert_eq!(var, json!({ "k": 1 }));
+        }
+        other => panic!("expected a call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
+    // The fanout shim is Lua over the task protocol: its first yield is the
+    // `spawn` of the first member, including the worker as the target, the
+    // member as the `item` seed, its 1-based position as `index`, the
+    // caller's `var` snapshot, the author origin, and the fanout mark.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    match yielded_request(
+        &vm,
+        r####"return tasks.fanout("### Worker", {"a", "b"})"####,
+    ) {
+        Request::Spawn {
+            target,
+            input,
+            item,
+            index,
+            var,
+            origin,
+            via,
+        } => {
+            assert_eq!(target, "### Worker");
+            assert_eq!(input, None);
+            assert_eq!(item, Some(json!("a")));
+            assert_eq!(index, Some(1));
+            assert_eq!(var, json!({}));
+            assert_eq!(origin, TaskOrigin::Author);
+            assert_eq!(via, SpawnVia::Fanout, "an arm's spawn sets the fanout mark");
+        }
+        other => panic!("expected a spawn request, got {other:?}"),
+    }
+}
+
+#[test]
+fn fanout_rejects_an_empty_collection_before_any_spawn() {
+    // The empty-collection guard runs in the shim before the first spawn
+    // yield, so the call fails at the call site with the fixed message and
+    // the driver never sees a request.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (kind, message): (String, String) = vm
+        .lua()
+        .load(
+            "local ok, err = pcall(tasks.fanout, '### Worker', {})\n\
+             assert(not ok, 'an empty collection must fail')\n\
+             return err.kind, tostring(err)",
+        )
+        .call(())
+        .expect("the rejection is a pcall-able error table");
+    assert_eq!(kind, "lua");
+    assert_eq!(
+        message,
+        "tasks.fanout over an empty collection: no work is likely a bug"
+    );
+}
+
+#[test]
+fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
+    let var = json!({ "k": 1 });
+    let vm = scheduler_vm(&ModelSet::default(), Some(&var));
+    let source =
+        r###"return tasks.spawn("## Child", { input = "in", item = { name = "a" }, index = 2 })"###;
+    match yielded_request(&vm, source) {
+        Request::Spawn {
+            target,
+            input,
+            item,
+            index,
+            var,
+            origin,
+            via,
+        } => {
+            assert_eq!(target, "## Child");
+            assert_eq!(input.as_deref(), Some("in"));
+            assert_eq!(item, Some(json!({ "name": "a" })));
+            assert_eq!(index, Some(2));
+            assert_eq!(var, json!({ "k": 1 }));
+            assert_eq!(origin, TaskOrigin::Author);
+            assert_eq!(via, SpawnVia::Spawn, "`tasks.spawn` is not a fanout arm");
+        }
+        other => panic!("expected a spawn request, got {other:?}"),
+    }
+}
+
+#[test]
+fn tasks_spawn_resumes_with_a_methodless_task_table() {
+    // The shim wraps the resumed id in `{ task = id }`: a plain table with
+    // no metatable and no methods, so a handle stored in `var` survives
+    // the serde boundary unchanged.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (thread, _yielded) = start(
+        &vm,
+        "local t = tasks.spawn('## Child')\n\
+         return t.task, getmetatable(t) == nil, next(t, 'task') == nil",
+    );
+    let (id, methodless, single_field): (String, bool, bool) = thread
+        .resume((true, "0.3"))
+        .expect("the shim returns the task table");
+    assert_eq!(id, "0.3");
+    assert!(methodless, "the task table is a plain table");
+    assert!(single_field, "the task table holds exactly one field");
+}
+
+#[test]
+fn tasks_spawn_rejects_non_table_options_at_the_call_site() {
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (kind, message): (String, String) = vm
+        .lua()
+        .load(
+            "local ok, err = pcall(tasks.spawn, '## Child', 5)\n\
+             assert(not ok, 'a non-table opts argument must fail')\n\
+             return err.kind, tostring(err)",
+        )
+        .call(())
+        .expect("the rejection is a pcall-able error table");
+    assert_eq!(kind, "lua");
+    assert_eq!(message, "tasks.spawn opts must be a table, got integer");
+}
+
+#[test]
+fn tools_call_yields_a_well_formed_request() {
+    // The tools.call shim installs in section VMs through the same setup
+    // path as the other suspending calls; its yield parses into the
+    // protocol's ToolCall variant with the author's args as JSON.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    match yielded_request(&vm, r#"return tools.call("tools/echo", { value = "hi" })"#) {
+        Request::ToolCall {
+            alias,
+            args,
+            call_id,
+            turn,
+        } => {
+            assert_eq!(alias, "tools/echo");
+            assert_eq!(args, json!({ "value": "hi" }));
+            assert_eq!(call_id, None, "a script call leaves the call id unset");
+            assert_eq!(turn, None, "a script call leaves the turn unset");
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_local_tool_handler_runs_inside_the_block_coroutine() {
+    // The two-yield handshake end to end: the `tool_call` yield, the
+    // `Local` answer handing over the handler, the handler's own `store`
+    // yield from inside the same coroutine, the `local_tool_done` yield
+    // carrying its return, and the block's return with the answered text.
+    // `jump` is refused while the handler runs and back afterward.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (thread, yielded) = start(
+        &vm,
+        "local withheld\n\
+         tools.offer_local('grab', 'Grab a value', { value = 'string' }, function(args)\n\
+           local ok, err = pcall(jump, '## Other')\n\
+           withheld = not ok\n\
+             and tostring(err):find('jump is unavailable inside a local tool handler', 1, true) ~= nil\n\
+           store.write('grab.txt', args.value)\n\
+           return 'stored ' .. args.value\n\
+         end)\n\
+         local out = tools.call('grab', { value = 'hi' })\n\
+         return out .. '|' .. tostring(withheld) .. '|' .. tostring(jump ~= nil)",
+    );
+    match parse_request(&vm, yielded) {
+        Request::ToolCall { alias, call_id, .. } => {
+            assert_eq!(alias, "grab");
+            assert_eq!(call_id, None);
+        }
+        other => panic!("the block's first yield is the tool call, got {other:?}"),
+    }
+    let yielded = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallResult(Ok(ToolCallOutcome::Local {
+            alias: "grab".to_owned(),
+            args: json!({ "value": "hi" }),
+        })),
+    );
+    match parse_request(&vm, yielded) {
+        Request::Store {
+            op: VfsOp::Write { path, contents },
+        } => {
+            assert_eq!(path, "grab.txt");
+            assert_eq!(contents, "hi");
+        }
+        other => panic!("the handler's store call yields from the block, got {other:?}"),
+    }
+    let yielded = resume_with(&vm, &thread, Answer::Store(Ok(VfsOutcome::Unit)));
+    match parse_request(&vm, yielded) {
+        Request::LocalToolDone {
+            outcome: LocalToolOutcome::Returned(text),
+        } => assert_eq!(text, "stored hi"),
+        other => panic!("the handler's return is reported, got {other:?}"),
+    }
+    let returned = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallResult(Ok(ToolCallOutcome::Plain("stored hi".to_owned()))),
+    );
+    let text: String = vm
+        .lua()
+        .unpack(
+            returned
+                .into_iter()
+                .next()
+                .expect("the block returns a value"),
+        )
+        .expect("the block returns a string");
+    assert_eq!(text, "stored hi|true|true");
+}
+
+#[test]
+fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
+    // A round requesting two calls under turn 7: one `tool_calls` yield
+    // carries both calls and that turn, so each call reports the round
+    // that requested it however far the counter moved in between.
+    let vm = scheduler_vm_with_tools(&test_models(), &test_tools(), None);
+    let (thread, yielded) = start(
+        &vm,
+        "local msgs = messages.new()\nmsgs:user('hi')\nmodels.loop(msgs)\nreturn #msgs",
+    );
+    assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
+    let call = |id: &str| ToolCallEvent::new(id, "tools_echo", json!({ "value": id }));
+    let round = ChatResult {
+        outcome: ChatOutcome::ToolCalls(vec![call("c1"), call("c2")]),
+        finish_reason: Some("tool_calls".to_owned()),
+        turn: 7,
+    };
+    let yielded = resume_with(&vm, &thread, Answer::Chat(Ok(Box::new(round))));
+    match parse_request(&vm, yielded) {
+        Request::ToolCalls { calls, turn } => {
+            let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
+            let args: Vec<serde_json::Value> =
+                calls.iter().map(|call| call.arguments.clone()).collect();
+            assert_eq!(ids, ["c1", "c2"]);
+            assert_eq!(args, [json!({ "value": "c1" }), json!({ "value": "c2" })]);
+            assert_eq!(turn, 7, "the batch carries the requesting round's turn");
+        }
+        other => panic!("the loop yields the round's calls, got {other:?}"),
+    }
+    let yielded = resume_with(
+        &vm,
+        &thread,
+        Answer::ToolCallsResult(Ok(vec!["echoed".to_owned(), "echoed".to_owned()])),
+    );
+    assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
+}
+
+#[test]
+fn the_bare_tool_call_global_is_not_installed() {
+    // Every tool operation lives under the `tools.*` namespace; the bare
+    // global from before the rename must be gone, not aliased.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let is_nil: bool = vm
+        .lua()
+        .load("return tool_call == nil")
+        .eval()
+        .expect("the global read evaluates");
+    assert!(is_nil, "the bare `tool_call` global must not exist");
+}
+
+#[test]
+fn tools_call_accepts_a_tool_object_in_place_of_the_id() {
+    // A tool object stands for its canonical id; passing it as the leading
+    // argument dispatches the tool it names.
+    let vm = scheduler_vm_with_tools(&ModelSet::default(), &test_tools(), None);
+    match yielded_request(
+        &vm,
+        r#"return tools.call(tools.get("tools/echo"), { value = "hi" })"#,
+    ) {
+        Request::ToolCall { alias, args, .. } => {
+            assert_eq!(alias, "tools/echo");
+            assert_eq!(args, json!({ "value": "hi" }));
+        }
+        other => panic!("expected a tool_call request, got {other:?}"),
+    }
+}
+
+#[test]
+fn tools_call_rejects_a_first_argument_that_is_neither_a_string_nor_a_tool() {
+    // The polymorphism is a string (a tool id or a local alias) or a tool
+    // object; anything else is the call's own error at the protocol
+    // boundary, so an author pcall catches it at the call site.
+    let vm = scheduler_vm(&ModelSet::default(), None);
+    let (_thread, yielded) = start(&vm, "return tools.call(42, {})");
+    let value = yielded.into_iter().next().expect("one yielded value");
+    match Request::from_yield(vm.lua(), &value) {
+        YieldParse::Call(answer) => {
+            let message = format!("{answer:?}");
+            assert!(
+                message.contains("tools.call takes a tool id, a local alias, or a tool object"),
+                "the rejection names the expected forms: {message}"
+            );
+        }
+        other => panic!("expected the call's own error, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_handles_infer_runs_on_its_frozen_binding() {
+    let vm = scheduler_vm(&test_models(), None);
+    let request = yielded_request(
+        &vm,
+        r#"
+            local h = models.get("fast")
+            local u = models.use("fast")
+            assert(h.name == "fast" and h.model_id == "test-model")
+            assert(u.name == "fast")
+            return h:infer("yo")
+            "#,
+    );
+    match request {
+        Request::Infer {
+            prompt,
+            binding: Some(binding),
+        } => {
+            assert_eq!(prompt, "yo");
+            assert_eq!(binding.alias(), "fast");
+            assert_eq!(binding.id().name(), "test-model");
+        }
+        other => panic!("expected an infer request with a binding, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_handle_from_models_get_infers_without_a_proxy() {
+    let vm = scheduler_vm(&test_models(), None);
+    match yielded_request(&vm, r#"return models.get("fast"):infer("yo")"#) {
+        Request::Infer {
+            prompt,
+            binding: Some(binding),
+        } => {
+            assert_eq!(prompt, "yo");
+            assert_eq!(binding.alias(), "fast");
+        }
+        other => panic!("expected an infer request with a binding, got {other:?}"),
+    }
+}
+
+#[test]
+fn model_handles_carry_infer_and_loop_methods() {
+    // A model handle stays a frozen, inspectable userdata whose `infer`
+    // and `loop` fields read the shim's methods; a field the handle does
+    // not have still fails to read.
+    let vm = scheduler_vm(&test_models(), None);
+    let (is_userdata, methods, read_failed): (bool, String, bool) = vm
+        .lua()
+        .load(
+            r#"
+            local h = models.get("fast")
+            local ok = pcall(function() return h.nothing end)
+            return type(h) == "userdata",
+              type(h.infer) .. "|" .. type(h.loop),
+              not ok
+            "#,
+        )
+        .eval()
+        .expect("the handle probe evaluates");
+    assert!(is_userdata, "handles install as bare userdata");
+    assert_eq!(methods, "function|function");
+    assert!(read_failed, "a handle has no `nothing` field to read");
+}

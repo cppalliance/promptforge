@@ -14,22 +14,22 @@ import {
 test("maps the Windows target to Tauri's suffixed executable name", () => {
   assert.equal(
     gatewaySidecarName("x86_64-pc-windows-msvc"),
-    "promptforge-gateway-x86_64-pc-windows-msvc.exe",
+    "runvil-gateway-x86_64-pc-windows-msvc.exe",
   );
   assert.equal(
     gatewayBinaryName("x86_64-pc-windows-msvc"),
-    "promptforge-gateway.exe",
+    "runvil-gateway.exe",
   );
 });
 
 test("maps the Linux target to Tauri's suffix without an extension", () => {
   assert.equal(
     gatewaySidecarName("x86_64-unknown-linux-gnu"),
-    "promptforge-gateway-x86_64-unknown-linux-gnu",
+    "runvil-gateway-x86_64-unknown-linux-gnu",
   );
   assert.equal(
     gatewayBinaryName("x86_64-unknown-linux-gnu"),
-    "promptforge-gateway",
+    "runvil-gateway",
   );
 });
 
@@ -39,10 +39,10 @@ test("maps every valid non-Windows target without an extension", () => {
     "x86_64-apple-darwin",
     "aarch64-unknown-linux-gnu",
   ]) {
-    assert.equal(gatewayBinaryName(target), "promptforge-gateway");
+    assert.equal(gatewayBinaryName(target), "runvil-gateway");
     assert.equal(
       gatewaySidecarName(target),
-      `promptforge-gateway-${target}`,
+      `runvil-gateway-${target}`,
     );
   }
 });
@@ -50,7 +50,7 @@ test("maps every valid non-Windows target without an extension", () => {
 test("maps other valid Windows targets with an executable extension", () => {
   assert.equal(
     gatewaySidecarName("x86_64-pc-windows-gnu"),
-    "promptforge-gateway-x86_64-pc-windows-gnu.exe",
+    "runvil-gateway-x86_64-pc-windows-gnu.exe",
   );
 });
 
@@ -59,14 +59,14 @@ test("rejects a malformed target triple", () => {
 });
 
 test("rejects a missing source binary", () => {
-  const root = mkdtempSync(join(tmpdir(), "promptforge-sidecar-"));
+  const root = mkdtempSync(join(tmpdir(), "runvil-sidecar-"));
   try {
     assert.throws(
       () =>
         stageGatewaySidecar({
           root,
           target: "x86_64-pc-windows-msvc",
-          source: join(root, "target", "debug", "promptforge-gateway.exe"),
+          source: join(root, "target", "debug", "runvil-gateway.exe"),
         }),
       /source binary does not exist/,
     );
@@ -76,8 +76,8 @@ test("rejects a missing source binary", () => {
 });
 
 test("rejects a source binary whose platform name mismatches the target", () => {
-  const root = mkdtempSync(join(tmpdir(), "promptforge-sidecar-"));
-  const source = join(root, "target", "debug", "promptforge-gateway");
+  const root = mkdtempSync(join(tmpdir(), "runvil-sidecar-"));
+  const source = join(root, "target", "debug", "runvil-gateway");
   try {
     mkdirSync(join(root, "target", "debug"), { recursive: true });
     writeFileSync(source, "linux gateway");
@@ -88,7 +88,7 @@ test("rejects a source binary whose platform name mismatches the target", () => 
           target: "x86_64-pc-windows-msvc",
           source,
         }),
-      /source binary must be named promptforge-gateway\.exe/,
+      /source binary must be named runvil-gateway\.exe/,
     );
   } finally {
     rmSync(root, { force: true, recursive: true });
@@ -96,8 +96,8 @@ test("rejects a source binary whose platform name mismatches the target", () => 
 });
 
 test("stages and removes the real source file under Tauri's target name", () => {
-  const root = mkdtempSync(join(tmpdir(), "promptforge-sidecar-"));
-  const source = join(root, "target", "debug", "promptforge-gateway.exe");
+  const root = mkdtempSync(join(tmpdir(), "runvil-sidecar-"));
+  const source = join(root, "target", "debug", "runvil-gateway.exe");
   try {
     mkdirSync(join(root, "target", "debug"), { recursive: true });
     writeFileSync(source, "compiled gateway");
@@ -115,7 +115,7 @@ test("stages and removes the real source file under Tauri's target name", () => 
         "workshop",
         "desktop",
         "binaries",
-        "promptforge-gateway-x86_64-pc-windows-msvc.exe",
+        "runvil-gateway-x86_64-pc-windows-msvc.exe",
       ),
     );
     assert.equal(readFileSync(staged, "utf8"), "compiled gateway");

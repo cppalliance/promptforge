@@ -9,15 +9,15 @@ use async_trait::async_trait;
 use harness::record::MemoryRecorder;
 use harness::vfs::{Origin, VfsError, VfsRef};
 use harness::{Harness, HostSnapshot, RunRequest};
-use promptforge::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
-use promptforge_plugin::ToolError;
+use runvil::vfs::{MemoryBackend, Op, Policy, Verdict, VfsPath};
+use runvil_plugin::ToolError;
 
 use crate::asker::{AskBroker, asker_host, broker_services};
 use crate::support::{Clock, Offline};
 
 /// Reads the notes, asks the operator, and writes the approved notes.
 const REVIEW: &str = concat!(
-    "---\nname: review\ndescription: Reads the notes, then asks the operator\npromptforge: 0\n",
+    "---\nname: review\ndescription: Reads the notes, then asks the operator\nrunvil: 0\n",
     "plugins:\n  - user-input\n",
     "input: { path: notes.md, description: The operator's notes }\n",
     "output: { path: summary.md, description: The approved notes }\n",

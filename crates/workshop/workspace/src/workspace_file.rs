@@ -1,4 +1,4 @@
-//! The workspace file: the single Turso database (`.pfwork`) that mirrors
+//! The workspace file: the single Turso database (`.rvwork`) that mirrors
 //! the in-memory grant set and holds window state between sessions.
 //!
 //! This is the persistence seam of the workspace subsystem. The in-memory
@@ -49,7 +49,7 @@ const META_CREATED_AT: &str = "created_at";
 const KV_WINDOW: &str = "window";
 
 /// The value every workspace file stores under [`META_FORMAT`].
-const FORMAT_NAME: &str = "promptforge-workspace";
+const FORMAT_NAME: &str = "runvil-workspace";
 /// The schema version this build reads and writes, as both the `meta`
 /// text and the `user_version` pragma.
 const SUPPORTED_VERSION: &str = "1";
@@ -81,9 +81,9 @@ pub enum WorkspaceFileError {
         source: DatabaseSource,
     },
 
-    /// The file is not a PromptForge workspace: not a database, or a
+    /// The file is not a Runvil workspace: not a database, or a
     /// database without the `meta` stamp.
-    #[error("{} is not a promptforge workspace file", path.display())]
+    #[error("{} is not a runvil workspace file", path.display())]
     NotAWorkspace {
         /// The refused path.
         path: PathBuf,

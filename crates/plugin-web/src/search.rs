@@ -5,7 +5,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use promptforge_plugin::{ToolError, ToolErrorKind, ToolOutput};
+use runvil_plugin::{ToolError, ToolErrorKind, ToolOutput};
 
 use crate::provider::{SearchErrorKind, SearchProvider};
 

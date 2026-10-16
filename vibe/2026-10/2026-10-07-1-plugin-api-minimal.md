@@ -1,6 +1,6 @@
 ---
 name: Plugin API minimal
-overview: Introduce the Plugin contract crate `promptforge-plugin`, a Host-built `HostContext` that installs each Plugin explicitly and holds the Host-wide services, and per-run dispatch by Plugin name. Every usable Plugin's tools reach every run, and `tools.offered()` lets a section's Lua hand the tools of Plugins the prompt didn't declare to the model. Migrate `promptforge/web` and `promptforge/user-input` to `plugin-web` and `plugin-user-input`, and delete `harness-plugins`. Crate linking only, no DLL work.
+overview: Introduce the Plugin contract crate `runvil-plugin`, a Host-built `HostContext` that installs each Plugin explicitly and holds the Host-wide services, and per-run dispatch by Plugin name. Every usable Plugin's tools reach every run, and `tools.offered()` lets a section's Lua hand the tools of Plugins the prompt didn't declare to the model. Migrate `runvil/web` and `runvil/user-input` to `plugin-web` and `plugin-user-input`, and delete `harness-plugins`. Crate linking only, no DLL work.
 todos:
   - id: step-1-grammar
     content: "Step 1: one-segment PluginId and two-or-more-segment ToolId, the 53-file literal sweep, registry punctuation on one-segment names, regenerate public-api.txt, gates"
@@ -12,7 +12,7 @@ todos:
     content: "Step 3: ToolCallOrigin move, survives_stop wired through the old performer and the effect loop, event tool ids, Workshop ask recognition by the event's tool, Requirements.unavailable/missing_tools, named preludes, regenerate public-api.txt, gates"
     status: completed
   - id: step-4-contract
-    content: "Step 4: add promptforge-plugin, move service.rs, harness-plugins re-export bridge, structural-check updates, Cargo.lock and hakari, gates"
+    content: "Step 4: add runvil-plugin, move service.rs, harness-plugins re-export bridge, structural-check updates, Cargo.lock and hakari, gates"
     status: completed
   - id: step-5-host
     content: "Step 5: HostContext and HostRunContext, plugin-web and plugin-user-input, Workshop install wiring, delete harness-plugins and performers-tools.rs, fixture Plugins in Harness tests, Family::Plugin rules, Cargo.lock and hakari, gates"
@@ -36,11 +36,11 @@ Plugins live inside the Harness today, carry two-segment ids their authors fix, 
 
 - Problem and users:
   - Host authors, such as Workshop in this repository, install Plugins and give them services. Plugin authors write the Plugin crates. Prompt authors declare Plugins and tool slots in a prompt's frontmatter.
-  - `crates/harness-internal/plugins/` (package `harness-plugins`) holds the Plugin trait, per-run activation (`Plugin::create`, `Contribution`, `RunServices`, `activate`), `PluginRegistry`, the `Tool` trait, and the user-input Plugin. `crates/harness-web/` is a Harness crate. Plugin ids are fixed pairs such as `promptforge/web`, and tool ids are triples such as `promptforge/web/fetch`.
+  - `crates/harness-internal/plugins/` (package `harness-plugins`) holds the Plugin trait, per-run activation (`Plugin::create`, `Contribution`, `RunServices`, `activate`), `PluginRegistry`, the `Tool` trait, and the user-input Plugin. `crates/harness-web/` is a Harness crate. Plugin ids are fixed pairs such as `runvil/web`, and tool ids are triples such as `runvil/web/fetch`.
   - A run's catalog holds only the Plugins its prompt declares (`crates/harness-internal/plugins/src/activation.rs`, `activate`), so an agent such as Workshop's chat can't use a Plugin its prompt didn't anticipate.
-  - Tool-call and tool-result events record only the alias a call used, so a Host can't tell which tool ran. Workshop spots the operator's typed answer by matching the literal `promptforge/user-input/ask` (`crates/workshop/server/src/agents/wire.rs`), and the Harness's stop logic matches the same literal (`crates/harness-internal/runner/src/effect_loop.rs`).
+  - Tool-call and tool-result events record only the alias a call used, so a Host can't tell which tool ran. Workshop spots the operator's typed answer by matching the literal `runvil/user-input/ask` (`crates/workshop/server/src/agents/wire.rs`), and the Harness's stop logic matches the same literal (`crates/harness-internal/runner/src/effect_loop.rs`).
 - Terms, as this plan uses them. Engine, Harness, Host, and Plugin are capitalized defined terms in the root `AGENTS.md`, and these entries match it:
-  - **Engine:** the `promptforge` and `promptforge-*` crates. It parses a prompt and steps a run, and asks its caller for every model reply, tool result, timer, and file through effects. It performs no I/O and holds no Plugin code.
+  - **Engine:** the `runvil` and `runvil-*` crates. It parses a prompt and steps a run, and asks its caller for every model reply, tool result, timer, and file through effects. It performs no I/O and holds no Plugin code.
   - **Harness:** the `harness` and `harness-*` crates. It steps the Engine, performs every effect, and records the run. One `Harness` object serves one run.
   - **Host:** an application that runs prompts through the Harness, such as Workshop. It makes every policy decision.
   - **Plugin:** a named unit of tools, and optionally a Lua prelude, that the Host installs for its runs. After this work, a Plugin is one installed instance of a Package, under a local name.
@@ -54,7 +54,7 @@ Plugins live inside the Harness today, carry two-segment ids their authors fix, 
   - **Host-wide and per-run services:** two `HostServices` maps, which look up shared objects by a typed key. Host-wide services, such as the search provider, reach only a Package's `construct`. Per-run services, such as a conversation's input broker, reach only tool calls.
   - **Stop and cancel:** a stop drops the calls in flight, except those whose descriptor sets `survives_stop`, and lets the run go on. A cancel ends every call and the run.
 - Goals:
-  - A public contract crate, `promptforge-plugin`, that Plugin crates depend on instead of the Harness.
+  - A public contract crate, `runvil-plugin`, that Plugin crates depend on instead of the Harness.
   - A Host-built `HostContext` that installs each Plugin once, under a local name the Host chooses, and that every run shares.
   - One-segment Plugin names (`web`) and tool ids of two or more segments (`web/fetch`). The Harness dispatches a call by its tool id's first segment.
   - `plugin-web` and `plugin-user-input` replace `harness-web` and the user-input Plugin in `harness-plugins`, and `harness-plugins` is deleted.
@@ -67,12 +67,12 @@ Plugins live inside the Harness today, carry two-segment ids their authors fix, 
   - Every Exit criteria command in the Testing Plan passes at the end of each step.
   - Workshop's chat agent declares `web` and `user-input`, binds `web/fetch` and `web/search`, reaches the operator through `input.ask()`, opts in to the offering, and a stop leaves an open question open.
   - A prompt that doesn't declare an installed Plugin can call that Plugin's tools by full id, gets none of its prelude, and shows the model none of its tools unless its Lua adds them from `tools.offered()`.
-  - `harness-plugins` no longer exists, and no prompt, fixture, or code in the repository names a `promptforge/web/...` or `promptforge/user-input/...` id. The package names `promptforge/web` and `promptforge/user-input` remain.
+  - `harness-plugins` no longer exists, and no prompt, fixture, or code in the repository names a `runvil/web/...` or `runvil/user-input/...` id. The package names `runvil/web` and `runvil/user-input` remain.
 - Constraints:
-  - Repository `promptforge2` at `c:\Users\Vinnie\cursor\promptforge2`. Work happens on a branch named `plugin-api`, created from `upstream/master` at commit `3e917d209`. That commit already gives each tool call its own filesystem identity, forked from the calling chain's and ended when the call ends (`access_spawn` in `crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`).
+  - Repository `runvil2` at `c:\Users\Vinnie\cursor\runvil2`. Work happens on a branch named `plugin-api`, created from `upstream/master` at commit `3e917d209`. That commit already gives each tool call its own filesystem identity, forked from the calling chain's and ended when the call ends (`access_spawn` in `crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`).
   - Every path in this plan is relative to the repository root, including the targets of its Markdown links.
   - Crate linking only: a Plugin is a Rust crate the Host links and installs in code.
-  - `promptforge-plugin` is an Engine crate by name, and Engine crates may not depend on `tokio`, `tokio-util`, `async-trait`, or `reqwest` (`crates/build-xtask/src/engine_deps.rs`).
+  - `runvil-plugin` is an Engine crate by name, and Engine crates may not depend on `tokio`, `tokio-util`, `async-trait`, or `reqwest` (`crates/build-xtask/src/engine_deps.rs`).
   - The Host makes every policy decision: which Plugins are installed, under which names, and with which configuration and services.
   - The existing refusal line `- {plugin} needs {service}, and this host provides none` keeps its wording.
 - Open questions: None
@@ -143,9 +143,9 @@ flowchart BT
 
 - Modules and interfaces: each H3 below declares one module's public items and their behavior.
 - File and public API changes:
-  - New crates: `crates/promptforge-plugin/`, `crates/plugin-web/` (renamed from `crates/harness-web/`), and `crates/plugin-user-input/`.
+  - New crates: `crates/runvil-plugin/`, `crates/plugin-web/` (renamed from `crates/harness-web/`), and `crates/plugin-user-input/`.
   - Deleted: `crates/harness-internal/plugins/`, and `crates/harness-internal/runner/src/performers-tools.rs` (`ActivatedTools` and its `ToolTable`, which `HostRunContext` replaces).
-  - `crates/promptforge/public-api.txt` is regenerated in every step that changes the facade's surface: steps 1, 2, 3, and 6 at least. `xtask api --check` in the Exit criteria catches any other step that does.
+  - `crates/runvil/public-api.txt` is regenerated in every step that changes the facade's surface: steps 1, 2, 3, and 6 at least. `xtask api --check` in the Exit criteria catches any other step that does.
   - Steps 4 and 5 add workspace crates, so each updates `Cargo.lock` (one build without `--locked`) and runs `cargo hakari generate` and `cargo hakari manage-deps` before the gates.
 - Data, persistence, failure, security, and privacy constraints:
   - Events logged before this change still load: the new event fields are `Option`s with `#[serde(default, skip_serializing_if = "Option::is_none")]`, and `ToolDescriptor::survives_stop` uses `#[serde(default)]`.
@@ -158,9 +158,9 @@ flowchart BT
     - `call` is cancellation-aware: the Harness drops its future on a stop or cancel.
   - Comments inside the declaration blocks explain the declarations for review. Code gets doc comments in the repository's own style, not copies of these comments.
 
-### Plugin contract crate `promptforge-plugin`
+### Plugin contract crate `runvil-plugin`
 
-Location: `crates/promptforge-plugin/`. It's an Engine crate by name, is public, and depends on `promptforge-types`, `promptforge-vfs`, `serde_json`, and `workspace-hack`. It has no `async-trait`, so it passes the Engine manifest guard. Its `test-support` feature adds `testing::TestCall`, described under Boundary rules.
+Location: `crates/runvil-plugin/`. It's an Engine crate by name, is public, and depends on `runvil-types`, `runvil-vfs`, `serde_json`, and `workspace-hack`. It has no `async-trait`, so it passes the Engine manifest guard. Its `test-support` feature adds `testing::TestCall`, described under Boundary rules.
 
 `src/lib.rs`:
 
@@ -179,12 +179,12 @@ pub use service::{HostServices, ServiceError, ServiceId, ServiceKey};
 
 // Names defined in the Engine's types crate and the filesystem crate, passed
 // through so a Plugin author never has to find or depend on those crates.
-pub use promptforge_types::plugins::{PluginId, PluginIdError, PluginIdErrorKind};
-pub use promptforge_types::tools::{
+pub use runvil_types::plugins::{PluginId, PluginIdError, PluginIdErrorKind};
+pub use runvil_types::tools::{
     OutputTrust, ToolCallOrigin, ToolCaller, ToolDescriptor, ToolError, ToolErrorKind, ToolId,
     ToolIdError, ToolIdErrorKind, ToolOutput,
 };
-pub use promptforge_vfs::{Access, Entry, FileType, PathReason, Stat, VfsError};
+pub use runvil_vfs::{Access, Entry, FileType, PathReason, Stat, VfsError};
 ```
 
 `src/plugin.rs`. `call`, the one async method, returns a boxed future with a single lifetime, and an implementation wraps its body in `Box::pin(async move { ... })`. Native `async fn` in traits can't be used here, because the Harness holds Plugins as `dyn Plugin`. `#[async_trait]` can't be used on an implementation either, because the macro's expansion uses different lifetime parameters than this trait:
@@ -240,7 +240,7 @@ pub trait Plugin: Send + Sync {
 // `Clone, Copy` because it is a few pointers and cheap to duplicate.
 #[derive(Clone, Copy)]
 pub struct Package {
-    pub name: &'static str,            // "vendor/name", such as "promptforge/web"
+    pub name: &'static str,            // "vendor/name", such as "runvil/web"
     pub prelude: Option<&'static str>, // Lua run for each prompt that declares the Plugin, if any
     pub needs: &'static [ServiceId],   // per-run services its tools read; a run without them can't use the Plugin
     // The build function: a plain function with no hidden state, which
@@ -301,11 +301,11 @@ impl<'a> ToolContext<'a> {
 }
 ```
 
-`src/service.rs` moves from [crates/harness-internal/plugins/src/service.rs](crates/harness-internal/plugins/src/service.rs), with `ServiceId`, `ServiceKey<T>`, `HostServices::{new, provide, get, provides}`, and `ServiceError` unchanged. Only two things change: the `GlobalName` import comes from `promptforge_types` instead of the `promptforge` facade, and the module docs stop linking `Plugin::needs` and `RunServices`. `provide` keeps its own check that an id literal has exactly one `/`, so service ids stay two-segment after `GlobalName` accepts any count. `HostServices` is a map from a service name (such as `promptforge/input-broker`) to a shared object. A Host fills two of them: the Host-wide map it gives `HostContext::new`, read only by `construct`, and each Harness's per-run map, read only by calls.
+`src/service.rs` moves from [crates/harness-internal/plugins/src/service.rs](crates/harness-internal/plugins/src/service.rs), with `ServiceId`, `ServiceKey<T>`, `HostServices::{new, provide, get, provides}`, and `ServiceError` unchanged. Only two things change: the `GlobalName` import comes from `runvil_types` instead of the `runvil` facade, and the module docs stop linking `Plugin::needs` and `RunServices`. `provide` keeps its own check that an id literal has exactly one `/`, so service ids stay two-segment after `GlobalName` accepts any count. `HostServices` is a map from a service name (such as `runvil/input-broker`) to a shared object. A Host fills two of them: the Host-wide map it gives `HostContext::new`, read only by `construct`, and each Harness's per-run map, read only by calls.
 
 ### Engine type changes
 
-[crates/promptforge-internal/types/src/names.rs](crates/promptforge-internal/types/src/names.rs):
+[crates/runvil-internal/types/src/names.rs](crates/runvil-internal/types/src/names.rs):
 
 ```rust
 // The shared parser for slash-separated names such as `web` or `web/fetch`.
@@ -324,10 +324,10 @@ impl GlobalName {
 pub enum GlobalNameErrorKind { Empty, Control }         // removed: SegmentCount
 ```
 
-[crates/promptforge-internal/types/src/plugins.rs](crates/promptforge-internal/types/src/plugins.rs):
+[crates/runvil-internal/types/src/plugins.rs](crates/runvil-internal/types/src/plugins.rs):
 
 ```rust
-// Today a Plugin's id is two segments, `promptforge/web`, fixed by its author.
+// Today a Plugin's id is two segments, `runvil/web`, fixed by its author.
 // Now it is one segment that the Host picks at install, `web` by default.
 /// The local name a Host installs a Plugin under: one segment, such as `web`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -347,11 +347,11 @@ pub enum PluginIdErrorKind { SegmentCount, Empty, Control }       // SegmentCoun
 // Prelude: unchanged type; docs state the chunk receives the Plugin's name as `...`
 ```
 
-[crates/promptforge-internal/types/src/tools/ids.rs](crates/promptforge-internal/types/src/tools/ids.rs):
+[crates/runvil-internal/types/src/tools/ids.rs](crates/runvil-internal/types/src/tools/ids.rs):
 
 ```rust
 // A tool's routing name, such as `web/fetch`. Today it is three segments,
-// `promptforge/web/fetch`. The first segment says which Plugin gets the call,
+// `runvil/web/fetch`. The first segment says which Plugin gets the call,
 // and the rest is the Plugin's own name for the tool.
 /// A tool's identity: its Plugin's local name, then one or more segments the Plugin chooses.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -371,7 +371,7 @@ impl ToolId {
 pub enum ToolIdErrorKind { SegmentCount, Empty, Separator, Control }   // SegmentCount: fewer than two
 ```
 
-[crates/promptforge-internal/types/src/tools/descriptor.rs](crates/promptforge-internal/types/src/tools/descriptor.rs):
+[crates/runvil-internal/types/src/tools/descriptor.rs](crates/runvil-internal/types/src/tools/descriptor.rs):
 
 ```rust
 // Plain data describing one tool. The Engine shows it to a model and binds it
@@ -403,9 +403,9 @@ impl ToolDescriptor {
 }                                                                // removed: with_conflicts
 ```
 
-`ToolCallOrigin` and `ToolCaller` move verbatim from `engine/src/execute/run/effect.rs` to a new `types/src/tools/origin.rs`. `effect.rs` re-exports them, so the path `promptforge::effect::ToolCallOrigin` is unchanged.
+`ToolCallOrigin` and `ToolCaller` move verbatim from `engine/src/execute/run/effect.rs` to a new `types/src/tools/origin.rs`. `effect.rs` re-exports them, so the path `runvil::effect::ToolCallOrigin` is unchanged.
 
-[crates/promptforge-internal/types/src/metrics.rs](crates/promptforge-internal/types/src/metrics.rs), [crates/promptforge-internal/types/src/event.rs](crates/promptforge-internal/types/src/event.rs), and [crates/promptforge-internal/types/src/emitter.rs](crates/promptforge-internal/types/src/emitter.rs):
+[crates/runvil-internal/types/src/metrics.rs](crates/runvil-internal/types/src/metrics.rs), [crates/runvil-internal/types/src/event.rs](crates/runvil-internal/types/src/event.rs), and [crates/runvil-internal/types/src/emitter.rs](crates/runvil-internal/types/src/emitter.rs):
 
 ```rust
 // One call in a model's tool-call batch, as the event log records it. Today
@@ -441,12 +441,12 @@ impl Emitter {
 
 Where the Engine fills `tool`:
 
-- **[crates/promptforge-internal/engine/src/execute/scope.rs](crates/promptforge-internal/engine/src/execute/scope.rs):** `DispatchTarget::Bound` becomes `Bound(ToolId)`, taken from the binding it is built from (line 88).
-- **[crates/promptforge-internal/engine/src/execute/scheduler/chat.rs](crates/promptforge-internal/engine/src/execute/scheduler/chat.rs):** `tool_calls` sets each `ToolCallEvent::tool` from the round's `advertised` map: `Some` for a `Bound` target, `None` otherwise.
-- **[crates/promptforge-internal/lua/src/dispatch.rs](crates/promptforge-internal/lua/src/dispatch.rs):** both `tool_result` calls (lines 142 and 179) pass `Some(&binding.id)`.
-- **`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`** (Lua-local tools) and **`scheduler/builtins.rs`** beside it (task built-ins) pass `None`.
+- **[crates/runvil-internal/engine/src/execute/scope.rs](crates/runvil-internal/engine/src/execute/scope.rs):** `DispatchTarget::Bound` becomes `Bound(ToolId)`, taken from the binding it is built from (line 88).
+- **[crates/runvil-internal/engine/src/execute/scheduler/chat.rs](crates/runvil-internal/engine/src/execute/scheduler/chat.rs):** `tool_calls` sets each `ToolCallEvent::tool` from the round's `advertised` map: `Some` for a `Bound` target, `None` otherwise.
+- **[crates/runvil-internal/lua/src/dispatch.rs](crates/runvil-internal/lua/src/dispatch.rs):** both `tool_result` calls (lines 142 and 179) pass `Some(&binding.id)`.
+- **`crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`** (Lua-local tools) and **`scheduler/builtins.rs`** beside it (task built-ins) pass `None`.
 
-[crates/promptforge-internal/parser/src/build-frontmatter.rs](crates/promptforge-internal/parser/src/build-frontmatter.rs):
+[crates/runvil-internal/parser/src/build-frontmatter.rs](crates/runvil-internal/parser/src/build-frontmatter.rs):
 
 ```rust
 // A prompt's header block. Its `plugins:` list becomes plain names, such as
@@ -463,7 +463,7 @@ impl Frontmatter { pub fn plugins(&self) -> &[PluginId]; }
 // removed from contract.rs: PluginDecl, PluginDeclVisitor, parse_plugin_id, check_slot_plugins, declares
 ```
 
-[crates/promptforge-internal/engine/src/execute/requirements.rs](crates/promptforge-internal/engine/src/execute/requirements.rs):
+[crates/runvil-internal/engine/src/execute/requirements.rs](crates/runvil-internal/engine/src/execute/requirements.rs):
 
 ```rust
 // Every reason a run can't start. When any list is non-empty the run is
@@ -491,18 +491,18 @@ impl UnavailablePlugin { #[must_use] pub fn new(plugin: PluginId, reason: impl I
 
 The refusal notice gains the lines `- {plugin} is unavailable: {reason}` and `- missing tool: {tool}; {plugin} does not offer it`. `merge` also drops a `missing_required` entry whose Plugin is listed in `unavailable`.
 
-Behavior changes in [fill.rs](crates/promptforge-internal/engine/src/execute/fill.rs) and [lua/src/prelude.rs](crates/promptforge-internal/lua/src/prelude.rs):
+Behavior changes in [fill.rs](crates/runvil-internal/engine/src/execute/fill.rs) and [lua/src/prelude.rs](crates/runvil-internal/lua/src/prelude.rs):
 
 - If a slot's Plugin is present but the tool is missing, the tool is reported in `missing_tools` instead of the slot being left unbound.
 - A prelude chunk runs with `.call::<()>(plugin.to_string())` instead of `.exec()`.
 
-`promptforge-lua` `ToolBinding` (in [handles.rs](crates/promptforge-internal/lua/src/handles.rs)) drops `pub conflicts: Vec<PluginId>`.
+`runvil-lua` `ToolBinding` (in [handles.rs](crates/runvil-internal/lua/src/handles.rs)) drops `pub conflicts: Vec<PluginId>`.
 
 ### The offering: `tools.offered()`
 
-The Engine already binds every catalog tool under its full id for a script's `tools.call` and never advertises those bindings (`catalog_bindings` in [context-bound.rs](crates/promptforge-internal/engine/src/execute/context-bound.rs)). Once the catalog holds every usable Plugin's tools, the offering is a second set of bindings, under model-facing names, for the tools of Plugins the prompt doesn't declare. The existing lookups find them, so `tools.add`, the round's scope, model-call dispatch, call counts, and the event's `tool` all work unchanged.
+The Engine already binds every catalog tool under its full id for a script's `tools.call` and never advertises those bindings (`catalog_bindings` in [context-bound.rs](crates/runvil-internal/engine/src/execute/context-bound.rs)). Once the catalog holds every usable Plugin's tools, the offering is a second set of bindings, under model-facing names, for the tools of Plugins the prompt doesn't declare. The existing lookups find them, so `tools.add`, the round's scope, model-call dispatch, call counts, and the event's `tool` all work unchanged.
 
-[handles.rs](crates/promptforge-internal/lua/src/handles.rs):
+[handles.rs](crates/runvil-internal/lua/src/handles.rs):
 
 ```rust
 // The run's tool set gains the offering. Its bindings never become Lua
@@ -523,11 +523,11 @@ impl ToolSet {
 
 Where it is built and read:
 
-- **[context-bound.rs](crates/promptforge-internal/engine/src/execute/context-bound.rs) `bound_tool_set`** fills `offered`: every catalog tool whose `id.plugin()` is not in `Frontmatter::plugins`, bound with `ToolBinding::from_descriptor(name, tool)`, where `name` is the id with `/` and `.` replaced by `_` (`web/fetch` becomes `web_fetch`). It leaves out, with a log line, a name that equals a frontmatter tool alias or a task built-in name (`RESERVED_TOOL_NAMES` in `scheduler/tool_call.rs`), that isn't a legal model tool name (the check `tool_schema_new` makes), or that repeats an earlier one.
-- **Three lookups** check `binding`, then `offered_binding`: the `tools.add` check in [lua/src/tools.rs](crates/promptforge-internal/lua/src/tools.rs), `binding_for_scope` in [vm/state.rs](crates/promptforge-internal/lua/src/vm/state.rs), and `prepare_tool_call` in [scheduler/tool_call.rs](crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs), for both script and model calls.
-- **Unchanged on purpose:** `tools.always` and the `tools.add_local` duplicate check keep using `binding` alone. `prepare_scoped_tools` in [scope.rs](crates/promptforge-internal/engine/src/execute/scope.rs) leaves out an offered binding whose name a Lua-local tool also uses, so the local tool wins.
+- **[context-bound.rs](crates/runvil-internal/engine/src/execute/context-bound.rs) `bound_tool_set`** fills `offered`: every catalog tool whose `id.plugin()` is not in `Frontmatter::plugins`, bound with `ToolBinding::from_descriptor(name, tool)`, where `name` is the id with `/` and `.` replaced by `_` (`web/fetch` becomes `web_fetch`). It leaves out, with a log line, a name that equals a frontmatter tool alias or a task built-in name (`RESERVED_TOOL_NAMES` in `scheduler/tool_call.rs`), that isn't a legal model tool name (the check `tool_schema_new` makes), or that repeats an earlier one.
+- **Three lookups** check `binding`, then `offered_binding`: the `tools.add` check in [lua/src/tools.rs](crates/runvil-internal/lua/src/tools.rs), `binding_for_scope` in [vm/state.rs](crates/runvil-internal/lua/src/vm/state.rs), and `prepare_tool_call` in [scheduler/tool_call.rs](crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs), for both script and model calls.
+- **Unchanged on purpose:** `tools.always` and the `tools.add_local` duplicate check keep using `binding` alone. `prepare_scoped_tools` in [scope.rs](crates/runvil-internal/engine/src/execute/scope.rs) leaves out an offered binding whose name a Lua-local tool also uses, so the local tool wins.
 
-Lua surface, in [lua/src/tools.rs](crates/promptforge-internal/lua/src/tools.rs) and [tools/decode.rs](crates/promptforge-internal/lua/src/tools/decode.rs):
+Lua surface, in [lua/src/tools.rs](crates/runvil-internal/lua/src/tools.rs) and [tools/decode.rs](crates/runvil-internal/lua/src/tools/decode.rs):
 
 - **`tools.offered()`** returns a fresh list of plain records `{ id, name, plugin, description }`, one per offered binding, in id order.
 - **Records in `tools.add` and `tools.call`:** a table with a string `name` field is one record and stands for that name. Any other table is a list whose elements are aliases, Tool handles, or records. `tool_alias` reads a record's `name`, so `tools.call(record, args)` works through the same decode.
@@ -680,11 +680,11 @@ Facade [harness/src/lib.rs](crates/harness/src/lib.rs):
 // their own dependencies.
 pub mod plugin {
     pub use harness_runner::{HostContext, InstallError};
-    pub use promptforge_plugin::{HostServices, PluginId};
+    pub use runvil_plugin::{HostServices, PluginId};
 }
 // removed: USER_INPUT_ASK_TOOL and every other harness_plugins re-export,
 // and the ToolCallOrigin and ToolCaller re-exports, which callers take from
-// promptforge::effect
+// runvil::effect
 ```
 
 ### Plugins
@@ -694,7 +694,7 @@ pub mod plugin {
 ```rust
 // The web Plugin crate's public face. PACKAGE is the only thing the Host
 // needs; it has no prelude and needs no per-run services.
-pub const PACKAGE: Package = Package { name: "promptforge/web", prelude: None, needs: &[], construct };
+pub const PACKAGE: Package = Package { name: "runvil/web", prelude: None, needs: &[], construct };
 // Runs once at install and builds the shared Web object.
 fn construct(name: &PluginId, config: Value, services: &HostServices) -> Result<Arc<dyn Plugin>, ToolError>;
 // The Plugin object: its tool list and the two tools.
@@ -723,7 +723,7 @@ A Plugin crate has three parts:
 
 ```rust
 pub const PACKAGE: Package = Package {
-    name: "promptforge/web",
+    name: "runvil/web",
     prelude: None,
     needs: &[],
     construct,
@@ -742,10 +742,10 @@ fn construct(
     // Fetch the two shared objects the Host must provide, or fail naming the
     // missing one. The `?` returns the error early.
     let provider = services.get(&SEARCH_PROVIDER).ok_or_else(|| {
-        ToolError::message("web needs promptforge/search-provider, and this host provides none")
+        ToolError::message("web needs runvil/search-provider, and this host provides none")
     })?;
     let runtime = services.get(&TOKIO_RUNTIME).ok_or_else(|| {
-        ToolError::message("web needs promptforge/tokio-runtime, and this host provides none")
+        ToolError::message("web needs runvil/tokio-runtime, and this host provides none")
     })?;
     // A small helper that makes `web/fetch` from "fetch", using whatever name
     // the Host installed the Plugin under.
@@ -841,12 +841,12 @@ Box::pin(async move {
 
 ```rust
 // The label. It has a prelude and needs the input broker for each run.
-pub const PACKAGE: Package = Package { name: "promptforge/user-input", prelude: Some(PRELUDE), needs: NEEDS, construct };
+pub const PACKAGE: Package = Package { name: "runvil/user-input", prelude: Some(PRELUDE), needs: NEEDS, construct };
 // The ask tool's last segment, so its full id is `<name>/ask`.
 pub const ASK: &str = "ask";
 // The typed key for the per-run input broker. The Host provides the broker
 // under it, and the tool reads it back with the same key.
-pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("promptforge/input-broker");
+pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("runvil/input-broker");
 // The Package's `needs`: a run without a broker can't use this Plugin.
 const NEEDS: &[ServiceId] = &[INPUT_BROKER.id()];
 // What the Host implements to deliver the person's answer. This crate may use
@@ -895,16 +895,16 @@ The ask tool is `{name}/ask`, with wire name `ask`, marked `.survives_stop(true)
 [product.rs](crates/build-xtask/src/product.rs):
 
 - Add `Family::Plugin` for crates named `plugin-*`.
-- A `plugin-*` crate may depend on `promptforge-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries only. `workspace-hack` must be named, because the matrix treats it as an unaffiliated workspace crate, as the Harness rule already does (`WORKSPACE_HACK`).
-- The matrix checks dev-dependencies too (`DEP_KINDS`), and keeps them in one flat list with normal ones, so a Plugin crate's tests get no extra dependency. A test needs `VfsRef` and `Origin` to build the `Access` a `ToolContext` borrows, and the contract re-exports neither, so `promptforge-plugin` gains a `test-support` feature, following the Engine crates' existing `test-support` features. It holds one item, `testing::TestCall`: it owns a fresh in-memory `Access`, a script origin, a `ToolId`, and `HostServices`, and lends a `ToolContext` through `context()`, the same shape as today's `harness-web/src/test_support.rs`. Plugin crates enable it in `[dev-dependencies]` only.
-- `promptforge`, Gateway, and Harness crates may not depend on `plugin-*`, dev-dependencies included. The one exception is `harness-gateway-client`, which implements web's `SearchProvider`. Harness tests therefore use fixture Plugins, and the real user-input prelude is covered end to end by Workshop's tests.
-- `PUBLIC_PROMPTFORGE` becomes `["promptforge", "promptforge-plugin"]`, and the Harness rule's error text names `promptforge-plugin` beside `promptforge` and `workspace-hack`.
+- A `plugin-*` crate may depend on `runvil-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries only. `workspace-hack` must be named, because the matrix treats it as an unaffiliated workspace crate, as the Harness rule already does (`WORKSPACE_HACK`).
+- The matrix checks dev-dependencies too (`DEP_KINDS`), and keeps them in one flat list with normal ones, so a Plugin crate's tests get no extra dependency. A test needs `VfsRef` and `Origin` to build the `Access` a `ToolContext` borrows, and the contract re-exports neither, so `runvil-plugin` gains a `test-support` feature, following the Engine crates' existing `test-support` features. It holds one item, `testing::TestCall`: it owns a fresh in-memory `Access`, a script origin, a `ToolId`, and `HostServices`, and lends a `ToolContext` through `context()`, the same shape as today's `harness-web/src/test_support.rs`. Plugin crates enable it in `[dev-dependencies]` only.
+- `runvil`, Gateway, and Harness crates may not depend on `plugin-*`, dev-dependencies included. The one exception is `harness-gateway-client`, which implements web's `SearchProvider`. Harness tests therefore use fixture Plugins, and the real user-input prelude is covered end to end by Workshop's tests.
+- `PUBLIC_RUNVIL` becomes `["runvil", "runvil-plugin"]`, and the Harness rule's error text names `runvil-plugin` beside `runvil` and `workspace-hack`.
 - `PUBLIC_HARNESS` drops `harness-web`.
-- `container_named_exception` returns a list, and `promptforge-internal` admits both `promptforge` and `promptforge-plugin`.
+- `container_named_exception` returns a list, and `runvil-internal` admits both `runvil` and `runvil-plugin`.
 
 Other `build-xtask` files:
 
-- **[engine_guards.rs](crates/build-xtask/src/engine_guards.rs):** `ENGINE_ROOT_CRATES` becomes `["promptforge", "promptforge-plugin"]`.
+- **[engine_guards.rs](crates/build-xtask/src/engine_guards.rs):** `ENGINE_ROOT_CRATES` becomes `["runvil", "runvil-plugin"]`.
 - **[tidy.rs](crates/build-xtask/src/tidy.rs):** `family_requires_marker` also covers `plugin-*`.
 - **`site.rs` and `tidy-wiring.rs`:** use the new crate names.
 
@@ -937,12 +937,12 @@ Each step lands with tests for the behavior it adds, and each step ends with eve
 - Regression, security, and performance:
   - Existing refusal text for missing Plugins and missing services stays identical.
   - Output trust handling is unchanged.
-  - `cargo test -p build-xtask` enforces the `plugin-*` family rules, the Engine guards over `promptforge-plugin`, and the `## Invariants` marker on the new crates.
+  - `cargo test -p build-xtask` enforces the `plugin-*` family rules, the Engine guards over `runvil-plugin`, and the `## Invariants` marker on the new crates.
 - Exit criteria: at the end of every step, these pass:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features` and `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, both with `CARGO_BUILD_WARNINGS=deny`, plus `cargo check -p gateway --no-default-features`.
   - `cargo fmt --all --check`.
-  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`, all with `RUSTDOCFLAGS="-D warnings"`. The last one is the only docs check over Workshop, which steps 2, 3, and 5 edit.
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`, all with `RUSTDOCFLAGS="-D warnings"`. The last one is the only docs check over Workshop, which steps 2, 3, and 5 edit.
   - `cargo +nightly-2026-09-05 xtask api --check`, the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`.
   - `cargo test -p build-xtask`.
   - `cargo hakari verify` and `cargo deny check`, which CI runs and which new crates can break.
@@ -969,10 +969,10 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
     - Declaring a Plugin does two things: it installs the Plugin's prelude, because a prelude defines Lua globals and so changes what a prompt's Lua can call, and it makes the Plugin required, so a prompt is refused before any Lua runs when the Plugin is missing. An undeclared Plugin's prelude never installs, so the set of globals never changes because the Host installed something.
     - Today's catalog holds only declared Plugins, so this is a deliberate change, not a side effect of `begin_run`.
   - The offering is the tools of the Plugins the prompt doesn't declare. The user: "anything that the prompt declares is explicitly part of the tool catalog ... all the plugins that it didn't declare, they go into an overflow bucket called offered." A broader version, every tool not bound to a slot, was set aside: it would put a declared Plugin's unslotted tools, such as chat's own ask tool, into `tools.add(tools.offered())`.
-  - `tools.offered()` lands in this work rather than later. It is small because the Engine already binds every catalog tool by full id for scripts (`catalog_bindings` in `crates/promptforge-internal/engine/src/execute/context-bound.rs`), and the existing scope, dispatch, and counting code finds offered bindings through one more lookup.
+  - `tools.offered()` lands in this work rather than later. It is small because the Engine already binds every catalog tool by full id for scripts (`catalog_bindings` in `crates/runvil-internal/engine/src/execute/context-bound.rs`), and the existing scope, dispatch, and counting code finds offered bindings through one more lookup.
   - An offered tool's model-facing name comes from its id (`/` and `.` become `_`), not from its descriptor's `wire_name`, so two installs of one package never share a name. Install already refuses Plugin names that differ only by punctuation.
   - The offering is fixed for the run. Two refinements wait for mid-run snapshot updates: reading the offering only when Lua first asks for it, and refreshing it between model turns so a Plugin added mid-run appears in a running conversation.
-  - Plugin crates test `call` through `promptforge-plugin`'s `test-support` feature rather than a dev-dependency on the facade, because the boundary matrix doesn't distinguish dependency kinds.
+  - Plugin crates test `call` through `runvil-plugin`'s `test-support` feature rather than a dev-dependency on the facade, because the boundary matrix doesn't distinguish dependency kinds.
   - web takes no JSON configuration yet, and `FetchConfig` becomes private to the crate.
   - `Plugin::call` returns a boxed future with one lifetime, `PluginFuture<'a, T>`, because `dyn Plugin` can't use `async fn` and Engine crates can't use `async-trait`. Each implementation wraps its body in `Box::pin(async move { ... })`.
   - The Host installs each Plugin explicitly, with one `install(plugin_x::PACKAGE, ...)` call per crate. That line is the reference that makes the compiler link the crate.
@@ -998,16 +998,16 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
   - Filling event tool ids through `ToolBindings::alias_id`: the scheduler's `tool_calls` receives only the round's dispatch map, so carrying the id on `DispatchTarget::Bound` is the smaller change. Revisit if `tool_calls` gains the run's bindings.
   - `install` returning `construct` errors, so a failed Plugin is merely missing: the refusal notice would lose the reason. Revisit if Hosts want startup to fail instead.
   - One shared type for `MissingService` and `UnavailablePlugin`: it saves one type but rewrites existing Engine types and merge rules. Revisit if a third entry of the same shape appears.
-  - The contract as a module of the `promptforge` facade: every Plugin would compile and see the whole Engine, and the Engine would export a contract it never uses. Revisit if the separate crate's structural rules prove costly.
+  - The contract as a module of the `runvil` facade: every Plugin would compile and see the whole Engine, and the Engine would export a contract it never uses. Revisit if the separate crate's structural rules prove costly.
   - web taking the runtime it is installed in (`Handle::try_current()`): the Host's choice of runtime would become implicit. Revisit never, unless the Host stops choosing runtimes.
   - Keeping `HostContext::package` and passing the `HostContext` into Workshop's event framing: the name `install` returns gives Workshop the same answer with a smaller API. Revisit when tool-call display needs a name-to-package lookup that Workshop's own map can't give.
   - A catalog of declared Plugins only, as today: it leaves the offering empty, and an agent could never use a Plugin its prompt didn't anticipate. Revisit never: the owner decided that every prompt receives every tool.
   - The offering as every tool not bound to a slot: chat declares user-input for its prelude, so `tools.add(tools.offered())` would hand the chat model its own ask tool. Revisit if a prompt needs a declared Plugin's unslotted tools exposed without a slot.
   - The descriptor's `wire_name` as the offered name: the Plugin picks it, so two installs of one package collide (web builds `web_fetch` under any name). Revisit if Plugins need to choose model-facing names.
   - `tools.offered()` in a later plan: it would leave the offering reachable only by full id from scripts, and the work is small. Revisit never.
-  - A dev-dependency on the `promptforge` facade for Plugin crate tests: the matrix keeps one flat dependency list, so allowing it for tests would allow it everywhere. Revisit if the matrix learns dependency kinds.
+  - A dev-dependency on the `runvil` facade for Plugin crate tests: the matrix keeps one flat dependency list, so allowing it for tests would allow it everywhere. Revisit if the matrix learns dependency kinds.
 - Assumptions, risks, and notes:
-  - `promptforge2` is on a detached HEAD at `3e917d209`, so the `plugin-api` branch must exist before the first commit.
+  - `runvil2` is on a detached HEAD at `3e917d209`, so the `plugin-api` branch must exist before the first commit.
   - Events logged before this change have no `tool`, so a script's ask in them renders as a plain tool result. Step 1's id change already breaks the old string match for them.
   - Service keys with a concrete type, such as `ServiceKey<Handle>` for the runtime, need the Host and plugin-web to link the same tokio crate. A second tokio version makes the service read as missing, not as the wrong type.
   - Workshop builds its `HostContext` where it builds its services today: once, in `AgentSessions::new`, which production reaches inside `runtime.block_on` (`crates/workshop/server/src/serve.rs`), so `TOKIO_RUNTIME` is present. Sync tests with no current runtime leave it out, and web is unavailable there, as today.
@@ -1016,7 +1016,7 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
 ### Deferred and Out of Scope
 
 - Deferred:
-  - Prompts in other repositories (`tools-public`) and the `promptforge-docs` guide still use `promptforge/web/...`. Revisit after this lands.
+  - Prompts in other repositories (`tools-public`) and the `runvil-docs` guide still use `runvil/web/...`. Revisit after this lands.
   - Plugin states and cleanup for MCP: a defaulted trait method that reports a Plugin as still starting or failed with a reason, and a defaulted async `shutdown`. Adding a defaulted method doesn't break existing Plugins. Revisit when an MCP Plugin is planned.
   - MCP shape, settled for later: one installed Plugin per MCP server. The Host reads its server list from its own settings and calls `install(plugin_mcp::PACKAGE, Some(server_name), server_json)` once per server, so tools are named like `github/create_issue` and prompts declare servers one at a time. Every server shares the package name, so tool-call display keys must include the server's local name. Revisit with MCP.
   - Tool-call display in Workshop. Revisit after this lands. It covers:
@@ -1024,7 +1024,7 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
     - a UI table of renderers keyed by it, with a one-call label, a group label such as "Read 3 files", and whether consecutive calls merge, plus today's generic card for anything not in the table;
     - folding consecutive mergeable calls into one expandable line;
     - optionally, a plain-English `title` that third-party tools supply.
-  - Change notification, waiting on Plugins that are still starting, snapshot updates attached to answers, refreshing the offering at turn boundaries, group paths, JSON configuration for web, package pins, and a public API listing for `promptforge-plugin`. Revisit with MCP, or when a Host needs one of them.
+  - Change notification, waiting on Plugins that are still starting, snapshot updates attached to answers, refreshing the offering at turn boundaries, group paths, JSON configuration for web, package pins, and a public API listing for `runvil-plugin`. Revisit with MCP, or when a Host needs one of them.
   - Ambient discovery: a build script that reads the Host's direct dependencies, with each Plugin crate declaring a `links` key and announcing itself. Revisit when a Host must install Plugins it doesn't name in code.
   - DLL Plugins: a C interface with JSON in and out, wrapped by an adapter package installed once per DLL. DLL Plugins get no Host services and no filesystem access. The user: "we might just have to settle for DLLs not being able to use host services". Revisit when a Plugin must ship outside the Host's build.
   - Workshop settings: a `plugins` table that gives each installed Plugin its name and JSON configuration. Revisit when Workshop needs a third Plugin or Plugin configuration.
@@ -1041,22 +1041,22 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
 ## Project Survey
 
 - Status: complete
-- Build command: `cargo build --locked` builds the workspace default member, package `gateway` in `crates/gateway/app` (binary `promptforge-gateway`), per `default-members` in `Cargo.toml`. The Workshop desktop app is opt-in: `cargo build --locked -p workshop` (CI first installs Tauri system packages on Linux and stages the gateway sidecar with `node tools/stage-gateway-sidecar.mjs stage --target <triple> --source <gateway binary>`), or the `cargo workshop` alias for the `crates/build-workshop` orchestrator (`.cargo/config.toml`). UI bundles reach `$OUT_DIR/ui-dist` through build scripts, so CI runs `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` before any build.
+- Build command: `cargo build --locked` builds the workspace default member, package `gateway` in `crates/gateway/app` (binary `runvil-gateway`), per `default-members` in `Cargo.toml`. The Workshop desktop app is opt-in: `cargo build --locked -p workshop` (CI first installs Tauri system packages on Linux and stages the gateway sidecar with `node tools/stage-gateway-sidecar.mjs stage --target <triple> --source <gateway binary>`), or the `cargo workshop` alias for the `crates/build-workshop` orchestrator (`.cargo/config.toml`). UI bundles reach `$OUT_DIR/ui-dist` through build scripts, so CI runs `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` before any build.
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; add `--test it` to target a crate's `tests/it` integration binary. Drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. Gateway process tests run as `cargo test --locked -p gateway --no-default-features --features test-fixtures --test it <test-name>` (`.github/workflows/ci.yml`). A single JS test file runs with `node --test <file>` from its package directory.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` (the three Workshop app crates without `--all-features`). Structural checks: `cargo test -p build-xtask`. Workshop JS packages: `npm test --workspace <ui|look|platform>` run from `crates/workshop`. Gateway config UI: `npm test` run from `crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` (`AGENTS.md`, `.github/workflows/ci.yml`). The workspace run includes `build-xtask`. CI also runs `npm run build --workspace ui` then `npm test --workspaces --if-present` in `crates/workshop`, and `npm run build` then `npm test` in `crates/gateway/config-ui/ui`; the Workshop boot tests load the gitignored built bundle in `crates/workshop/ui/dist/`, so any `npm test` run there, including the Exit criteria's, builds first. CI also runs Windows-only `cargo nextest run --locked -p workshop-workspace --all-features` and `cargo nextest run --locked -p workshop-server --features headless`.
 - Linter command: `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `CARGO_BUILD_WARNINGS=deny cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, plus the headless build-shape check `cargo check -p gateway --no-default-features`. Never add a standalone `cargo check --workspace` (`AGENTS.md`). TypeScript: `npm run typecheck --workspaces --if-present` in `crates/workshop` and `npm run typecheck` in `crates/gateway/config-ui/ui`. Supply chain: `cargo deny check`, `cargo hakari verify`, and CI also runs `cargo audit`.
 - Formatter check command: `cargo fmt --all --check` (`rustfmt.toml`; also the `.githooks/pre-commit` hook). No JS formatter found.
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus, with the same `RUSTDOCFLAGS`, `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (pin in `crates/build-xtask/src/api/toolchain.rs`; `--bless` updates the committed `crates/promptforge/public-api.txt`), then `cargo nextest run --locked -p build-xtask --run-ignored only` on the same nightly.
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus, with the same `RUSTDOCFLAGS`, `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (pin in `crates/build-xtask/src/api/toolchain.rs`; `--bless` updates the committed `crates/runvil/public-api.txt`), then `cargo nextest run --locked -p build-xtask --run-ignored only` on the same nightly.
 - Test placement and naming conventions:
-  - Unit tests live in `#[cfg(test)] mod tests`, either inline, in a sibling `<stem>-tests.rs` wired with `#[path = "<stem>-tests.rs"] mod tests;` (`crates/harness-internal/runner/src/environment.rs`), or in a `src/<module>/tests/` directory once there are three or more files (`crates/promptforge-internal/engine/src/execute/tests/`).
-  - Integration tests compile into one binary per crate at `tests/it/main.rs` with modules beside it (`crates/gateway/app/tests/it/`, `crates/harness-internal/runner/tests/it/`, every Workshop library crate that has them). `crates/harness` and `crates/promptforge` use `tests/suite/`. Prompt fixtures go in `tests/prompts/`, data in `tests/fixtures/`, and helpers in `tests/common/` or `tests/it/support/`.
+  - Unit tests live in `#[cfg(test)] mod tests`, either inline, in a sibling `<stem>-tests.rs` wired with `#[path = "<stem>-tests.rs"] mod tests;` (`crates/harness-internal/runner/src/environment.rs`), or in a `src/<module>/tests/` directory once there are three or more files (`crates/runvil-internal/engine/src/execute/tests/`).
+  - Integration tests compile into one binary per crate at `tests/it/main.rs` with modules beside it (`crates/gateway/app/tests/it/`, `crates/harness-internal/runner/tests/it/`, every Workshop library crate that has them). `crates/harness` and `crates/runvil` use `tests/suite/`. Prompt fixtures go in `tests/prompts/`, data in `tests/fixtures/`, and helpers in `tests/common/` or `tests/it/support/`.
   - Test names are snake_case sentences stating the behavior, such as `a_direct_launch_recovers_the_lease_from_a_terminated_owner`.
   - `clippy.toml` allows `unwrap` and `expect` only in tests. `build-xtask` fixtures that need rustdoc JSON are `#[ignore]`d on stable. `.config/nextest.toml` sets a 60s slow timeout and a `heavy` group for `gateway-stt` and `gateway-stt-backend-whisper`.
   - JS tests run under `node --test` over `test/**/*.mjs` and `src/**/*.test.mjs`.
 - Directory map:
-  - `crates/promptforge/`: the Engine facade, the family's one public crate; `public-api.txt` is the committed surface listing.
-  - `crates/promptforge-internal/`: private Engine crates `engine`, `lua`, `model-client`, `parser`, `types`, `vfs`.
+  - `crates/runvil/`: the Engine facade, the family's one public crate; `public-api.txt` is the committed surface listing.
+  - `crates/runvil-internal/`: private Engine crates `engine`, `lua`, `model-client`, `parser`, `types`, `vfs`.
   - `crates/harness/`, `crates/harness-gateway-client/`, `crates/harness-web/`: the public Harness crates. `crates/harness-internal/`: private `runner` and `plugins`.
   - `crates/gateway/`: the private gateway family: `app` (package `gateway`), `cloud-providers`, `config`, `config-ui` (TypeScript UI in `ui/`), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api` as package `gateway-stt`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/gateway-api-types/`, `crates/gateway-api-discovery/`: the gateway's public pair.
@@ -1065,8 +1065,8 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
   - `crates/build-*`: tooling. `build-xtask` (structural checks and the `api`, `tidy`, `site`, `new-crate` subcommands), `build-workshop` (`cargo workshop`), `build-ui`, `build-user-guide`, `build-llama-cuda`, `build-ceiling`. `crates/workspace-hack/` is the cargo-hakari crate (`.config/hakari.toml`).
   - `guide/`: user guide books, chrome, and landing page. `prompts/`: example prompts. `images/`: marketing and site assets. `tools/`: Node scripts for staging the gateway sidecar and a live TTS check. `vibe/`: plan records. `.github/workflows/`: CI and release workflows. `.githooks/`: pre-commit fmt; pre-push headless check, clippy, and `cargo deny`.
 - Component boundaries (enforced by `cargo test -p build-xtask` through `crates/build-xtask/src/product.rs` and `crates/build-xtask/src/tidy.rs`):
-  - Engine (`promptforge`, `promptforge-*`) depends on no gateway, Workshop, or Harness crate. Other families reach it only through `promptforge`, the one outside crate allowed into `crates/promptforge-internal/` besides the family itself.
-  - Harness (`harness`, `harness-*`) names only `promptforge` and `workspace-hack` outside its family, so no gateway, shared, Workshop, or `build-*` crate. Other crates reach it only through `harness`, `harness-gateway-client`, and `harness-web`. `crates/harness-internal/` is open only to the family's crates inside it and `harness`.
+  - Engine (`runvil`, `runvil-*`) depends on no gateway, Workshop, or Harness crate. Other families reach it only through `runvil`, the one outside crate allowed into `crates/runvil-internal/` besides the family itself.
+  - Harness (`harness`, `harness-*`) names only `runvil` and `workspace-hack` outside its family, so no gateway, shared, Workshop, or `build-*` crate. Other crates reach it only through `harness`, `harness-gateway-client`, and `harness-web`. `crates/harness-internal/` is open only to the family's crates inside it and `harness`.
   - Gateway (`gateway`, `gateway-*`) depends on no Engine, Workshop, or Harness crate. `crates/gateway/` is private to the family. Workshop crates may name only `gateway-api-types` and `gateway-api-discovery`. Within the family, the `crates/gateway/stt/` subsystem is reachable only through `gateway-stt`.
   - Workshop tiers: vocabulary crates (`workshop-protocol`, `workshop-registry`, `workshop-support`) name no Workshop crate; services (`workshop-gateway`, `workshop-menu`, `workshop-status`) name vocabulary only; features (`workshop-agents`, `workshop-run-log`, `workshop-user-state`, `workshop-workspace`) name vocabulary and services; `workshop-server` may name every lower tier. The desktop app `workshop` names only `workshop-server-api`, which names only `workshop-server`.
   - `shared-*` crates depend on no product crate. A Cargo cycle rejection means the design is wrong, not the graph (`AGENTS.md`).
@@ -1089,10 +1089,10 @@ Plugins are built once and shared, named by the Host, and reached by name. Every
 
 Seven components, in dependency order:
 
-1. Engine id grammar (step 1). First, because every later component speaks one-segment Plugin names and tool ids of two or more segments. The 53-file literal sweep and the registry's one-segment punctuation rule land here, so nothing still names `promptforge/web/...` as a Plugin or tool id.
+1. Engine id grammar (step 1). First, because every later component speaks one-segment Plugin names and tool ids of two or more segments. The 53-file literal sweep and the registry's one-segment punctuation rule land here, so nothing still names `runvil/web/...` as a Plugin or tool id.
 2. Removals (step 2). Conflicts, optional Plugins, and the `PluginDecl` map form go before anything new is added, so no later step has to decide what a failed optional Plugin means. They delete code on today's activation path and need nothing from `HostContext`.
 3. Engine additive Plugin surface (step 3). `survives_stop`, the event `tool` fields, `Requirements::unavailable` and `missing_tools`, the moved `ToolCallOrigin`, and named preludes are the Engine surface that `HostContext`, Workshop's ask recognition, and the Plugin crates consume. The stop flag and the event field each get their real consumer here, on today's activation path, so step 5 only changes where the ask id comes from.
-4. Plugin contract crate (step 4). Plugin crates and `HostContext` depend on `promptforge-plugin`, and the Engine does not. It re-exports `ToolCallOrigin` from its new home, so it follows step 3. Until step 5 deletes `harness-plugins`, that crate re-exports the moved service types so its callers keep compiling.
+4. Plugin contract crate (step 4). Plugin crates and `HostContext` depend on `runvil-plugin`, and the Engine does not. It re-exports `ToolCallOrigin` from its new home, so it follows step 3. Until step 5 deletes `harness-plugins`, that crate re-exports the moved service types so its callers keep compiling.
 5. Host install and name dispatch (step 5). Needs components 1 to 4. `HostContext`, `HostRunContext`, the Plugin crates, Workshop's install wiring, deleting `harness-plugins`, and the `plugin-*` boundary rules ship as one joint piece: no green intermediate exists in which Workshop's chat agent lacks both Plugins under Host-chosen names.
 6. The offering (step 6). The Engine and Lua work needs only a catalog, but the catalog holds undeclared Plugins only after step 5, and the runner test that proves the whole flow needs `HostContext`.
 7. Docs and invariants (step 7). Last; it describes the finished shape and rewrites every crate doc that still names activation, two-segment ids, or a declared-only catalog.
@@ -1108,16 +1108,16 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - Component: Engine id grammar
 - Placement: first. `HostContext`, the Plugin crates, prompts, and fixtures all need the new segment counts before any install-by-name work.
 - Construction: one piece built as one step. The parsers, the 53-file sweep, and the registry's one-segment punctuation check are one behavior: every test that parses a Plugin or tool id must pass together.
-- Grammar (`crates/promptforge-internal/types/src/`):
+- Grammar (`crates/runvil-internal/types/src/`):
   - `names.rs`: `GlobalName` keeps one or more segments; drop `namespace()`, `plugin()`, `plugin_prefix()`, and `GlobalNameErrorKind::SegmentCount`.
   - `plugins.rs`: `PluginId::parse` accepts exactly one segment; add `contains(&ToolId)` (the tool's first segment) and the crate-private `from_segment`; drop `namespace()`, `name()`, and `from_prefix()`. `PluginIdErrorKind::SegmentCount` means more than one segment.
   - `tools/ids.rs`: `ToolId::parse` requires two or more segments; `name()` is the last segment; `plugin()` is the first, as a `PluginId`. `ToolIdErrorKind::SegmentCount` means fewer than two.
-- Literal sweep: every path that `rg "promptforge/(web|user-input)"` finds outside `vibe/` and `target/` (53 files at `3e917d209`), including `crates/workshop/agents/agents/chat.md` and `prompts/research-person.md`, moves its Plugin and tool ids to `web`, `user-input`, `web/fetch`, `web/search`, and `user-input/ask`. Package-name prose, such as `crates/harness-gateway-client/Cargo.toml` and `crates/workshop/protocol/src/lib.rs`, keeps `promptforge/web` and `promptforge/user-input`. Service ids such as `promptforge/input-broker` are unchanged.
+- Literal sweep: every path that `rg "runvil/(web|user-input)"` finds outside `vibe/` and `target/` (53 files at `3e917d209`), including `crates/workshop/agents/agents/chat.md` and `prompts/research-person.md`, moves its Plugin and tool ids to `web`, `user-input`, `web/fetch`, `web/search`, and `user-input/ask`. Package-name prose, such as `crates/harness-gateway-client/Cargo.toml` and `crates/workshop/protocol/src/lib.rs`, keeps `runvil/web` and `runvil/user-input`. Service ids such as `runvil/input-broker` are unchanged.
 - `USER_INPUT_ASK_TOOL` in `crates/harness-internal/plugins/src/user_input.rs` becomes `user-input/ask`, and `effect_loop.rs` still matches that constant.
 - Registry (`crates/harness-internal/plugins/src/registry.rs`): the punctuation-twin refusal compares one-segment local names (`-`, `_`, `.`).
 - Frontmatter and parser call sites that assume two-segment Plugin ids move to one segment. `PluginDecl`, `optional`, and conflicts stay until step 2.
 - Tests: `PluginId`, `ToolId`, and `GlobalName` unit tests for the new segment rules, `contains`, `plugin()`, and `name()`; every updated fixture and prompt; registry punctuation twins on one-segment names.
-- Regenerate `crates/promptforge/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless`.
+- Regenerate `crates/runvil/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless`.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: grammar, sweep, registry punctuation, `public-api.txt`, and tests.
 
@@ -1130,13 +1130,13 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - Component: Removals
 - Placement: second. The parser and activation already speak one-segment ids after step 1. Removing `optional` before step 3 means an activation failure has one meaning when step 3 maps it into `unavailable`.
 - Construction: one piece built as one step. The Engine, parser, activation, and Workshop halves of `optional` and conflicts reference each other, so they go together.
-- Engine and Lua: `ToolDescriptor::conflicts` and `with_conflicts`; `Requirements::conflicts`, `PluginConflict`, and the conflict notice line; `ToolBinding::conflicts` (`crates/promptforge-internal/lua/src/handles.rs`).
-- Parser (`crates/promptforge-internal/parser/src/contract.rs`, `build-frontmatter.rs`, `parse.rs`): `PluginDecl`, `PluginDeclVisitor`, `parse_plugin_id`, `check_slot_plugins`, and `declares` go; `Frontmatter::plugins` becomes `Vec<PluginId>`. The map form (`ref`, `optional`, `config`) is refused with a parse error; nothing outside parser tests reads `config`.
+- Engine and Lua: `ToolDescriptor::conflicts` and `with_conflicts`; `Requirements::conflicts`, `PluginConflict`, and the conflict notice line; `ToolBinding::conflicts` (`crates/runvil-internal/lua/src/handles.rs`).
+- Parser (`crates/runvil-internal/parser/src/contract.rs`, `build-frontmatter.rs`, `parse.rs`): `PluginDecl`, `PluginDeclVisitor`, `parse_plugin_id`, `check_slot_plugins`, and `declares` go; `Frontmatter::plugins` becomes `Vec<PluginId>`. The map form (`ref`, `optional`, `config`) is refused with a parse error; nothing outside parser tests reads `config`.
 - Activation (`crates/harness-internal/plugins/src/activation.rs`, `plugin.rs`): `activate` iterates `PluginId`s, every declared Plugin is required, and the conflict pass and `Plugin::conflicts` go. Degraded activation goes too, because only an optional Plugin reaches it: `ServiceGap` and the path that activates a Plugin without a service it needs. A declared user-input without a broker is now always refused with the missing-service line, so its prelude's `connected` is always true until step 5 rewrites it. The `prepare-input.rs` cases for `input.connected()` returning false and for the fallback sentence are deleted here.
 - Workshop: `PluginDto` in `crates/workshop/server/src/routes/prompts.rs` and `RunContractPlugin` in `crates/workshop/ui/src/services/run-api.ts` drop `optional`, along with the checkbox row in `crates/workshop/ui/src/parts/run/run-rows.ts` that `optional` enabled.
 - Fixtures that use the map form or `optional: true` move to plain names:
-  - `crates/promptforge-internal/parser/src/contract/tests.rs` and `tests-plugins.rs`;
-  - `crates/promptforge/tests/suite/prompt.rs`;
+  - `crates/runvil-internal/parser/src/contract/tests.rs` and `tests-plugins.rs`;
+  - `crates/runvil/tests/suite/prompt.rs`;
   - `crates/harness-internal/plugins/tests/it/activation.rs`, `needs.rs`, and `preludes.rs`, and `crates/harness-internal/plugins/src/activation-tests.rs`;
   - `crates/harness-internal/runner/tests/it/prepare-input.rs` and `prepare-host-services.rs`;
   - `crates/workshop/server/src/routes/prompts-tests.rs`;
@@ -1144,7 +1144,7 @@ Before the first commit, the session that runs the steps creates branch `plugin-
   
   A test that pinned optional or conflict behavior is deleted with it. A search for `ref:` and `optional: true` in Rust, Markdown, and `.mjs` files outside `vibe/` and `target/` finds them all; matches in `.github/workflows/` and in `args` declarations are unrelated.
 - Tests: the map form is refused with a message naming the plain-name form; a declared Plugin whose activation yields nothing refuses the run.
-- Regenerate `crates/promptforge/public-api.txt`.
+- Regenerate `crates/runvil/public-api.txt`.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: removals, fixture updates, `public-api.txt`, and tests.
 
@@ -1157,17 +1157,17 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - Component: Engine additive Plugin surface
 - Placement: third. `HostContext`'s stop path, Workshop's ask framing, and the fill and refusal lines need these Engine fields before step 5. It comes after the removals so its API review sees only additions.
 - Construction: one piece built as one step. The descriptor flag, event fields, `Requirements`, fill, prelude argument, and `ToolCallOrigin` move share one public-API and test surface, and the stop flag and the event field each get their consumer in the same commit.
-- `ToolCallOrigin` and `ToolCaller`: move verbatim from `crates/promptforge-internal/engine/src/execute/run/effect.rs` to `crates/promptforge-internal/types/src/tools/origin.rs`. `crates/promptforge-internal/types/src/tools.rs` re-exports them beside its other items, so step 4 imports them as `promptforge_types::tools::{ToolCallOrigin, ToolCaller}`. `effect.rs` re-exports them, so `promptforge::effect::ToolCallOrigin` is unchanged.
-- `ToolDescriptor` (`crates/promptforge-internal/types/src/tools/descriptor.rs`): add `survives_stop` with `#[serde(default)]` and the builder `survives_stop(self, bool)`.
+- `ToolCallOrigin` and `ToolCaller`: move verbatim from `crates/runvil-internal/engine/src/execute/run/effect.rs` to `crates/runvil-internal/types/src/tools/origin.rs`. `crates/runvil-internal/types/src/tools.rs` re-exports them beside its other items, so step 4 imports them as `runvil_types::tools::{ToolCallOrigin, ToolCaller}`. `effect.rs` re-exports them, so `runvil::effect::ToolCallOrigin` is unchanged.
+- `ToolDescriptor` (`crates/runvil-internal/types/src/tools/descriptor.rs`): add `survives_stop` with `#[serde(default)]` and the builder `survives_stop(self, bool)`.
 - Stop flag, wired on today's path: `ToolPerformer` (`crates/harness-internal/runner/src/performers.rs`) gains `survives_stop(&self, tool: &ToolId) -> bool`; `ActivatedTools` (`crates/harness-internal/runner/src/performers-tools.rs`) answers it from its descriptors; the user-input ask tool overrides the provided `Tool::descriptor` method (`crates/harness-internal/plugins/src/tool.rs`) to add `.survives_stop(true)` in `crates/harness-internal/plugins/src/user_input.rs`; `crates/harness-internal/runner/src/effect_loop.rs` asks the performer instead of comparing with `USER_INPUT_ASK_TOOL`. The test performers in `crates/harness-internal/runner/tests/it/support.rs` and `performers.rs` implement the method.
 - Events: `ToolCallEvent::tool` and `Event::ToolResult::tool` as `Option<ToolId>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`; `Emitter::tool_result` gains `tool: Option<&ToolId>`.
-- Fill sites, under `crates/promptforge-internal/engine/src/execute/` unless named in full: `DispatchTarget::Bound(ToolId)` in `scope.rs`, taken from the binding it is built from; `scheduler/chat.rs` sets `ToolCallEvent::tool` from `advertised`; `crates/promptforge-internal/lua/src/dispatch.rs` passes `Some(&binding.id)` at both `tool_result` calls; Lua-local tools (`scheduler/tool_call.rs`) and task built-ins (`scheduler/builtins.rs`) pass `None`.
+- Fill sites, under `crates/runvil-internal/engine/src/execute/` unless named in full: `DispatchTarget::Bound(ToolId)` in `scope.rs`, taken from the binding it is built from; `scheduler/chat.rs` sets `ToolCallEvent::tool` from `advertised`; `crates/runvil-internal/lua/src/dispatch.rs` passes `Some(&binding.id)` at both `tool_result` calls; Lua-local tools (`scheduler/tool_call.rs`) and task built-ins (`scheduler/builtins.rs`) pass `None`.
 - Workshop ask recognition, wired on today's path: `crates/workshop/server/src/agents/wire.rs` frames a script's tool result (empty `tool_call_id`) as `user_message` when its `tool` equals the ask id, instead of matching the alias against `USER_INPUT_ASK_TOOL`. `AgentEvent::from_event` and `AgentEventFrame::new` take `ask: Option<&ToolId>`; `Inner` (`crates/workshop/server/src/agents.rs`) and `Attached` (`crates/workshop/server/src/agents/socket.rs`) hold the id, built here by parsing `USER_INPUT_ASK_TOOL`; `wire-tests.rs` and `socket_frames-tests.rs` in the same directory build events with a `tool`.
-- `Requirements` (`crates/promptforge-internal/engine/src/execute/requirements.rs`): add `unavailable: Vec<UnavailablePlugin>` and `missing_tools: Vec<ToolId>`, with the refusal lines `- {plugin} is unavailable: {reason}` and `- missing tool: {tool}; {plugin} does not offer it`. `merge` drops a `missing_required` entry whose Plugin is in `unavailable`.
+- `Requirements` (`crates/runvil-internal/engine/src/execute/requirements.rs`): add `unavailable: Vec<UnavailablePlugin>` and `missing_tools: Vec<ToolId>`, with the refusal lines `- {plugin} is unavailable: {reason}` and `- missing tool: {tool}; {plugin} does not offer it`. `merge` drops a `missing_required` entry whose Plugin is in `unavailable`.
 - `fill.rs`: a present Plugin missing a slotted tool reports it in `missing_tools`. In `harness-plugins`, an activation failure maps into `unavailable`, keeping its reason.
-- Preludes (`crates/promptforge-internal/lua/src/prelude.rs`): a prelude runs with `.call::<()>(plugin.to_string())` instead of `.exec()`, and the `Prelude` docs state that the chunk receives its Plugin's local name as `...`.
-- Tests: descriptor serde default; the stop tests pass with the flag in place of the constant; event fields set, `None`, and round-tripped; Workshop's ask framing by `tool`; `Requirements` notice lines and merge; fill missing-tool; prelude receives its name; the origin path unchanged at `promptforge::effect::ToolCallOrigin`.
-- Regenerate `crates/promptforge/public-api.txt`.
+- Preludes (`crates/runvil-internal/lua/src/prelude.rs`): a prelude runs with `.call::<()>(plugin.to_string())` instead of `.exec()`, and the `Prelude` docs state that the chunk receives its Plugin's local name as `...`.
+- Tests: descriptor serde default; the stop tests pass with the flag in place of the constant; event fields set, `None`, and round-tripped; Workshop's ask framing by `tool`; `Requirements` notice lines and merge; fill missing-tool; prelude receives its name; the origin path unchanged at `runvil::effect::ToolCallOrigin`.
+- Regenerate `crates/runvil/public-api.txt`.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: additive Engine changes, their consumers, `public-api.txt`, and tests.
 
@@ -1175,16 +1175,16 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 
 <step-4>
 
-### Step 4: Add the `promptforge-plugin` contract crate [completed]
+### Step 4: Add the `runvil-plugin` contract crate [completed]
 
 - Component: Plugin contract crate
-- Placement: fourth. `HostContext` and every `plugin-*` crate depend on it, and the Engine never does. It re-exports `ToolCallOrigin` from `promptforge-types`, where step 3 moved it. It ships alone so the contract surface can be reviewed before the Host migration.
+- Placement: fourth. `HostContext` and every `plugin-*` crate depend on it, and the Engine never does. It re-exports `ToolCallOrigin` from `runvil-types`, where step 3 moved it. It ships alone so the contract surface can be reviewed before the Host migration.
 - Construction: one piece built as one step. `Package`, `Plugin`, `PluginFuture`, `ToolContext`, `testing::TestCall`, and the moved `HostServices` are one API that a Plugin author links.
-- New crate `crates/promptforge-plugin/`: an Engine crate by name, depending on `promptforge-types`, `promptforge-vfs`, `serde_json`, and `workspace-hack`, with no `tokio`, `async-trait`, or `reqwest`. Modules `context`, `plugin`, `service`, and the `test-support`-gated `testing`, as in the Technical Design. `lib.rs` re-exports `ToolContext`, `Package`, `Plugin`, `PluginFuture`, `HostServices`, `ServiceError`, `ServiceId`, `ServiceKey`, and the Engine id, tool, and filesystem names listed there.
-- `service.rs`: moves from `crates/harness-internal/plugins/src/service.rs`, with its `GlobalName` import taken from `promptforge_types` and the module docs' links to `Plugin::needs` and `RunServices` removed.
+- New crate `crates/runvil-plugin/`: an Engine crate by name, depending on `runvil-types`, `runvil-vfs`, `serde_json`, and `workspace-hack`, with no `tokio`, `async-trait`, or `reqwest`. Modules `context`, `plugin`, `service`, and the `test-support`-gated `testing`, as in the Technical Design. `lib.rs` re-exports `ToolContext`, `Package`, `Plugin`, `PluginFuture`, `HostServices`, `ServiceError`, `ServiceId`, `ServiceKey`, and the Engine id, tool, and filesystem names listed there.
+- `service.rs`: moves from `crates/harness-internal/plugins/src/service.rs`, with its `GlobalName` import taken from `runvil_types` and the module docs' links to `Plugin::needs` and `RunServices` removed.
 - `Plugin::call` returns `PluginFuture<'a, _>` through `Box::pin(async move { ... })`, with no `async-trait`.
-- Workspace and structural checks: add the crate to the workspace and to root `[workspace.dependencies]`, with a `build.rs` running the `build-ceiling` check like other crates. In `crates/build-xtask/src/`, `ENGINE_ROOT_CRATES` (`engine_guards.rs`) and `PUBLIC_PROMPTFORGE` (`product.rs`) become `["promptforge", "promptforge-plugin"]`, `container_named_exception` (`product.rs`) returns a list so `promptforge-internal` admits both `promptforge` and `promptforge-plugin`, and the Harness rule's error text names `promptforge-plugin`. These land here because the bridge below needs a Harness crate to name `promptforge-plugin`.
-- Bridge: `harness-plugins` depends on `promptforge-plugin` and re-exports the moved service types, so Workshop, the runner, and `harness-web` keep compiling until step 5.
+- Workspace and structural checks: add the crate to the workspace and to root `[workspace.dependencies]`, with a `build.rs` running the `build-ceiling` check like other crates. In `crates/build-xtask/src/`, `ENGINE_ROOT_CRATES` (`engine_guards.rs`) and `PUBLIC_RUNVIL` (`product.rs`) become `["runvil", "runvil-plugin"]`, `container_named_exception` (`product.rs`) returns a list so `runvil-internal` admits both `runvil` and `runvil-plugin`, and the Harness rule's error text names `runvil-plugin`. These land here because the bridge below needs a Harness crate to name `runvil-plugin`.
+- Bridge: `harness-plugins` depends on `runvil-plugin` and re-exports the moved service types, so Workshop, the runner, and `harness-web` keep compiling until step 5.
 - Lockfile and hakari: update `Cargo.lock` with one build without `--locked`, then run `cargo hakari generate` and `cargo hakari manage-deps`.
 - Tests: `HostServices` provide, get, and wrong-type lookups; `ToolContext` getters; `TestCall` lends a working context; a fixture `Package` and `Plugin` with a `construct` and a `call`. No `HostContext` yet.
 - Verification: every Exit criteria command in the Testing Plan.
@@ -1208,10 +1208,10 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - `## Invariants` sections for `plugin-web` (carried from `harness-web`, with its crate name updated) and `plugin-user-input`, because the `plugin-*` marker rule lands in this step.
 - Workshop: `host_context` installs both Packages with `None` for the name and `Value::Null` for the configuration, and builds the ask id `<name>/ask` from the name the user-input install returns, replacing step 3's parse of `USER_INPUT_ASK_TOOL`; `Inner` (`crates/workshop/server/src/agents.rs`) holds `host` and `ask` in place of `plugins` and `services`, `harness_for` passes `Arc::clone(&host)` and `conversation.run_services()`, and `run_services` in `crates/workshop/agents/src/conversation-run.rs` replaces `services(base)`, as the Technical Design's Workshop section describes; imports move to `plugin_web` and `plugin_user_input`; the broker in `crates/workshop/agents/src/input-tool.rs` returns `ToolError` with kind `Backend`.
 - Callers: `harness-gateway-client`, `crates/harness/examples/run-prompt.rs`, the facade suite, and the runner's `tests/it`. Every Harness test that used the real `UserInput` switches to a shared fixture Plugin (ask tool with `survives_stop`, a prelude, a broker need, and a broker returning `ToolError`): `harness-stop.rs`, `harness-stop-timing.rs`, `prepare-input.rs`, and `prepare-host-services.rs` in `crates/harness-internal/runner/tests/it/`, and `host.rs` and `vfs.rs` in `crates/harness/tests/suite/`. Harness crates can't name `plugin-*`, dev-dependencies included.
-- Plugin crate tests: `plugin-web` and `plugin-user-input` enable `promptforge-plugin`'s `test-support` feature in `[dev-dependencies]` and build contexts with `testing::TestCall`. `harness-web`'s `test_support.rs` goes, and the fetch and search tests call the tools' inherent `call` directly.
-- Boundary rules (`crates/build-xtask/src/`): `Family::Plugin` for `plugin-*` crates and its dependency allow-list (`promptforge-plugin`, `shared-*`, `workspace-hack`, outside libraries); `promptforge`, Gateway, and Harness crates may not depend on `plugin-*`, except `harness-gateway-client`; `PUBLIC_HARNESS` drops `harness-web`; `family_requires_marker` (`tidy.rs`) covers `plugin-*`; `site.rs` and `tidy-wiring.rs` use the new crate names.
+- Plugin crate tests: `plugin-web` and `plugin-user-input` enable `runvil-plugin`'s `test-support` feature in `[dev-dependencies]` and build contexts with `testing::TestCall`. `harness-web`'s `test_support.rs` goes, and the fetch and search tests call the tools' inherent `call` directly.
+- Boundary rules (`crates/build-xtask/src/`): `Family::Plugin` for `plugin-*` crates and its dependency allow-list (`runvil-plugin`, `shared-*`, `workspace-hack`, outside libraries); `runvil`, Gateway, and Harness crates may not depend on `plugin-*`, except `harness-gateway-client`; `PUBLIC_HARNESS` drops `harness-web`; `family_requires_marker` (`tidy.rs`) covers `plugin-*`; `site.rs` and `tidy-wiring.rs` use the new crate names.
 - Lockfile and hakari: update `Cargo.lock` with one build without `--locked`, then run `cargo hakari generate` and `cargo hakari manage-deps`.
-- Regenerate `crates/promptforge/public-api.txt` if the facade changed.
+- Regenerate `crates/runvil/public-api.txt` if the facade changed.
 - Tests: install's default name, `InvalidPackage`, `NameTaken` (exact duplicate and punctuation twin), and construct failure stored as unavailable; `begin_run` dropping bad tools, hiding Plugins with unmet needs, putting an undeclared Plugin's tools in the catalog without its prelude, and prelude order; dispatch by first segment; `survives_stop`; `plugin-web` and `plugin-user-input` construct and call; Workshop's ask framing with the installed name; the stop integration fixtures; `cargo test -p build-xtask`.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: Host objects, Plugin crates, Workshop, the deletion, fixture Plugins, boundary rules, `Cargo.lock`, hakari changes, and tests.
@@ -1225,13 +1225,13 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - Component: The offering
 - Placement: sixth. The Engine and Lua work needs only a catalog and the declared Plugin list, but production catalogs hold undeclared Plugins only after step 5, and the runner test that proves the whole flow needs `HostContext`.
 - Construction: one piece built as one step. `ToolSet::offered`, the three lookups, the Lua function, and the record decode are one behavior that the Lua, Engine, and runner tests cover together.
-- `ToolSet` (`crates/promptforge-internal/lua/src/handles.rs`): add `offered`, `offered()`, and `offered_binding()`; `from_parts`, `for_test`, and `ToolView` gain the list.
-- `bound_tool_set` (`crates/promptforge-internal/engine/src/execute/context-bound.rs`): fill `offered` from the catalog tools whose Plugin `Frontmatter::plugins` doesn't list, named by id with `/` and `.` replaced by `_`, leaving out and logging a name that equals a frontmatter tool alias or a task built-in name (`RESERVED_TOOL_NAMES` in `crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`), isn't a legal model tool name (the check `tool_schema_new` makes, as `prepare_scoped_tools` in `scope.rs` uses it), or repeats an earlier one.
-- Lookups: `binding`, then `offered_binding`, in the `tools.add` check (`crates/promptforge-internal/lua/src/tools.rs`), `binding_for_scope` (`crates/promptforge-internal/lua/src/vm/state.rs`), and `prepare_tool_call` (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`). `tools.always` and the `tools.add_local` duplicate check stay on `binding`. `prepare_scoped_tools` (`crates/promptforge-internal/engine/src/execute/scope.rs`) leaves out an offered binding whose name a Lua-local tool also uses.
-- Lua: `tools.offered()` in `install_tools` (`crates/promptforge-internal/lua/src/tools.rs`); record decoding in `crates/promptforge-internal/lua/src/tools/decode.rs`, where a table with a string `name` field is one record and `tool_alias` reads it, so `tools.add` and `tools.call` both take records.
+- `ToolSet` (`crates/runvil-internal/lua/src/handles.rs`): add `offered`, `offered()`, and `offered_binding()`; `from_parts`, `for_test`, and `ToolView` gain the list.
+- `bound_tool_set` (`crates/runvil-internal/engine/src/execute/context-bound.rs`): fill `offered` from the catalog tools whose Plugin `Frontmatter::plugins` doesn't list, named by id with `/` and `.` replaced by `_`, leaving out and logging a name that equals a frontmatter tool alias or a task built-in name (`RESERVED_TOOL_NAMES` in `crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`), isn't a legal model tool name (the check `tool_schema_new` makes, as `prepare_scoped_tools` in `scope.rs` uses it), or repeats an earlier one.
+- Lookups: `binding`, then `offered_binding`, in the `tools.add` check (`crates/runvil-internal/lua/src/tools.rs`), `binding_for_scope` (`crates/runvil-internal/lua/src/vm/state.rs`), and `prepare_tool_call` (`crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`). `tools.always` and the `tools.add_local` duplicate check stay on `binding`. `prepare_scoped_tools` (`crates/runvil-internal/engine/src/execute/scope.rs`) leaves out an offered binding whose name a Lua-local tool also uses.
+- Lua: `tools.offered()` in `install_tools` (`crates/runvil-internal/lua/src/tools.rs`); record decoding in `crates/runvil-internal/lua/src/tools/decode.rs`, where a table with a string `name` field is one record and `tool_alias` reads it, so `tools.add` and `tools.call` both take records.
 - `crates/workshop/agents/agents/chat.md`: the Conversation section calls `tools.add(tools.offered())` before its loop.
 - Tests: the offering unit cases listed in the Testing Plan; the runner offering test with an undeclared fixture Plugin through `HostContext`; Workshop's chat tests still pass with the opt-in and an empty offering.
-- Regenerate `crates/promptforge/public-api.txt`.
+- Regenerate `crates/runvil/public-api.txt`.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: the offering, the chat opt-in, `public-api.txt`, and tests.
 
@@ -1244,9 +1244,9 @@ Before the first commit, the session that runs the steps creates branch `plugin-
 - Component: Docs and invariants
 - Placement: last. Step 5 fixes the crate names and the install shape, and step 6 the offering.
 - Construction: one piece built as one step. The root definition, the new crates' Invariants, and leftover activation, two-segment, and declared-only docs are one docs-claims and rustdoc surface. Earlier steps already fix any broken doc link, because the rustdoc gates deny warnings at every step; this step fixes prose that is still accurate Rust but wrong about behavior.
-- Root `AGENTS.md`: a Plugin is a `plugin-*` crate implementing `promptforge-plugin`, installed into a `HostContext` under a local name the Host chooses. Every run receives every usable Plugin's tools; declaring a Plugin installs its prelude and makes it required, and the prompt's Lua decides what the model sees.
-- Write the `## Invariants` section for `promptforge-plugin`, including the `Plugin::call` rules from the Technical Design, and bring the `plugin-web` and `plugin-user-input` sections in line with the finished shape.
-- Update the docs in `harness-runner`, the `harness` facade, `crates/harness-internal/runner/src/harness-control.rs` (a stop spares calls whose descriptor sets `survives_stop`), `promptforge-types`, and `promptforge-lua` (the `tools` namespace: `tools.offered()` and the record forms) that still describe activation, two-segment ids, or a declared-only catalog.
+- Root `AGENTS.md`: a Plugin is a `plugin-*` crate implementing `runvil-plugin`, installed into a `HostContext` under a local name the Host chooses. Every run receives every usable Plugin's tools; declaring a Plugin installs its prelude and makes it required, and the prompt's Lua decides what the model sees.
+- Write the `## Invariants` section for `runvil-plugin`, including the `Plugin::call` rules from the Technical Design, and bring the `plugin-web` and `plugin-user-input` sections in line with the finished shape.
+- Update the docs in `harness-runner`, the `harness` facade, `crates/harness-internal/runner/src/harness-control.rs` (a stop spares calls whose descriptor sets `survives_stop`), `runvil-types`, and `runvil-lua` (the `tools` namespace: `tools.offered()` and the record forms) that still describe activation, two-segment ids, or a declared-only catalog.
 - Tests: `npm test` in `crates/workshop/ui` (docs claims) and the rustdoc gates.
 - Verification: every Exit criteria command in the Testing Plan.
 - Commit: prose and Invariants only.

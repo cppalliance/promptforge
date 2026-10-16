@@ -21,7 +21,7 @@
 //! `Mcp-Session-Id`, or `Last-Event-Id`, which the client owns.
 //!
 //! Install does no I/O. It reads the Host's runtime from the Plugin
-//! contract's [`promptforge_plugin::TOKIO_RUNTIME`] service and starts one
+//! contract's [`runvil_plugin::TOKIO_RUNTIME`] service and starts one
 //! background task on it, which connects, runs the handshake, and lists
 //! every page of tools within two minutes. The Plugin's `ready` waits for
 //! that task, so a run sees the tools of a server that is still starting.
@@ -54,7 +54,7 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//! - May depend on: `runvil-plugin`, `shared-*` crates, and outside
 //!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
 //!   allow-list. Only [`PACKAGE`] is public.
 //! - Every output is untrusted.
@@ -72,7 +72,7 @@ mod server;
 
 use std::sync::Arc;
 
-use promptforge_plugin::{
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginId, ServiceKey, TOKIO_RUNTIME, ToolError,
 };
 use serde_json::Value;
@@ -84,12 +84,12 @@ use crate::server::{Server, State};
 
 /// The Plugin's label, which a Host adds to its package registry.
 ///
-/// Its name is `promptforge/mcp`. The Host installs it once per server,
+/// Its name is `runvil/mcp`. The Host installs it once per server,
 /// passing the server's `mcp.json` entry as the configuration, and
-/// provides the Plugin contract's [`promptforge_plugin::TOKIO_RUNTIME`]
+/// provides the Plugin contract's [`runvil_plugin::TOKIO_RUNTIME`]
 /// service. It has no prelude and needs no per-run service.
 pub const PACKAGE: Package =
-    Package::new("promptforge/mcp", construct).description("Tools from one MCP server");
+    Package::new("runvil/mcp", construct).description("Tools from one MCP server");
 
 /// The key `construct` reads the Host's runtime through.
 const RUNTIME: ServiceKey<Handle> = ServiceKey::new(TOKIO_RUNTIME);
@@ -109,7 +109,7 @@ fn construct(
     let home = std::env::home_dir().map(|dir| dir.to_string_lossy().into_owned());
     let entry = entry::parse(&config, &Vars { env: &env, home })?;
     let runtime = services.get(&RUNTIME).ok_or_else(|| {
-        ToolError::message("MCP needs promptforge/tokio-runtime, and this host provides none")
+        ToolError::message("MCP needs runvil/tokio-runtime, and this host provides none")
     })?;
     let (state, watching) = watch::channel(State::Starting);
     let connection = runtime.spawn(connect::run(

@@ -334,7 +334,7 @@ async fn a_lan_gateway_that_needs_a_restart_settles_with_the_notice() {
     let base_url = spawn_gateway(switch.merge(profile_routes(Some("main")))).await;
     let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     state.catalog().publish(vec![serde_json::json!(
-        {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        {"id": "test-model", "object": "model", "owned_by": "runvil"}
     )]);
     state.menu().set_gateway_reachable(true);
     state.menu().set_profiles(
@@ -410,7 +410,7 @@ async fn a_lan_gateway_deferring_no_profile_settles_with_the_unload_notice() {
     let base_url = spawn_gateway(switch.merge(profile_routes(Some("main")))).await;
     let (url, _state_dir, state) = spawn_session_server(&base_url).await;
     state.catalog().publish(vec![serde_json::json!(
-        {"id": "test-model", "object": "model", "owned_by": "promptforge"}
+        {"id": "test-model", "object": "model", "owned_by": "runvil"}
     )]);
     state.menu().set_gateway_reachable(true);
     state.menu().set_profiles(

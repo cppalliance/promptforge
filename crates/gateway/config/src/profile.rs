@@ -39,7 +39,7 @@ impl ProfileSelection {
         self.command_line.as_deref()
     }
 
-    /// Returns the `PROMPTFORGE_PROFILE` value, when supplied.
+    /// Returns the `RUNVIL_PROFILE` value, when supplied.
     #[must_use]
     pub fn environment(&self) -> Option<&str> {
         self.environment.as_deref()
@@ -131,7 +131,7 @@ pub(crate) fn resolve_selection(
             .map(|name| Some((SelectionSource::CommandLine, name)));
     }
     if let Some(value) = inputs.environment() {
-        return parse_selected_name(value, "PROMPTFORGE_PROFILE")
+        return parse_selected_name(value, "RUNVIL_PROFILE")
             .map(|name| Some((SelectionSource::Environment, name)));
     }
     let state_path = profile_state_path(config_path);

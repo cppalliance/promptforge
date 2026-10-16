@@ -126,7 +126,7 @@ console.error = (...args) => {
   consoleErrors.push(args.join(" "));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-editor-commands-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-editor-commands-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   editorCommands,

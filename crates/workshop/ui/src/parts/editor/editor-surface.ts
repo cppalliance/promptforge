@@ -138,7 +138,7 @@ export interface EditorSurface {
 // selection needs the long .cm-selectionLayer path to win, and the bracket
 // match must show with the editor unfocused, which the built-in rule does
 // not.
-const promptforgeTheme = EditorView.theme(
+const runvilTheme = EditorView.theme(
   {
     "&": {
       backgroundColor: "var(--editor-bg)",
@@ -262,7 +262,7 @@ const promptforgeTheme = EditorView.theme(
 // --editor-token-* values in @workshop/look/tokens.css. A tag falls back
 // to its parent's rule (controlKeyword to keyword, integer to number), so
 // each rule names the family.
-const promptforgeHighlight = HighlightStyle.define([
+const runvilHighlight = HighlightStyle.define([
   { tag: [tags.keyword, tags.modifier], color: "var(--editor-token-keyword)" },
   { tag: tags.operator, color: "var(--editor-token-operator)" },
   { tag: tags.punctuation, color: "var(--editor-token-punctuation)" },
@@ -585,8 +585,8 @@ export class CodeMirrorSurface extends Disposable implements EditorSurface {
             ]),
             search({ createPanel: createFindWidget }),
             hasSelectionClass,
-            promptforgeTheme,
-            syntaxHighlighting(promptforgeHighlight),
+            runvilTheme,
+            syntaxHighlighting(runvilHighlight),
             this.language.of([]),
             this.readOnly.of(readOnlyExtension(this.readOnlyState)),
             this.wordWrap.of(wordWrapExtension(this.settings.wordWrap)),

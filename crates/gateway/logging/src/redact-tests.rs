@@ -253,7 +253,7 @@ fn unlabeled_urls_and_local_paths_are_replaced_whole_in_error_chains() {
 fn an_ordinary_line_passes_through_unchanged() {
     for line in [
         "loaded profile main with 2 models; bind 127.0.0.1:8081",
-        "logging to C:\\Users\\operator\\.promptforge\\logs\\gateway.log",
+        "logging to C:\\Users\\operator\\.runvil\\logs\\gateway.log",
     ] {
         assert_eq!(
             redact_line(line),

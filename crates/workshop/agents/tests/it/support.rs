@@ -15,8 +15,8 @@ use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::MemoryRecorder;
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding,
     ModelCatalog, ToolSchema,
 };
@@ -47,7 +47,7 @@ impl InferenceBroker for Offline {
 /// Plugin.
 pub(crate) fn prompt(lua: &str) -> String {
     format!(
-        "---\nname: fixture\ndescription: a conversation fixture\npromptforge: 0\n\
+        "---\nname: fixture\ndescription: a conversation fixture\nrunvil: 0\n\
          plugins:\n  - user-input\n---\n\n\
          # Fixture\n\n## Conversation\n\n```lua\n{lua}\n```\n"
     )

@@ -1,6 +1,6 @@
-//! PromptForge Workshop HTTP server.
+//! Runvil Workshop HTTP server.
 //!
-//! Holds the `workshop.toml` configuration, the PromptForge gateway client,
+//! Holds the `workshop.toml` configuration, the Runvil gateway client,
 //! and the axum router. Start at
 //! [`Config::load`] for configuration, `AgentSessions` for the
 //! agent-session launcher behind `/agents/ws` (each conversation's run
@@ -32,8 +32,8 @@
 //!   `workshop-run-log`, `workshop-user-state`, `workshop-workspace`),
 //!   the Harness's public crates `harness` and `harness-gateway-client`,
 //!   the Plugin crates `plugin-web`, `plugin-user-input`, and
-//!   `plugin-mcp`, and the Engine's public crates `promptforge` and
-//!   `promptforge-plugin`.
+//!   `plugin-mcp`, and the Engine's public crates `runvil` and
+//!   `runvil-plugin`.
 //!   `cargo test -p build-xtask` enforces the product and container
 //!   boundaries. Read `crates/workshop/server/AGENTS.md` before adding an
 //!   import.

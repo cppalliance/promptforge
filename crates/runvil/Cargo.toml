@@ -1,0 +1,30 @@
+[package]
+name = "runvil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Every crate that defines a re-exported item: each `pub use` names the
+# defining crate's path.
+[dependencies]
+runvil-engine.workspace = true
+runvil-lua.workspace = true
+runvil-model-client.workspace = true
+runvil-parser.workspace = true
+runvil-types.workspace = true
+runvil-vfs.workspace = true
+
+[dev-dependencies]
+# The suite's and the `greeter` example's tool descriptors carry JSON
+# parameter schemas, and the suite reads its effect and event logs back
+# as JSON.
+serde_json.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
+
+[lints]
+workspace = true

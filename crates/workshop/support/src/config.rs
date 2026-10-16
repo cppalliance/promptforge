@@ -1,7 +1,7 @@
 //! `workshop.toml` loading: TOML parsing, `${VAR}` environment
 //! interpolation, and defaults.
 //!
-//! Interpolation follows the promptforge convention (gateway-config CFG-007):
+//! Interpolation follows the runvil convention (gateway-config CFG-007):
 //! the TOML is parsed first and only string *values* are interpolated, so
 //! `${VAR}` inside comments or keys is never expanded and an interpolated
 //! value containing a quote, backslash, or newline cannot corrupt the
@@ -23,7 +23,7 @@ pub const DEFAULT_CONFIG_PATH: &str = "workshop.toml";
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Connection settings for the PromptForge gateway.
+    /// Connection settings for the Runvil gateway.
     pub gateway: GatewayConfig,
     /// HTTP server settings.
     #[serde(default)]

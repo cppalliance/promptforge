@@ -10,14 +10,14 @@ publish = false
 # The Harness public API: the `InferenceBroker` trait the Gateway broker
 # implements, with its boxed future.
 harness.workspace = true
-# The `promptforge/web` Plugin's `SearchProvider` trait and its query,
+# The `runvil/web` Plugin's `SearchProvider` trait and its query,
 # result, and error vocabulary, which `GatewaySearch` implements.
 plugin-web.workspace = true
 # The Engine's public API: the chat vocabulary (Message, ToolSchema,
 # Completion, CompletionError) the wire code reads and builds through its
 # public constructors, the canonical metrics and model catalog
 # vocabulary, and the run limits the broker applies to every round.
-promptforge.workspace = true
+runvil.workspace = true
 # `SearchProvider` is an `async_trait` trait.
 async-trait.workspace = true
 # Names `bytes::Bytes`, the buffer `reqwest` yields per body chunk, as the

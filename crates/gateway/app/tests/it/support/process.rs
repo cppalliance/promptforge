@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-const TEST_START_READY_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_READY";
-const TEST_START_RELEASE_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_RELEASE";
+const TEST_START_READY_ENV: &str = "RUNVIL_GATEWAY_TEST_START_READY";
+const TEST_START_RELEASE_ENV: &str = "RUNVIL_GATEWAY_TEST_START_RELEASE";
 
 /// A real Gateway child whose teardown is bounded even when a race test
 /// panics before its ordinary shutdown path.
@@ -81,7 +81,7 @@ impl GatewayProcess {
     }
 
     fn command_selecting(config: &Path, home: &Path, profile: Option<&str>) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_runvil-gateway"));
         command.arg("--config").arg(config);
         if let Some(profile) = profile {
             command.arg("--profile").arg(profile);
@@ -91,7 +91,7 @@ impl GatewayProcess {
             .env("USERPROFILE", home)
             .env("HOME", home)
             .env_remove("RUST_LOG")
-            .env_remove("PROMPTFORGE_PROFILE")
+            .env_remove("RUNVIL_PROFILE")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

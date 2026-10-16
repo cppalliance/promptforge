@@ -52,7 +52,7 @@ async fn close_backing_on_an_ephemeral_workspace_is_a_no_op() {
 #[tokio::test]
 async fn close_backing_leaves_one_file_and_no_sidecar() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     workspace
@@ -68,7 +68,7 @@ async fn close_backing_leaves_one_file_and_no_sidecar() {
 
     assert_eq!(
         names_in(home.path()),
-        ["mine.pfwork"],
+        ["mine.rvwork"],
         "the WAL is folded in and the sidecar is gone"
     );
     assert_eq!(
@@ -100,7 +100,7 @@ async fn close_backing_leaves_one_file_and_no_sidecar() {
 #[tokio::test]
 async fn the_registered_task_closes_the_backing_on_shutdown() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let registry = Registry::new();
     let workspace = Workspace::new();
     let _registration = register_tasks(&registry, &workspace);
@@ -130,7 +130,7 @@ async fn the_registered_task_closes_the_backing_on_shutdown() {
     );
     assert_eq!(
         names_in(home.path()),
-        ["mine.pfwork"],
+        ["mine.rvwork"],
         "the file is complete and the sidecar is gone"
     );
 }

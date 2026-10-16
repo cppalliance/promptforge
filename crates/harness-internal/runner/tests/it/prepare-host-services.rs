@@ -4,7 +4,7 @@
 
 use super::*;
 
-use promptforge_plugin::{ServiceId, ServiceKey};
+use runvil_plugin::{ServiceId, ServiceKey};
 
 /// The test-only service the fixture needs.
 const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
@@ -16,7 +16,7 @@ const NEEDS: &[ServiceId] = &[GREETING.id()];
 const GREETER: Package = Package::new("tests/greeter", construct_greeter).needs(NEEDS);
 
 /// A prompt declaring the greeter Plugin and returning its greeting.
-const GREETS: &str = "---\nname: greets\ndescription: d\npromptforge: 0\n\
+const GREETS: &str = "---\nname: greets\ndescription: d\nrunvil: 0\n\
     plugins:\n  - greeter\n---\n\n# Title\n\n## Only\n\n\
     ```lua\nreturn tools.call('greeter/greet')\n```\n";
 

@@ -10,7 +10,7 @@
 
 use std::net::IpAddr;
 
-use promptforge_plugin::ToolErrorKind;
+use runvil_plugin::ToolErrorKind;
 
 /// How `call` should treat a [`FetchError`].
 ///
@@ -261,7 +261,7 @@ mod tests {
     use std::error::Error as _;
     use std::net::IpAddr;
 
-    use promptforge_plugin::ToolErrorKind;
+    use runvil_plugin::ToolErrorKind;
 
     use super::{Disposition, FetchError, SafeUrl};
 

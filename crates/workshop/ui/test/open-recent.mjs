@@ -2,12 +2,12 @@
 // (src/parts/workspace/open-recent.ts): the menu provider's dynamic rows
 // and the "" quick-access provider's accept, driven over injected stores
 // and an injected command registry the way test/menus.mjs drives the
-// menu half. Covers the workspace-file rows (TWF-003): a .pfwork entry
+// menu half. Covers the workspace-file rows (TWF-003): a .rvwork entry
 // in the recent-files store renders in 1_workspaces dispatching
 // workbench.action.openWorkspace with the path argument, any case of the
 // extension; a text entry still renders vscode.open in 3_files; the
 // quick-access provider's accept dispatches the workspace command for a
-// .pfwork hit and vscode.open for a text hit, a filter's match in the file
+// .rvwork hit and vscode.open for a text hit, a filter's match in the file
 // name is highlighted, and a rejected run is logged naming the command that
 // ran (the registry reports it as the toast, so no status message posts).
 // Bundles the module with esbuild and drives it DOM-free.
@@ -53,8 +53,8 @@ async function flush() {
   }
 }
 
-const WORKSPACE = "C:\\work\\Alpha.pfwork";
-const UPPER = "C:\\work\\Beta.PFWORK";
+const WORKSPACE = "C:\\work\\Alpha.rvwork";
+const UPPER = "C:\\work\\Beta.RVWORK";
 const NOTE = "C:\\work\\notes.md";
 
 const statusMessages = [];
@@ -64,10 +64,10 @@ registerService(STATUS_BAR, () => ({
 
 // --- The extension predicate ------------------------------------------------------
 
-check("a .pfwork path is a workspace file", isWorkspaceFilePath(WORKSPACE));
+check("a .rvwork path is a workspace file", isWorkspaceFilePath(WORKSPACE));
 check("the extension check is case-insensitive", isWorkspaceFilePath(UPPER));
 check("a .md path is not a workspace file", !isWorkspaceFilePath(NOTE));
-check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.pfwork.bak"));
+check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.rvwork.bak"));
 
 // --- The menu provider -------------------------------------------------------------
 
@@ -78,15 +78,15 @@ check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.p
 
   const workspaceRow = rows.find((row) => row.args?.[0] === WORKSPACE);
   check(
-    "a .pfwork entry renders in 1_workspaces dispatching workbench.action.openWorkspace with the path",
+    "a .rvwork entry renders in 1_workspaces dispatching workbench.action.openWorkspace with the path",
     workspaceRow?.command === "workbench.action.openWorkspace" &&
       workspaceRow?.group === "1_workspaces" &&
-      workspaceRow?.title === "Alpha.pfwork" &&
+      workspaceRow?.title === "Alpha.rvwork" &&
       workspaceRow?.order === 0,
   );
   const upperRow = rows.find((row) => row.args?.[0] === UPPER);
   check(
-    "an upper-case .PFWORK entry is a workspace row too",
+    "an upper-case .RVWORK entry is a workspace row too",
     upperRow?.command === "workbench.action.openWorkspace" && upperRow?.group === "1_workspaces" && upperRow?.order === 1,
   );
   const noteRow = rows.find((row) => row.args?.[0] === NOTE);
@@ -116,7 +116,7 @@ check("the extension must end the path", !isWorkspaceFilePath("C:\\work\\Alpha.p
 
   items.find((item) => item.description === WORKSPACE)?.accept();
   check(
-    "accepting a .pfwork hit dispatches workbench.action.openWorkspace with the path",
+    "accepting a .rvwork hit dispatches workbench.action.openWorkspace with the path",
     executed.at(-1)?.id === "workbench.action.openWorkspace" && executed.at(-1)?.args?.[0] === WORKSPACE,
   );
   items.find((item) => item.description === NOTE)?.accept();

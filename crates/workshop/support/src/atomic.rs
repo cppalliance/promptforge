@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Suffix every atomic-write temp file ends with; the sweep recognizes
 /// orphans by it.
-const TEMP_SUFFIX: &str = ".pf-tmp";
+const TEMP_SUFFIX: &str = ".rv-tmp";
 
 /// Process-wide counter making each temp name unique, so two concurrent
 /// writes to the same target never interleave inside one temp file: each

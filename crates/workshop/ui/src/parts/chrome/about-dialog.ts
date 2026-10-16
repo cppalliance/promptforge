@@ -91,14 +91,14 @@ export function showAboutDialog(updates?: UpdateService): IDisposable {
 
   const icon = document.createElement("img");
   icon.className = "ws-about-dialog__icon";
-  icon.src = "/icons/promptforge-icon.png";
-  icon.srcset = "/icons/promptforge-icon.png 1x, /icons/promptforge-icon@2x.png 2x";
+  icon.src = "/icons/runvil-icon.png";
+  icon.srcset = "/icons/runvil-icon.png 1x, /icons/runvil-icon@2x.png 2x";
   icon.alt = "";
 
   const title = document.createElement("h2");
   title.id = "about-dialog-title";
   title.className = "ws-about-dialog__title";
-  title.textContent = "PromptForge";
+  title.textContent = "Runvil";
 
   let currentVersion = APP_VERSION;
   const versionRow = buildRow("version", "Version", "Copy version", () =>

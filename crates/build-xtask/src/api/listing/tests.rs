@@ -17,11 +17,11 @@ fn owned(lines: &[&str]) -> Vec<String> {
 
 #[test]
 fn a_matching_listing_has_no_difference_whatever_its_line_endings() {
-    let lines = owned(&["pub fn promptforge::a()", "pub struct promptforge::B"]);
+    let lines = owned(&["pub fn runvil::a()", "pub struct runvil::B"]);
     assert!(difference(Some(&text(&lines)), &lines).is_empty());
     assert!(
         difference(
-            Some("pub fn promptforge::a()\r\npub struct promptforge::B\r\n"),
+            Some("pub fn runvil::a()\r\npub struct runvil::B\r\n"),
             &lines
         )
         .is_empty()
@@ -30,39 +30,33 @@ fn a_matching_listing_has_no_difference_whatever_its_line_endings() {
 
 #[test]
 fn a_changed_listing_reports_removed_then_added_lines() {
-    let lines = owned(&["pub fn promptforge::a()", "pub struct promptforge::C"]);
+    let lines = owned(&["pub fn runvil::a()", "pub struct runvil::C"]);
     assert_eq!(
-        difference(
-            Some("pub fn promptforge::a()\npub struct promptforge::B\n"),
-            &lines
-        ),
+        difference(Some("pub fn runvil::a()\npub struct runvil::B\n"), &lines),
         owned(&[
             "public-api.txt differs from the surface listing:",
-            "- pub struct promptforge::B",
-            "+ pub struct promptforge::C",
+            "- pub struct runvil::B",
+            "+ pub struct runvil::C",
         ])
     );
 }
 
 #[test]
 fn a_missing_listing_reports_every_line_as_added() {
-    let lines = owned(&["pub struct promptforge::B"]);
+    let lines = owned(&["pub struct runvil::B"]);
     assert_eq!(
         difference(None, &lines),
         owned(&[
             "public-api.txt is missing; the surface listing is:",
-            "+ pub struct promptforge::B"
+            "+ pub struct runvil::B"
         ])
     );
 }
 
 #[test]
 fn an_unsorted_listing_with_the_same_lines_still_differs() {
-    let lines = owned(&["pub fn promptforge::a()", "pub struct promptforge::B"]);
-    let report = difference(
-        Some("pub struct promptforge::B\npub fn promptforge::a()\n"),
-        &lines,
-    );
+    let lines = owned(&["pub fn runvil::a()", "pub struct runvil::B"]);
+    let report = difference(Some("pub struct runvil::B\npub fn runvil::a()\n"), &lines);
     assert_eq!(report.len(), 2, "{report:?}");
     assert!(report[1].contains("not sorted"), "{report:?}");
 }
@@ -73,12 +67,12 @@ const INNER: &str =
 const LEAKING_INNER: &str = "//! Inner.\n\n/// Kept internal.\npub struct Secret;\n\n\
     /// Leaks it.\npub fn make() -> Secret {\n    Secret\n}\n";
 
-const LEAKING_FACADE: &str = "//! Facade.\npub use promptforge_inner::make;\n";
+const LEAKING_FACADE: &str = "//! Facade.\npub use runvil_inner::make;\n";
 
 #[test]
 #[ignore = "needs the pinned nightly"]
 fn a_snapshot_difference_fails_check_until_blessed() {
-    let root = workspace(INNER, "//! Facade.\npub use promptforge_inner::Visible;\n");
+    let root = workspace(INNER, "//! Facade.\npub use runvil_inner::Visible;\n");
     let first = execute(root.path(), Mode::Check).expect("the fixture documents");
     assert!(first.failed, "{:?}", first.lines);
     assert!(
@@ -89,12 +83,12 @@ fn a_snapshot_difference_fails_check_until_blessed() {
     assert!(
         first
             .lines
-            .contains(&"+ pub struct promptforge::Visible { .. }".to_owned())
+            .contains(&"+ pub struct runvil::Visible { .. }".to_owned())
     );
     assert!(
         first
             .lines
-            .contains(&"+ pub promptforge::Visible::count: u8".to_owned())
+            .contains(&"+ pub runvil::Visible::count: u8".to_owned())
     );
     let blessed = execute(root.path(), Mode::Bless).expect("the fixture documents");
     assert!(!blessed.failed, "{:?}", blessed.lines);
@@ -106,7 +100,7 @@ fn a_snapshot_difference_fails_check_until_blessed() {
     );
     write(
         root.path(),
-        "crates/promptforge-internal/inner/src/lib.rs",
+        "crates/runvil-internal/inner/src/lib.rs",
         &format!(
             "{INNER}\nimpl Visible {{\n    /// Doubles it.\n    pub fn double(&self) -> u16 {{\n        u16::from(self.count) * 2\n    }}\n}}\n"
         ),
@@ -116,7 +110,7 @@ fn a_snapshot_difference_fails_check_until_blessed() {
     assert!(
         changed
             .lines
-            .contains(&"+ pub fn promptforge::Visible::double(&self) -> u16".to_owned()),
+            .contains(&"+ pub fn runvil::Visible::double(&self) -> u16".to_owned()),
         "{:?}",
         changed.lines
     );
@@ -141,9 +135,9 @@ fn a_violation_alone_fails_check_and_a_plain_run_only_prints_it() {
     let root = workspace(LEAKING_INNER, LEAKING_FACADE);
     let listing = report(root.path()).expect("the fixture documents").listing;
     std::fs::write(path(root.path()), text(&listing)).expect("the listing writes");
-    let leak = leak("promptforge_inner");
+    let leak = leak("runvil_inner");
     let expected = [
-        format!("promptforge::make: mentions `promptforge_inner::Secret` in its signature: {leak}"),
+        format!("runvil::make: mentions `runvil_inner::Secret` in its signature: {leak}"),
         "api: 1 violations; the listing matches public-api.txt".to_owned(),
     ];
     let check = execute(root.path(), Mode::Check).expect("the fixture documents");
@@ -165,9 +159,9 @@ const SHAPES: &str = "//! Inner.\n\n\
     pub union Word {\n    /// The bits.\n    pub bits: u32,\n    seed: f32,\n}\n";
 
 const SHAPES_FACADE: &str = "//! Facade.\n\
-    pub use promptforge_inner::AllowAll;\npub use promptforge_inner::ExecId;\n\
-    pub use promptforge_inner::Guarded;\npub use promptforge_inner::Open;\n\
-    pub use promptforge_inner::Word;\n";
+    pub use runvil_inner::AllowAll;\npub use runvil_inner::ExecId;\n\
+    pub use runvil_inner::Guarded;\npub use runvil_inner::Open;\n\
+    pub use runvil_inner::Word;\n";
 
 const VARIANTS: &str = "//! Inner.\n\n\
     /// An exhaustive enum.\n\
@@ -178,12 +172,12 @@ const VARIANTS: &str = "//! Inner.\n\n\
     pub enum Code {\n    /// The first.\n    First = 1,\n}\n";
 
 const VARIANTS_FACADE: &str = "//! Facade.\n\
-    pub use promptforge_inner::Code;\npub use promptforge_inner::Verdict;\n\
-    pub use promptforge_inner::VfsError;\n";
+    pub use runvil_inner::Code;\npub use runvil_inner::Verdict;\n\
+    pub use runvil_inner::VfsError;\n";
 
 const UNIT: &str = "//! Inner.\n\n/// A unit struct.\npub struct AllowAll;\n";
 
-const UNIT_FACADE: &str = "//! Facade.\npub use promptforge_inner::AllowAll;\n";
+const UNIT_FACADE: &str = "//! Facade.\npub use runvil_inner::AllowAll;\n";
 
 /// The surface listing of the fixture workspace built from `inner` and
 /// `facade`, as a set to test membership against.
@@ -215,19 +209,19 @@ fn a_struct_or_union_line_ends_with_its_kind_and_names_hidden_fields() {
     assert_lines(
         &listing,
         &[
-            "pub struct promptforge::AllowAll;",
-            "pub struct promptforge::ExecId(/* private fields */)",
-            "pub struct promptforge::Open { .. }",
-            "pub struct promptforge::Guarded { /* private fields */ }",
-            "pub union promptforge::Word { /* private fields */ }",
-            "pub promptforge::Guarded::count: u8",
+            "pub struct runvil::AllowAll;",
+            "pub struct runvil::ExecId(/* private fields */)",
+            "pub struct runvil::Open { .. }",
+            "pub struct runvil::Guarded { /* private fields */ }",
+            "pub union runvil::Word { /* private fields */ }",
+            "pub runvil::Guarded::count: u8",
         ],
         &[
-            "pub struct promptforge::AllowAll",
-            "pub struct promptforge::ExecId",
-            "pub struct promptforge::Open",
-            "pub struct promptforge::Guarded",
-            "pub union promptforge::Word",
+            "pub struct runvil::AllowAll",
+            "pub struct runvil::ExecId",
+            "pub struct runvil::Open",
+            "pub struct runvil::Guarded",
+            "pub union runvil::Word",
         ],
     );
 }
@@ -239,20 +233,20 @@ fn an_enum_or_variant_line_carries_non_exhaustive_and_its_variant_kind() {
     assert_lines(
         &listing,
         &[
-            "pub enum promptforge::Verdict",
-            "pub promptforge::Verdict::Allow",
-            "pub promptforge::Verdict::Deny(..)",
-            "pub promptforge::Verdict::Ask { .. }",
-            "#[non_exhaustive] pub enum promptforge::VfsError",
-            "#[non_exhaustive] pub promptforge::VfsError::Missing { .. }",
-            "pub promptforge::VfsError::Denied",
-            "pub promptforge::Code::First = 1",
+            "pub enum runvil::Verdict",
+            "pub runvil::Verdict::Allow",
+            "pub runvil::Verdict::Deny(..)",
+            "pub runvil::Verdict::Ask { .. }",
+            "#[non_exhaustive] pub enum runvil::VfsError",
+            "#[non_exhaustive] pub runvil::VfsError::Missing { .. }",
+            "pub runvil::VfsError::Denied",
+            "pub runvil::Code::First = 1",
         ],
         &[
-            "pub enum promptforge::VfsError",
-            "pub promptforge::VfsError::Missing { .. }",
-            "#[non_exhaustive] pub enum promptforge::Verdict",
-            "#[non_exhaustive] pub promptforge::VfsError::Denied",
+            "pub enum runvil::VfsError",
+            "pub runvil::VfsError::Missing { .. }",
+            "#[non_exhaustive] pub enum runvil::Verdict",
+            "#[non_exhaustive] pub runvil::VfsError::Denied",
         ],
     );
 }
@@ -265,7 +259,7 @@ fn marking_a_blessed_unit_struct_non_exhaustive_fails_check() {
     assert!(!blessed.failed, "{:?}", blessed.lines);
     write(
         root.path(),
-        "crates/promptforge-internal/inner/src/lib.rs",
+        "crates/runvil-internal/inner/src/lib.rs",
         &UNIT.replace(
             "pub struct AllowAll;",
             "#[non_exhaustive]\npub struct AllowAll;",
@@ -276,14 +270,14 @@ fn marking_a_blessed_unit_struct_non_exhaustive_fails_check() {
     assert!(
         changed
             .lines
-            .contains(&"- pub struct promptforge::AllowAll;".to_owned()),
+            .contains(&"- pub struct runvil::AllowAll;".to_owned()),
         "{:?}",
         changed.lines
     );
     assert!(
         changed
             .lines
-            .contains(&"+ #[non_exhaustive] pub struct promptforge::AllowAll;".to_owned()),
+            .contains(&"+ #[non_exhaustive] pub struct runvil::AllowAll;".to_owned()),
         "{:?}",
         changed.lines
     );

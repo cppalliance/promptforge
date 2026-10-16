@@ -35,7 +35,7 @@ fn the_closure_requirement_names_every_crate_it_permits() {
 fn a_path_table_entry_the_index_lacks_is_no_re_export_target() {
     let summary = rustdoc_types::ItemSummary {
         crate_id: 0,
-        path: vec!["promptforge_inner".to_owned(), "Gone".to_owned()],
+        path: vec!["runvil_inner".to_owned(), "Gone".to_owned()],
         kind: ItemKind::Struct,
     };
     let krate = Crate {
@@ -59,12 +59,12 @@ fn a_path_table_entry_the_index_lacks_is_no_re_export_target() {
 fn a_module_re_export_is_reported() {
     let root = workspace(
         "//! Inner.\n\n/// A module.\npub mod nested {\n    /// Inside.\n    pub struct Deep;\n}\n",
-        "//! Facade.\npub use promptforge_inner::nested;\n",
+        "//! Facade.\npub use runvil_inner::nested;\n",
     );
     assert_eq!(
         findings(root.path()),
         set([
-            "promptforge::nested: mentions `promptforge_inner::nested` as its re-export \
+            "runvil::nested: mentions `runvil_inner::nested` as its re-export \
               target: required a single-item re-export, found a module"
                 .to_owned()
         ])
@@ -76,15 +76,15 @@ fn a_module_re_export_is_reported() {
 fn a_second_facade_path_for_one_item_is_reported() {
     let root = workspace(
         "//! Inner.\n\n/// Exposed.\npub struct Visible;\n",
-        "//! Facade.\npub use promptforge_inner::Visible;\n\n\
-         /// Again.\npub mod again {\n    pub use promptforge_inner::Visible;\n}\n",
+        "//! Facade.\npub use runvil_inner::Visible;\n\n\
+         /// Again.\npub mod again {\n    pub use runvil_inner::Visible;\n}\n",
     );
     assert_eq!(
         findings(root.path()),
         set([
-            "promptforge::again::Visible: mentions `promptforge_inner::Visible` as its \
+            "runvil::again::Visible: mentions `runvil_inner::Visible` as its \
               re-export target: required exactly one facade path per item, found a second \
-              facade path beside `promptforge::Visible`"
+              facade path beside `runvil::Visible`"
                 .to_owned()
         ])
     );

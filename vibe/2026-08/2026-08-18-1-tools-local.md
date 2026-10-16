@@ -134,13 +134,13 @@ This is a prerequisite simplification that makes the whole system cleaner before
 
 **Files:**
 
-- `crates/promptforge-core/src/lua/vm.rs`: Add a method `install_control_globals` that takes the execute/fanout callbacks and installs `jump`, `execute`, `fanout`, `tasks`, `log`, and `store` as globals using `lua.create_function` (not scope-bound). Delete `clear_control_globals`. Delete `run_prologue_with_control`/`run_epilog_with_control` distinction - just `run_loaded_with_control` called for every chunk (which now doesn't need to install anything). Keep `jump_slot` as `Arc<Mutex<Option<String>>>` - it's the correct shape for a persistent closure.
+- `crates/runvil-core/src/lua/vm.rs`: Add a method `install_control_globals` that takes the execute/fanout callbacks and installs `jump`, `execute`, `fanout`, `tasks`, `log`, and `store` as globals using `lua.create_function` (not scope-bound). Delete `clear_control_globals`. Delete `run_prologue_with_control`/`run_epilog_with_control` distinction - just `run_loaded_with_control` called for every chunk (which now doesn't need to install anything). Keep `jump_slot` as `Arc<Mutex<Option<String>>>` - it's the correct shape for a persistent closure.
 
 **Store must be installed once:** Currently `store` is installed per-chunk inside `lua.scope` via `install_store_table`. With install-once, store methods would be invalid after the chunk's scope ends. Local tool handlers running during the tool loop have no live Scope. Install `store` once alongside the control globals using `lua.create_function` for each store method instead of scope-bound closures.
 
-- `crates/promptforge-core/src/execute/engine.rs`: In `run_one_section`, after `inject_host_with_var`, build the execute/fanout callbacks once and call `vm.install_control_globals(callbacks)`. `run_section_lua` loses the `before_prose` parameter and the callback-building code - it just runs the chunk. The callbacks live on the VM now. `execute` callback passes `None` for `last_reply`. Remove the `has_children` gate.
+- `crates/runvil-core/src/execute/engine.rs`: In `run_one_section`, after `inject_host_with_var`, build the execute/fanout callbacks once and call `vm.install_control_globals(callbacks)`. `run_section_lua` loses the `before_prose` parameter and the callback-building code - it just runs the chunk. The callbacks live on the VM now. `execute` callback passes `None` for `last_reply`. Remove the `has_children` gate.
 
-- `crates/promptforge-core/src/execute/engine.rs` (`run_execute_section`): Already takes `last_reply: Option<&str>` - pass `None` instead of the captured value.
+- `crates/runvil-core/src/execute/engine.rs` (`run_execute_section`): Already takes `last_reply: Option<&str>` - pass `None` instead of the captured value.
 
 **Impact on `tools.local` handlers:** With control globals installed once and always live, a local tool handler CAN see `jump`/`execute`/`fanout`/`models.infer`. Handlers are allowed to call `execute`, `fanout`, and `models.infer`. Only `jump` is blocked - the Engine nils it before calling the handler and restores after. The infer hook stays live (handlers may call `models.infer`).
 
@@ -150,7 +150,7 @@ This is a prerequisite simplification that makes the whole system cleaner before
 
 ### Where tools live in the architecture
 
-- `Tool` trait (`crates/promptforge-core/src/tools/registry.rs`): `id()`, `wire_name()`, `description()`, `parameters_schema()`, `call(args)`
+- `Tool` trait (`crates/runvil-core/src/tools/registry.rs`): `id()`, `wire_name()`, `description()`, `parameters_schema()`, `call(args)`
 - `ToolRegistry`: holds `&dyn Tool` by `ToolId`, built from the Harness's live tool set
 - `ToolSchema` (`client/wire.rs`): `{name, description, parameters}` sent to the model
 - Tool loop (`execute/tool_loop.rs:215`): dispatches via `dispatch` map (alias to ToolId) then `registry.get(id)` then `tool.call(args)`
@@ -178,17 +178,17 @@ A local tool lives alongside the `ToolRegistry` path, not inside it:
 
 ### Files to modify
 
-- `crates/promptforge-core/src/lua/vm.rs`: Add `LocalTools` storage (alias to schema + handler key). Methods: `register_local_tool`, `call_local_tool`, `local_tool_schemas`.
+- `crates/runvil-core/src/lua/vm.rs`: Add `LocalTools` storage (alias to schema + handler key). Methods: `register_local_tool`, `call_local_tool`, `local_tool_schemas`.
 
-- `crates/promptforge-core/src/lua/tools_bridge.rs`: Install the `tools.local` function. Validate alias, parse params table into JSON Schema, store handler via `lua.create_registry_value`, record in LocalTools.
+- `crates/runvil-core/src/lua/tools_bridge.rs`: Install the `tools.local` function. Validate alias, parse params table into JSON Schema, store handler via `lua.create_registry_value`, record in LocalTools.
 
-- `crates/promptforge-core/src/execute/tool_loop.rs` (~line 215): Accept an optional local tool dispatcher (closure or trait object). Before `registry.get(&id)`, check if alias is local. If so, call via the dispatcher.
+- `crates/runvil-core/src/execute/tool_loop.rs` (~line 215): Accept an optional local tool dispatcher (closure or trait object). Before `registry.get(&id)`, check if alias is local. If so, call via the dispatcher.
 
-- `crates/promptforge-core/src/execute/engine.rs`: Build the local dispatcher from the VM's LocalTools and thread it into `run_prose_inference`.
+- `crates/runvil-core/src/execute/engine.rs`: Build the local dispatcher from the VM's LocalTools and thread it into `run_prose_inference`.
 
-- `crates/promptforge-core/src/execute/tools.rs` (`ToolBag`/`InferContext`): Include local tool schemas in `prepare()`. Wire local dispatch into the `model:infer` path.
+- `crates/runvil-core/src/execute/tools.rs` (`ToolBag`/`InferContext`): Include local tool schemas in `prepare()`. Wire local dispatch into the `model:infer` path.
 
-- `crates/promptforge-core/src/execute/scope.rs` (`prepare_scoped_tools`): Append local tool schemas to the schema list.
+- `crates/runvil-core/src/execute/scope.rs` (`prepare_scoped_tools`): Append local tool schemas to the schema list.
 
 ### Steps
 

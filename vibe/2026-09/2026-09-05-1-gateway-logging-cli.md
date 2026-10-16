@@ -38,9 +38,9 @@ Rejected alternatives: an unbounded intrusive list, because slow output becomes 
 This is a Full-sized rulebook task because it changes a public CLI, installer and service callers, process startup/shutdown, and logging infrastructure. The run is deliberately lightened to four commits, one Coder and one Review-and-Fix pass per commit, and Verify only at rulebook-required component boundaries, every third commit, review-dirty steps, and final completion.
 
 ## Outcome
-- `promptforge-gateway` serves by default.
-- `promptforge-gateway --config PATH` serves an explicit config.
-- `promptforge-gateway diagnostics` emits formatted JSON without serving or rotating logs.
+- `runvil-gateway` serves by default.
+- `runvil-gateway --config PATH` serves an explicit config.
+- `runvil-gateway diagnostics` emits formatted JSON without serving or rotating logs.
 - Remove the `serve` verb, positional config path, and compatibility alias in one atomic migration.
 - Extract logging from `gateway/src/main.rs` into `crates/gateway-logging` without moving global subscriber initialization out of the binary.
 - Keep log memory bounded and preserve Warn/Error records through priority-aware eviction and blocking.
@@ -56,15 +56,15 @@ This is a Full-sized rulebook task because it changes a public CLI, installer an
 - The crate sets `unsafe_code = "forbid"` in its manifest lint table. Public fields stay private; `LogError` preserves private sources and exposes classification methods. Every public item has rustdoc, error documentation, and compiled examples.
 
 ## CLI contract
-- Root invocation serves with existing discovery: `promptforge-gateway`.
-- Explicit config uses `promptforge-gateway --config PATH`; it wins over `PROMPTFORGE_GATEWAY_CONFIG`.
-- `promptforge-gateway diagnostics` is the only subcommand and always emits JSON.
+- Root invocation serves with existing discovery: `runvil-gateway`.
+- Explicit config uses `runvil-gateway --config PATH`; it wins over `RUNVIL_GATEWAY_CONFIG`.
+- `runvil-gateway diagnostics` is the only subcommand and always emits JSON.
 - `--help`, `--version`, `diagnostics`, and second-instance handoff never initialize or rotate file logs.
 - Update all owned callers atomically: `gateway/src/main.rs`, `gateway/src/boot.rs`, `gateway/src/tray/logic.rs`, `gateway/packaging/gateway.service`, `gateway/tests/it/boot.rs`, `workshop/src/gateway.rs`, `workshop/installer.nsi`, `.github/workflows/gateway-release-test.yml`, Gateway README, and install guide. Preserve `--login`, `--browser`, `--print-url`, `--no-tray`, and `--profile` behavior.
 
 ## Logging path and lifecycle
 - Gateway alone derives the state directory from `shared_sidecar::default_run_dir().parent()` and passes it to `LogConfig`.
-- Logs remain under `<home>/.promptforge/logs`; this is not configurable because config discovery and parsing failures need a destination.
+- Logs remain under `<home>/.runvil/logs`; this is not configurable because config discovery and parsing failures need a destination.
 - Startup order: parse CLI; handle help/version/diagnostics; detect an already-running Gateway; resolve state directory; start logging; resolve or generate config; log version/config/profile; create runtime; bind; write `gateway.json`; enqueue boot loading; enter event loop.
 - Shutdown order: stop HTTP and tray work; stop commands, progress renderers, model runtimes, and native callbacks; log the terminal outcome; shut the logger down last.
 - Fatal returned errors are logged once with the complete source chain, then the queue drains before process exit. Raw stderr is only the fallback when logger initialization fails.
@@ -81,7 +81,7 @@ This is a Full-sized rulebook task because it changes a public CLI, installer an
 - No log record may contain credentials, cookies, authorization headers, environment values, request bodies, audio, transcript text, prompts, or full local model paths.
 
 ## Diagnostics contract
-`promptforge-gateway diagnostics` returns formatted JSON with:
+`runvil-gateway diagnostics` returns formatted JSON with:
 ```json
 {
   "state_dir": "...",
@@ -99,7 +99,7 @@ This is a Full-sized rulebook task because it changes a public CLI, installer an
 ```
 - It performs no logging initialization, rotation, config parsing, or mutation.
 - It returns no bearer key, environment value, config content, or log content.
-- Generated `gateway.toml` adds `# Diagnostics: promptforge-gateway diagnostics` as a comment, not a config field.
+- Generated `gateway.toml` adds `# Diagnostics: runvil-gateway diagnostics` as a comment, not a config field.
 
 ## Numbered commits
 1. Characterize current CLI, handoff, and launcher behavior in tests, then remove `serve` and positional config, add root serving with `--config PATH`, and update every repository-owned caller atomically. Focused gate: `cargo test -p gateway -p workshop`, followed by the Gateway release-test command fixture.
@@ -108,7 +108,7 @@ This is a Full-sized rulebook task because it changes a public CLI, installer an
 4. Update AGENTS and final documentation, enforce the dependency boundary, and run full verification: formatting, all-target/all-feature Clippy with warnings denied, `cargo test -p gateway-logging -p gateway -p workshop`, Gateway featureless check, rustdoc, `cargo deny check`, packaged Gateway/Workshop builds, and a child-process failure followed by `diagnostics` log discovery.
 
 ## Execution rules
-- Repository: `C:\Users\Vinnie\cursor\promptforge`.
+- Repository: `C:\Users\Vinnie\cursor\runvil`.
 - Plan: `C:\Users\Vinnie\.cursor\plans\gateway-logging-cli_d7a036c4.plan.md`.
 - Rulebooks: `C:\Users\Vinnie\cursor\tools-public\rulebooks\vibe-rulebook.md` and `C:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md`.
 - Governing rules: root `AGENTS.md`, `crates/gateway/AGENTS.md`, `crates/workshop/AGENTS.md`, `crates/shared-sidecar/AGENTS.md`, and new `crates/gateway-logging/AGENTS.md` after commit 2.

@@ -1,7 +1,7 @@
 //! Tests for the natives every registry holds: each builds a Plugin that
 //! offers no tools, and carries no prelude and no needs.
 
-use promptforge_plugin::HostServices;
+use runvil_plugin::HostServices;
 use serde_json::Value;
 
 use super::{NATIVE, package_name};

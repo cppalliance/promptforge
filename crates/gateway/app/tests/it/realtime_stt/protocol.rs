@@ -65,9 +65,9 @@ async fn producer_snapshots_partition_finalized_agreed_and_tentative_text() {
 #[ignore = "requires packaged whisper.dll, ggml-tiny.en.bin, and jfk.wav fixtures"]
 async fn realtime_stt_native_incremental() {
     for (variable, name) in [
-        ("PROMPTFORGE_WHISPER_LIBRARY", "whisper.dll"),
-        ("PROMPTFORGE_WHISPER_MODEL", "ggml-tiny.en.bin"),
-        ("PROMPTFORGE_WHISPER_AUDIO", "jfk.wav"),
+        ("RUNVIL_WHISPER_LIBRARY", "whisper.dll"),
+        ("RUNVIL_WHISPER_MODEL", "ggml-tiny.en.bin"),
+        ("RUNVIL_WHISPER_AUDIO", "jfk.wav"),
     ] {
         let _fixture = require_fixture(variable, &native_fixture_root(), name);
     }

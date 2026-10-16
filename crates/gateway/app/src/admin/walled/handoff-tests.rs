@@ -80,7 +80,7 @@ async fn the_right_key_sets_the_cookie_and_redirects_key_free() {
         .to_str()
         .expect("the cookie is header-safe");
     assert!(
-        cookie.starts_with("promptforge-gateway-session="),
+        cookie.starts_with("runvil-gateway-session="),
         "the handoff cookie: {cookie}"
     );
     let value = cookie

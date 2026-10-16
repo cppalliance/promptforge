@@ -12,8 +12,8 @@ isProject: false
 ## Product Requirements
 
 - Scope and target work:
-  - Repository root `C:\Users\Vinnie\cursor\promptforge`, branch `master`. All paths are relative to that root.
-  - Target: the 43 commits in `3e31cd23..11da61d8` (baseline `upstream/master` at `3e31cd23`, "Close plan: multi-product-docs-site"; endpoint `master` at `11da61d8`, "Close plan: workshop structure"). They carry two plans: `vibe/2026-09-25-2-workshop-fixes.md` (21 commits through `42edc053`) and `vibe/2026-09-25-3-workshop-structure.md` (22 commits after it). This is the content of [cppalliance/promptforge#75](https://github.com/cppalliance/promptforge/pull/75).
+  - Repository root `C:\Users\Vinnie\cursor\runvil`, branch `master`. All paths are relative to that root.
+  - Target: the 43 commits in `3e31cd23..11da61d8` (baseline `upstream/master` at `3e31cd23`, "Close plan: multi-product-docs-site"; endpoint `master` at `11da61d8`, "Close plan: workshop structure"). They carry two plans: `vibe/2026-09-25-2-workshop-fixes.md` (21 commits through `42edc053`) and `vibe/2026-09-25-3-workshop-structure.md` (22 commits after it). This is the content of [cppalliance/runvil#75](https://github.com/cppalliance/runvil/pull/75).
   - Disposition checked at `11da61d8`. Every accepted debt below is still present there.
   - Operator addition (2026-09-26): the pre-existing revoke race, DEBT-FIX-X01, is brought into scope as Step 5, placed before the plan's close.
   - Operator addition (2026-09-26): the gap Step 5 left for grants after the shutdown close, DEBT-FIX-X02, is brought into scope as Step 6, placed before the plan's close.
@@ -143,7 +143,7 @@ isProject: false
   - `cargo fmt --all --check`
   - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
   - `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`
-  - Setup for the `workshop` package: `npm ci` in both UI packages, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+  - Setup for the `workshop` package: `npm ci` in both UI packages, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
 
 </verification-contract>
 <decision-record>
@@ -178,7 +178,7 @@ isProject: false
 - The Unix dead-NFS stall in the tree listing. Revisit if Workshop starts supporting network-mounted grants.
 - Boot's per-attempt probe budget dropping from 2 s to 100 ms in `4b8fec5a` (weak, no demonstrated consequence). Revisit if a boot ever fails with `ProofInterrupted` against a live gateway. A fixture gateway whose `/v1/models` answers after 150 ms would settle it.
 - A slow grant canonicalize holding up the shutdown close (weak). Revisit by giving `grant_and_persist` the same resolve-then-guard shape Step 5 gives revokes.
-- The `models` UI guard rejecting a `null` description from non-PromptForge upstreams (weak). Revisit if a third-party catalog upstream is supported.
+- The `models` UI guard rejecting a `null` description from non-Runvil upstreams (weak). Revisit if a third-party catalog upstream is supported.
 
 </decision-record>
 <project-survey>
@@ -192,10 +192,10 @@ isProject: false
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features`. Never run a standalone `cargo check --workspace` beside the clippy runs. TypeScript: `npm run typecheck` in each UI package.
 - Formatter check command: `cargo fmt --all --check` (Rust only; no TypeScript formatter is configured).
-- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and, for the facade with default features, `cargo doc -p promptforge --no-deps`, both with `RUSTDOCFLAGS="-D warnings"` (in PowerShell set `$env:RUSTDOCFLAGS` for the call and clear it afterward). Also `cargo doc --locked --no-deps -p workshop-server --document-private-items`, the user guide via `cargo xtask site --books-only`, and the facade surface via `cargo +<nightly pinned in crates/build-xtask/src/api/toolchain.rs> xtask api --check`.
+- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and, for the facade with default features, `cargo doc -p runvil --no-deps`, both with `RUSTDOCFLAGS="-D warnings"` (in PowerShell set `$env:RUSTDOCFLAGS` for the call and clear it afterward). Also `cargo doc --locked --no-deps -p workshop-server --document-private-items`, the user guide via `cargo xtask site --books-only`, and the facade surface via `cargo +<nightly pinned in crates/build-xtask/src/api/toolchain.rs> xtask api --check`.
 - Test placement and naming conventions: Rust unit tests live in a kebab sibling `<module>-tests.rs` wired at the end of the module with `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;`, or in `<dir>/tests.rs` when the module is already a directory. Integration tests live in the crate's top-level `tests/`, typically as one `it` binary (`tests/it/main.rs` plus one module per area such as `boot.rs` or `chat_gate.rs`, helpers in `support.rs` or `tests/common/`, data in `tests/fixtures/`). Criterion benches sit in `benches/` of the engine and lua crates. Test functions are snake_case behavior sentences, for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`. `unwrap` and `expect` are allowed only in tests (`clippy.toml`). Workshop UI tests are `crates/workshop/ui/test/<feature>.mjs` run by `node --test` with shared helpers in `test/helpers/`; gateway config UI tests are colocated `src/**/*.test.mjs`. Behavior changes ship with tests in the same change.
 - Directory map:
-  - `crates/`: every Rust crate plus the TypeScript UIs. Public crates sit at the root (`promptforge`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), beside meta tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), `shared-ui` (shared TypeScript and CSS controls, not a Rust crate), and four manifestless private family containers: `promptforge-internal/`, `gateway/`, `harness/`, `workshop/`.
+  - `crates/`: every Rust crate plus the TypeScript UIs. Public crates sit at the root (`runvil`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`), beside meta tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), `shared-ui` (shared TypeScript and CSS controls, not a Rust crate), and four manifestless private family containers: `runvil-internal/`, `gateway/`, `harness/`, `workshop/`.
   - `crates/workshop/ui/`: the Workshop SPA in TypeScript, layered as `src/base`, `src/services`, `src/parts`, and `src/tokens`, with tests in `test/`.
   - `guide/`: mdBook user guide books, landing page, and site chrome.
   - `prompts/`: example prompt pipelines.
@@ -209,10 +209,10 @@ isProject: false
   - `local/` (gitignored local gateway config, profiles, and fixtures), `target/` and `target-msrv/` (build output).
   - Root files: `Cargo.toml` (workspace members, default member `crates/gateway/app`, shared dependencies and lints), `AGENTS.md` (repo rules and verification gates), `rust-toolchain.toml` (stable), `clippy.toml`, `rustfmt.toml`, `deny.toml`, `dist-workspace.toml`.
 - Component boundaries:
-  - PromptForge: the `promptforge` facade is the family's only public crate. The private `promptforge-internal/` holds engine (sans-I/O executor), types (wire vocabulary only), vfs, lua, parser, store, and model-client. Depends only on shared crates; never on gateway, workshop, or Harness crates.
-  - Gateway: the public pair `gateway-api-types` and `gateway-api-discovery`. The private `gateway/` holds app (the server binary), routing, local, cloud-providers, config, config-ui, logging, progress, protocol, web-search, and the nested `stt/` subsystem, where only `gateway-stt` is visible to the family. Never depends on promptforge, workshop, or Harness crates.
-  - Harness: the public `harness-api`. The private `harness/` holds runner, models, plugins, log (the Turso run log), sessions, web, webfetch, and web-search. May depend on `promptforge`, the gateway public pair, and shared crates; never on workshop or private gateway crates.
-  - Workshop: the private `workshop/` holds the desktop app (package `workshop`), which depends on `workshop-server-api` and never on `workshop-server`. Server crates form four tiers, each depending only on tiers below it: server (`workshop-server`), features (`workshop-user-state`, `workshop-workspace`), services (`workshop-gateway`, `workshop-menu`, `workshop-status`), and vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`). Reaches other products only through `harness-api`, `promptforge`, and the gateway public pair.
+  - Runvil: the `runvil` facade is the family's only public crate. The private `runvil-internal/` holds engine (sans-I/O executor), types (wire vocabulary only), vfs, lua, parser, store, and model-client. Depends only on shared crates; never on gateway, workshop, or Harness crates.
+  - Gateway: the public pair `gateway-api-types` and `gateway-api-discovery`. The private `gateway/` holds app (the server binary), routing, local, cloud-providers, config, config-ui, logging, progress, protocol, web-search, and the nested `stt/` subsystem, where only `gateway-stt` is visible to the family. Never depends on runvil, workshop, or Harness crates.
+  - Harness: the public `harness-api`. The private `harness/` holds runner, models, plugins, log (the Turso run log), sessions, web, webfetch, and web-search. May depend on `runvil`, the gateway public pair, and shared crates; never on workshop or private gateway crates.
+  - Workshop: the private `workshop/` holds the desktop app (package `workshop`), which depends on `workshop-server-api` and never on `workshop-server`. Server crates form four tiers, each depending only on tiers below it: server (`workshop-server`), features (`workshop-user-state`, `workshop-workspace`), services (`workshop-gateway`, `workshop-menu`, `workshop-status`), and vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`). Reaches other products only through `harness-api`, `runvil`, and the gateway public pair.
   - Shared (`shared-error-source`, `shared-loopback`): no product dependencies.
   - Enforcement: `cargo test -p build-xtask` checks the tier graph, container privacy, the product-boundary matrix, the mandatory `## Invariants` marker, and the 500-line ceiling. The rules bind normal, dev, build, and target-specific dependencies.
 - Conventions summary:
@@ -286,7 +286,7 @@ isProject: false
   - `the_launch_wait_fails_at_its_budget_with_the_last_probe_error` (line 346) uses the fake seam and a `health` closure that always returns a constructed `HealthError::Timeout { .. }`. It asserts an exact probe count derived from the budget and `RECOVERY_POLL_INTERVAL`, and that the message contains both "no validated gateway discovery file" and the last probe error. It has no `Instant::now` or `elapsed`.
   - `the_launch_wait_completes_when_a_dead_port_file_is_replaced_by_a_live_one` (line 314) uses the fake seam. Its first file names a fixed port, different from the live fixture's, that is never probed. The `health` closure fails the first call by construction and writes the live file, then probes the live gateway on the second call. It keeps `probes == 2` and `waited == live`.
 - Verify:
-  - Setup, once: `npm ci` in `crates/workshop/ui` and in `crates/gateway/config-ui/ui`, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`. The staged sidecar is gitignored. Leave it staged for Step 4.
+  - Setup, once: `npm ci` in `crates/workshop/ui` and in `crates/gateway/config-ui/ui`, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`. The staged sidecar is gitignored. Leave it staged for Step 4.
   - `cargo nextest run --locked -p workshop`, at least three times in a row.
   - `rg -n "thread::sleep|elapsed\(\)|dead_port" crates/workshop/desktop/src/gateway/tests/boot.rs` finds no hit in the three tests above.
   - `rg -n "wait_for_launched_file_cancellable_with" crates/workshop/desktop` shows that every call passes a seam.
@@ -327,7 +327,7 @@ isProject: false
   - This plan's repository copy, `vibe/2026-09-26-1-workshop-debt-removal.md`, which the run's seed commit creates before Step 1. Record into that copy; don't create another.
   - An `Exit results` list inside this step in that copy. Each line gives the command and its result, with the matching number from the `Exit results` list under Step 21 of `vibe/2026-09-25-3-workshop-structure.md` in brackets beside it.
 - Tests (the Testing Plan's exit commands, verbatim):
-  - Setup for the `workshop` package, if the sidecar isn't still staged from Step 2: `npm ci` in both UI packages, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+  - Setup for the `workshop` package, if the sidecar isn't still staged from Step 2: `npm ci` in both UI packages, then `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
   - `cargo nextest run --locked -p workshop-workspace --all-features` (Windows)
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - `cargo nextest run --locked -p workshop-server --features headless`

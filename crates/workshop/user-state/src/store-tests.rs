@@ -131,7 +131,7 @@ async fn a_write_leaves_no_temp_and_the_file_holds_the_full_document() {
     assert_eq!(
         dir_names(dir.path()),
         [USER_STATE_FILE],
-        "the state file is the only thing left behind; no .pf-tmp remains"
+        "the state file is the only thing left behind; no .rv-tmp remains"
     );
     let document: Value =
         serde_json::from_slice(&std::fs::read(dir.path().join(USER_STATE_FILE)).expect("readable"))

@@ -1,4 +1,4 @@
-//! The `promptforge:file-drop` dispatch shared by both drop paths: the
+//! The `runvil:file-drop` dispatch shared by both drop paths: the
 //! Windows WebView2 web-message bridge ([`crate::bridge`]) and Tauri's own
 //! drag-drop window event everywhere else.
 //!
@@ -25,7 +25,7 @@ fn normalize_dropped_path(path: &Path) -> String {
     }
 }
 
-/// Dispatches the `promptforge:file-drop` event with the normalized
+/// Dispatches the `runvil:file-drop` event with the normalized
 /// dropped paths. The page listens for the event and grants each path
 /// through the workspace HTTP API.
 pub(crate) fn dispatch_file_drop(window: &tauri::WebviewWindow, paths: &[PathBuf]) {
@@ -41,7 +41,7 @@ pub(crate) fn dispatch_file_drop(window: &tauri::WebviewWindow, paths: &[PathBuf
         }
     };
     let script = format!(
-        "window.dispatchEvent(new CustomEvent(\"promptforge:file-drop\", {{detail: {{paths: {detail}}}}}));"
+        "window.dispatchEvent(new CustomEvent(\"runvil:file-drop\", {{detail: {{paths: {detail}}}}}));"
     );
     if let Err(error) = window.eval(&script) {
         eprintln!("could not dispatch the file-drop event: {error}");
@@ -60,7 +60,7 @@ mod tests {
             r"C:\Users\Vinnie\Documents\project",
             r"C:\Users\Vinnie\My Documents\file name.txt",
             "C:\\Users\\Vinnie\\caf\u{e9} \u{4e2d}\u{6587}.txt",
-            r"D:\src\promptforge\crates",
+            r"D:\src\runvil\crates",
         ] {
             assert_eq!(normalize_dropped_path(Path::new(path)), path, "{path}");
         }

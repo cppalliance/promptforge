@@ -1,5 +1,5 @@
 //! The standard client a Host uses to run model rounds, list models, and
-//! search the web through the PromptForge Gateway.
+//! search the web through the Runvil Gateway.
 //!
 //! [`GatewayBroker`] is the [`harness::InferenceBroker`] that a Host using
 //! the Gateway passes to `Harness::new`. It runs every model round on a
@@ -29,7 +29,7 @@
 //!
 //! Under the client sits the OpenAI chat-completions wire code. It turns a
 //! round into a request body, a streamed reply into a
-//! [`Completion`](promptforge::model::Completion), and a failed response
+//! [`Completion`](runvil::model::Completion), and a failed response
 //! into the [`CompletionError`] the round fails with.
 //!
 //! - [`build_request_body`] builds the JSON body that every round sends.
@@ -80,8 +80,8 @@ pub use config::GatewayConfigError;
 pub use config::GatewayEndpoint;
 pub use config::SecretError;
 pub use config::SecretString;
-pub use promptforge::model::CompletionError;
-pub use promptforge::model::CompletionErrorKind;
+pub use runvil::model::CompletionError;
+pub use runvil::model::CompletionErrorKind;
 pub use search::GatewaySearch;
 pub use search::GatewaySearchError;
 pub use search::GatewaySearchErrorKind;

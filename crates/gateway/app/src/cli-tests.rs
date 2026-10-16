@@ -3,7 +3,7 @@
 use super::*;
 
 fn args(items: &[&str]) -> Vec<OsString> {
-    std::iter::once("promptforge-gateway")
+    std::iter::once("runvil-gateway")
         .chain(items.iter().copied())
         .map(OsString::from)
         .collect()

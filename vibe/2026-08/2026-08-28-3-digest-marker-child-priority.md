@@ -22,17 +22,17 @@ isProject: false
 
 # Digest Marker, Child Priority, and Switch-Failure Diagnosis
 
-**Task size (vibe-rulebook): Bounded** - one spike plus two committed fixes, with a third commit conditional on the spike. Governing: `tools-public/rulebooks/vibe-rulebook.md` (process), `tools-public/rulebooks/rust-rulebook.md` (all code), `promptforge/AGENTS.md` (house rules; an earlier glob confirmed no nested AGENTS.md exists under `promptforge-gateway`, so the root file is the whole manifest for every step).
+**Task size (vibe-rulebook): Bounded** - one spike plus two committed fixes, with a third commit conditional on the spike. Governing: `tools-public/rulebooks/vibe-rulebook.md` (process), `tools-public/rulebooks/rust-rulebook.md` (all code), `runvil/AGENTS.md` (house rules; an earlier glob confirmed no nested AGENTS.md exists under `runvil-gateway`, so the root file is the whole manifest for every step).
 
 **Review history:** this plan was revised after a defect pass found (a) the Gemma-4 dialect commit rested on an unproven root cause, and (b) the priority commit's rationale overstated its effect. Both are corrected below.
 
 ## Run machinery (vibe-rulebook)
 
 - **Scratch dir:** `cabinet/_scratch/vibe-gateway-switch-fixes/` holds `vibe-ledger.md` (append-only, one line per step: step, commit hash, Verify status, solo decisions with falsifiers) and `vibe-review.md` (open findings, carried forward verbatim between reviews). Main writes the ledger itself.
-- **Worktree gate:** if the promptforge worktree is dirty at run start, stop and tell the user to commit or stash first. The tool never pushes.
+- **Worktree gate:** if the runvil worktree is dirty at run start, stop and tell the user to commit or stash first. The tool never pushes.
 - **Spike (Step 0):** per the rulebook's Spike path - no kept code, no review: find the answer, report it, delete the artifacts. Its outcome routes the run: `DialectResolution`/`NoMatch` unlocks Commit 3; anything else cancels Commit 3 and the plan is updated with what the spike actually found before any fix is built.
-- **Per-commit checklist (Commits 1-3):** create the step checklist; dispatch the **Coder** subagent (role, this plan's path, step id, `<rule-book>` block name, `promptforge/AGENTS.md`, `tools-public/rulebooks/rust-rulebook.md`); commit; dispatch **Review-and-Fix** (adds `<code-review>`); amend if it dirtied the tree; run **Verify** when scheduled.
-- **Verify schedule:** when review-and-fix dirtied the tree, and on the final commit. Final Verify runs `cargo test --locked --workspace --all-features`; earlier Verifies run the step's focused command (`cargo test --locked -p promptforge-gateway` with the step's filter). An unfixed Critical finding blocks the next commit; three red Verify rounds stop the run.
+- **Per-commit checklist (Commits 1-3):** create the step checklist; dispatch the **Coder** subagent (role, this plan's path, step id, `<rule-book>` block name, `runvil/AGENTS.md`, `tools-public/rulebooks/rust-rulebook.md`); commit; dispatch **Review-and-Fix** (adds `<code-review>`); amend if it dirtied the tree; run **Verify** when scheduled.
+- **Verify schedule:** when review-and-fix dirtied the tree, and on the final commit. Final Verify runs `cargo test --locked --workspace --all-features`; earlier Verifies run the step's focused command (`cargo test --locked -p runvil-gateway` with the step's filter). An unfixed Critical finding blocks the next commit; three red Verify rounds stop the run.
 - **Commit messages:** first line <= 60 chars; body 100-400 tokens with an overview of the high-level changes; zero to 3 bullets for non-obvious notes or plan deviations with what forced them; no step numbers.
 - **Solo decisions** (rule 2): reversible calls are made and recorded in the ledger with falsifiers; the spike's outcome routing is the only planned branch point.
 
@@ -40,14 +40,14 @@ isProject: false
 
 - `gemma-4-31B-it-UD-Q4_K_XL.gguf` (18.8 GB) and `Qwen3.8-27B-Q8_0.gguf` (29 GB) are fully downloaded in the cache; `Qwen3.5-9B-Q4_K_M.gguf` exists only as a 2 GB `.part` (incomplete download).
 - Gemma-4 loads in the pinned Vulkan llama-server (b10082) in ~24 s with the gateway's exact launch flags; `/props` reports `chat_template_caps.supports_tool_calls: true`.
-- The gateway's dialect probe reads `has_tool_call_capability` from `/v1/models` ([local/dialect.rs:290](promptforge/crates/promptforge-gateway/src/local/dialect.rs:290)), and per that code's own comment a `--jinja` server with a tool-capable template reports it - so the existing code likely already resolves Gemma-4 to `"openai"`.
+- The gateway's dialect probe reads `has_tool_call_capability` from `/v1/models` ([local/dialect.rs:290](runvil/crates/runvil-gateway/src/local/dialect.rs:290)), and per that code's own comment a `--jinja` server with a tool-capable template reports it - so the existing code likely already resolves Gemma-4 to `"openai"`.
 - The actual switch-failure error was never captured; the UI shows only the generic label (`chat_ws.rs` pushes the gateway's detailed message alongside it).
 
 ## Step 0 (spike): capture the real failure
 
 Reproduce the switch with the gateway in the foreground and read the terminal error event, which carries the full source chain via `error_chain`:
 
-- Run `promptforge-gateway serve` against `~/.promptforge/gateway.toml` with tracing at `debug` for `promptforge_gateway`.
+- Run `runvil-gateway serve` against `~/.runvil/gateway.toml` with tracing at `debug` for `runvil_gateway`.
 - POST `/admin/switch-profile` with the failing profile name and record the SSE stream's terminal `error` event message.
 - Also record which profile was being switched to when the failure occurred.
 
@@ -55,7 +55,7 @@ Outcome routing: if the chain ends in `DialectResolution`/`NoMatch`, proceed to 
 
 ## Commit 1: verified-digest marker for cached models
 
-New submodule `crates/promptforge-gateway/src/local/artifacts/verified.rs`:
+New submodule `crates/runvil-gateway/src/local/artifacts/verified.rs`:
 
 ```rust
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,7 +80,7 @@ pub(super) fn verify_blob(
 - Marker format: plain lines via `write_synced` - line 1 the verified SHA-256 hex, line 2 file size, line 3 mtime as `<secs>.<nanos>` from `UNIX_EPOCH`.
 - Validation: `validate_cache_path` on both paths; marker exists AND pin matches AND size+mtime match -> `MarkerHit`, zero disk reads. Missing/stale/corrupt -> `file_digest`; on match write the marker and return `Hashed`; on mismatch delete the stale marker and return the existing `DigestMismatch`.
 - Marker locations: URL models beside the blob (`<cache>/models/<key>/<name>.verified`, under the existing `lock_artifact` guard); path sources at `<cache>/markers/<source_cache_key(path)>.verified`.
-- Wire-in: `ensure_blob` cache-hit branch ([artifacts.rs:230](promptforge/crates/promptforge-gateway/src/local/artifacts.rs:230)), the post-download verification in the same function, and the path-source branch of `ensure_model` ([artifacts.rs:120](promptforge/crates/promptforge-gateway/src/local/artifacts.rs:120)).
+- Wire-in: `ensure_blob` cache-hit branch ([artifacts.rs:230](runvil/crates/runvil-gateway/src/local/artifacts.rs:230)), the post-download verification in the same function, and the path-source branch of `ensure_model` ([artifacts.rs:120](runvil/crates/runvil-gateway/src/local/artifacts.rs:120)).
 
 **Accepted trust tradeoff (code comment + commit message):** mtime+size is spoofable by anyone who can write the cache; the cache root is already operator-trusted. The pin still fully guards the download path - a marker is written only after a real hash match.
 
@@ -88,7 +88,7 @@ Tests (`local/artifacts/tests.rs`, tempfile fixtures): first run hashes and writ
 
 ## Commit 2: spawn llama-server at below-normal priority on Windows
 
-In [local/server/support.rs](promptforge/crates/promptforge-gateway/src/local/server/support.rs:41), factor production `Command` construction into `production_command(request)` and apply:
+In [local/server/support.rs](runvil/crates/runvil-gateway/src/local/server/support.rs:41), factor production `Command` construction into `production_command(request)` and apply:
 
 ```rust
 /// Win32 BELOW_NORMAL_PRIORITY_CLASS. Raw value: stable ABI, avoids a
@@ -103,7 +103,7 @@ const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 }
 ```
 
-- Respawns inherit it (same `ChildSpawner`, [server.rs:449](promptforge/crates/promptforge-gateway/src/local/server.rs:449)).
+- Respawns inherit it (same `ChildSpawner`, [server.rs:449](runvil/crates/runvil-gateway/src/local/server.rs:449)).
 - Non-Windows: documented no-op.
 - Unconditional, not config-gated.
 
@@ -113,7 +113,7 @@ Test: `#[cfg(windows)]` test spawning `cmd /c exit 0` through `production_comman
 
 ## Commit 3 (CONDITIONAL): Gemma-4 dialect recognition
 
-**Only if Step 0 proves the switch fails in dialect resolution.** In [local/dialect.rs](promptforge/crates/promptforge-gateway/src/local/dialect.rs):
+**Only if Step 0 proves the switch fails in dialect resolution.** In [local/dialect.rs](runvil/crates/runvil-gateway/src/local/dialect.rs):
 
 - `fetch_props_evidence`: also read `props.chat_template_caps.supports_tool_calls` before falling back to the `/v1/models` probe.
 - `openai_score`: add the Gemma-4 conjunction `template.contains("<|tool_call|>") && template.contains("<|tool_response|>")`.
@@ -125,7 +125,7 @@ If Step 0 clears dialect resolution, this commit is cancelled and the spike's ac
 ## Verification
 
 - Rust-rulebook gates before every commit: `cargo fmt --all --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`.
-- Per commit: `cargo test --locked -p promptforge-gateway` with the step's focused filter (`local::artifacts` / `local::server` / `local::dialect`).
+- Per commit: `cargo test --locked -p runvil-gateway` with the step's focused filter (`local::artifacts` / `local::server` / `local::dialect`).
 - Final Verify: `cargo test --locked --workspace --all-features`.
 - Manual: next real profile switch - `starting-models` begins weight loading without a hash pass, and the switch to `gemma` either succeeds or fails with a captured, specific error.
 
@@ -135,7 +135,7 @@ If Step 0 clears dialect resolution, this commit is cancelled and the spike's ac
 - Defender exclusion for the cache dir (operator action).
 - Completing or removing the partial `Qwen3.5-9B` download (operator action; the next switch to a profile containing it will resume it).
 - Diffing old vs new model sets on switch to keep surviving children running.
-- whisper worker priority in promptforge-ws-server.
+- whisper worker priority in runvil-ws-server.
 
 
 ---
@@ -178,7 +178,7 @@ Design thinking behind each:
 
 4. Unix priority lowering. Considered and deferred: `nice` would need libc/`pre_exec` unsafe; the change is a documented no-op off Windows.
 
-5. Deliberately out of scope per the chat: Defender exclusion for the cache dir (operator action), completing/removing the partial Qwen3.5-9B download, diffing old vs new model sets to keep surviving children running, whisper worker priority in promptforge-ws-server.
+5. Deliberately out of scope per the chat: Defender exclusion for the cache dir (operator action), completing/removing the partial Qwen3.5-9B download, diffing old vs new model sets to keep surviving children running, whisper worker priority in runvil-ws-server.
 
 ## Execution note (post-plan, same chat)
 

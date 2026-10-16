@@ -1,6 +1,6 @@
 ---
 name: Brave web search tools
-overview: Add web_search (via Brave API through gateway) and web_fetch (local, in-process) tools to promptforge, with the tool-call loop in the executor.
+overview: Add web_search (via Brave API through gateway) and web_fetch (local, in-process) tools to runvil, with the tool-call loop in the executor.
 todos:
   - id: step-1
     content: "Gateway tools config: add optional [tools.web_search] to config parsing with test"
@@ -36,7 +36,7 @@ isProject: false
 
 ## What We Are Building
 
-Two built-in tools for promptforge - `web_search` (Brave API, credential held by gateway) and `web_fetch` (local HTTP fetch + HTML-to-markdown) - plus the executor loop that lets a model call tools and receive results.
+Two built-in tools for runvil - `web_search` (Brave API, credential held by gateway) and `web_fetch` (local HTTP fetch + HTML-to-markdown) - plus the executor loop that lets a model call tools and receive results.
 
 ## High-Level Components (dependency order)
 
@@ -52,15 +52,15 @@ Two built-in tools for promptforge - `web_search` (Brave API, credential held by
 
 ```mermaid
 flowchart LR
-    subgraph CLI["promptforge-cli"]
+    subgraph CLI["runvil-cli"]
         Executor["executor (tool loop)"]
     end
-    subgraph Core["promptforge-core"]
+    subgraph Core["runvil-core"]
         WebFetch["web_fetch (local)"]
         ToolTrait["Tool trait"]
         RemoteProxy["WebSearch proxy"]
     end
-    subgraph Gateway["promptforge-gateway"]
+    subgraph Gateway["runvil-gateway"]
         Route["/v1/tools/web_search"]
         BraveClient["Brave API client"]
     end
@@ -83,7 +83,7 @@ flowchart LR
 
 ## Key Design Decisions
 
-- Gateway does not depend on `promptforge-core` (credential proxy only)
+- Gateway does not depend on `runvil-core` (credential proxy only)
 - `web_fetch` runs locally (no credential needed), `web_search` proxies through gateway
 - No feature gates - one binary, unconditional
 - Tool-call loop caps at 10 iterations to prevent runaway
@@ -110,7 +110,7 @@ Each step is one commit with its code, test, and docs.
 
 Add optional `[tools.web_search]` section to gateway config.
 
-File: `crates/promptforge-gateway/src/config.rs`
+File: `crates/runvil-gateway/src/config.rs`
 
 ```toml
 [tools.web_search]
@@ -129,7 +129,7 @@ api_key = "${BRAVE_API_KEY}"
 
 ### Step 2: Gateway web_search route
 
-File: `crates/promptforge-gateway/src/tools.rs`
+File: `crates/runvil-gateway/src/tools.rs`
 
 - `POST /v1/tools/web_search` - bearer-authed, reuse `check_auth` from `lib.rs`
 - Request body struct: `WebSearchRequest { query: String, count: Option<u8> }` (count defaults to 10)
@@ -143,7 +143,7 @@ File: `crates/promptforge-gateway/src/tools.rs`
 
 ### Step 3: Core Tool trait
 
-File: `crates/promptforge-core/src/tools.rs` (parent module file)
+File: `crates/runvil-core/src/tools.rs` (parent module file)
 
 ```rust
 /// A tool the executor can dispatch during a model's tool-call loop.
@@ -174,7 +174,7 @@ pub trait Tool: Send + Sync {
 
 ### Step 4: Core WebFetch
 
-File: `crates/promptforge-core/src/tools/web_fetch.rs`
+File: `crates/runvil-core/src/tools/web_fetch.rs`
 
 - `pub struct WebFetch` - zero-sized, implements `Tool`
 - `name()` returns `"web_fetch"`
@@ -192,11 +192,11 @@ File: `crates/promptforge-core/src/tools/web_fetch.rs`
 - Unit test: canned HTML with article content, verify markdown output; canned non-article HTML, verify htmd fallback fires
 
 New workspace deps in root `Cargo.toml`: `readabilityrs = "0.1"`, `htmd = "0.5"`
-New deps in `promptforge-core/Cargo.toml`: `readabilityrs.workspace = true`, `htmd.workspace = true`, `async-trait.workspace = true`
+New deps in `runvil-core/Cargo.toml`: `readabilityrs.workspace = true`, `htmd.workspace = true`, `async-trait.workspace = true`
 
 ### Step 5: Core WebSearch proxy
 
-File: `crates/promptforge-core/src/tools/web_search.rs`
+File: `crates/runvil-core/src/tools/web_search.rs`
 
 - `pub struct WebSearch { base_url: String, token: String }`
 - Constructor: `pub fn new(base_url: &str, token: impl Into<String>) -> Self`
@@ -208,7 +208,7 @@ File: `crates/promptforge-core/src/tools/web_search.rs`
 
 ### Step 6: Client tool support
 
-File: `crates/promptforge-core/src/client.rs`
+File: `crates/runvil-core/src/client.rs`
 
 - New types (all with `#[derive(Debug, Clone, serde::Serialize)]` or `Deserialize` as appropriate):
   - `ToolSchema { name: String, description: String, parameters: Value }` - the OpenAI function-calling shape
@@ -224,7 +224,7 @@ File: `crates/promptforge-core/src/client.rs`
 
 ### Step 7: Executor tool-call loop
 
-File: `crates/promptforge-core/src/execute.rs`
+File: `crates/runvil-core/src/execute.rs`
 
 - `pub async fn run` gains `tools: &[&dyn Tool]`
 - Build `ToolSchema` vec from provided tools, pass to `client.complete()`
@@ -241,12 +241,12 @@ File: `crates/promptforge-core/src/execute.rs`
 
 ### Step 8: Frontmatter + CLI wiring
 
-Files: `crates/promptforge-core/src/parser.rs`, `crates/promptforge-cli/src/main.rs`
+Files: `crates/runvil-core/src/parser.rs`, `crates/runvil-cli/src/main.rs`
 
 - Parser: add `#[serde(default)] pub tools: Vec<String>` to `Frontmatter`
 - CLI: 
   - Always instantiate `WebFetch`
-  - Instantiate `WebSearch::new(base_url, token)` when `PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN` are set
+  - Instantiate `WebSearch::new(base_url, token)` when `RUNVIL_BASE_URL` and `RUNVIL_TOKEN` are set
   - Filter tool list by frontmatter's `tools` field
   - Pass filtered `&[&dyn Tool]` to `execute::run`
 - Graceful: if a prompt requests `web_search` but no gateway is configured, return a clear error before execution
@@ -270,7 +270,7 @@ File: `README.md`
 
 In addition to the standard code-review checks, each commit must:
 
-1. Not introduce any dependency between `promptforge-gateway` and `promptforge-core`
+1. Not introduce any dependency between `runvil-gateway` and `runvil-core`
 2. Pass `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -- -D warnings`
 3. Preserve the existing test suite (no regressions)
 4. Use `Secret` type for any new credential handling

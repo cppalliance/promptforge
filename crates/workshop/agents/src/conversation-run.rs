@@ -9,7 +9,7 @@ use harness::plugin::HostServices;
 use harness::record::{RunOutcome, RunRecorder};
 use harness::{Harness, HarnessError, RunReport, RunRequest, display_chain};
 use plugin_user_input::{INPUT_BROKER, InputBroker};
-use promptforge::ids::RoundId;
+use runvil::ids::RoundId;
 use tokio::sync::broadcast;
 
 use super::{Conversation, lock};

@@ -6,10 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge Workshop desktop app: runs the workshop server in-process and opens the workshop window"
+description = "Runvil Workshop desktop app: runs the workshop server in-process and opens the workshop window"
 
 [[bin]]
-name = "promptforge-workshop"
+name = "runvil-workshop"
 path = "src/main.rs"
 
 [dependencies]

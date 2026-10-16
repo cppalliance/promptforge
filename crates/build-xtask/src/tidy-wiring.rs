@@ -260,7 +260,7 @@ mod tests {
     fn a_crate_with_no_package_root_build_script_fails_even_with_a_src_build_module() {
         let root = tempfile::TempDir::new().expect("tempdir");
         write_wired(root.path());
-        let name = "promptforge-parser";
+        let name = "runvil-parser";
         let parser = write_built(root.path(), "parser", name, BUILD_DEPENDENCY, None);
         let module = parser.join("src").join("build.rs");
         std::fs::write(module, CALLS_CHECK).expect("the module writes");

@@ -152,7 +152,7 @@ export class UpdateService extends Disposable {
       downloaded,
       total: null,
       error: "",
-      log: [...this.state.log, `Downloading PromptForge ${update.version}`],
+      log: [...this.state.log, `Downloading Runvil ${update.version}`],
       background: false,
     });
     try {
@@ -174,7 +174,7 @@ export class UpdateService extends Disposable {
       });
       this.publish({
         phase: "restarting",
-        log: [...this.state.log, "Update installed. Restarting PromptForge."],
+        log: [...this.state.log, "Update installed. Restarting Runvil."],
       });
       await this.backend.relaunch();
     } catch (error) {
@@ -232,7 +232,7 @@ export class UpdateService extends Disposable {
         notes: oneLine(update.body),
         downloaded: 0,
         total: null,
-        log: [`PromptForge ${update.version} is available.`],
+        log: [`Runvil ${update.version} is available.`],
       });
     } catch (error) {
       const message = errorText(error);

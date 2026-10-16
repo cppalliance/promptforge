@@ -25,7 +25,7 @@ All runtime steps completed and merged to master through 0.1.0 release prep. The
 - `Prompt` struct carries `replay: Option<LuaProgram>` and `h1_blocks: Vec<Block>`
 - `execute::run` takes `&Prompt` + `ResolutionContext` directly
 - `lua shared` fence recognized in parser; exactly one allowed, H1 only
-- 504 promptforge-core lib tests pass
+- 504 runvil-core lib tests pass
 - CLI, dev, MCP all use parse-to-run path
 - `design-core-orig.md` was deleted (consolidated into `design-core.md`)
 
@@ -48,7 +48,7 @@ Plus the block sequence diagram:
 [lua] [prose] [lua] [prose] ... [lua]
 ```
 
-This was never added. Needs to go into the current monolithic `promptforge-user-guide.md` or the mdbook equivalent.
+This was never added. Needs to go into the current monolithic `runvil-user-guide.md` or the mdbook equivalent.
 
 ### 2. STATUS.md stale claim
 

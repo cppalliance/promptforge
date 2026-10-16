@@ -1,15 +1,15 @@
 ---
-name: extract promptforge-dev crate
-overview: Extract the interactive prompt runner into a new leaf binary `promptforge-dev` that never starts infrastructure, slim `promptforge-core-tests` to the 0.6B scenario suite, document the split, and update `briefer.md` so model knobs and the report footer live on the prompt.
+name: extract runvil-dev crate
+overview: Extract the interactive prompt runner into a new leaf binary `runvil-dev` that never starts infrastructure, slim `runvil-core-tests` to the 0.6B scenario suite, document the split, and update `briefer.md` so model knobs and the report footer live on the prompt.
 todos:
   - id: step-1-dev-crate
-    content: "Step 1: create promptforge-dev (runner + offline tests + crate docs)"
+    content: "Step 1: create runvil-dev (runner + offline tests + crate docs)"
     status: completed
   - id: step-2-slim-core-tests
-    content: "Step 2: slim promptforge-core-tests to scenarios only"
+    content: "Step 2: slim runvil-core-tests to scenarios only"
     status: completed
   - id: step-3-root-docs
-    content: "Step 3: point root README / STATUS at promptforge-dev"
+    content: "Step 3: point root README / STATUS at runvil-dev"
     status: completed
   - id: step-4-briefer
     content: "Step 4: update briefer.md (context on models.always + italic footer)"
@@ -17,33 +17,33 @@ todos:
 isProject: false
 ---
 
-# Extract `promptforge-dev` and simplify core-tests
+# Extract `runvil-dev` and simplify core-tests
 
 Governing rulebooks (load before coding or reviewing):
 
 - [`tools-public/rulebooks/vibe-rulebook.md`](c:\Users\Vinnie\src\cursor\tools-public\rulebooks\vibe-rulebook.md)
 - [`tools-public/rulebooks/rust-rulebook.md`](c:\Users\Vinnie\src\cursor\tools-public\rulebooks\rust-rulebook.md)
 
-House conventions come from existing leaf bins ([`promptforge-cli`](promptforge/crates/promptforge-cli/), [`promptforge-core-tests`](promptforge/crates/promptforge-core-tests/)): hand-rolled args (no clap), `anyhow` in binaries, workspace-inherited package fields and `[lints] workspace = true`, unit tests in the same file as the code.
+House conventions come from existing leaf bins ([`runvil-cli`](runvil/crates/runvil-cli/), [`runvil-core-tests`](runvil/crates/runvil-core-tests/)): hand-rolled args (no clap), `anyhow` in binaries, workspace-inherited package fields and `[lints] workspace = true`, unit tests in the same file as the code.
 
-Scratch for review findings: `cabinet/_scratch/vibe-review-promptforge-dev/vibe-review.md` (overwrite each review cycle). Main context never reads the body.
+Scratch for review findings: `cabinet/_scratch/vibe-review-runvil-dev/vibe-review.md` (overwrite each review cycle). Main context never reads the body.
 
 ## 1. What you are building
 
-A small author-facing binary that runs one PromptForge prompt against an already-running gateway, plus slimmer scenario fixtures that still run their own temporary 0.6B gateway for CI. Prompt authors declare context / thinking / max_tokens on the prompt; the CLI does not.
+A small author-facing binary that runs one Runvil prompt against an already-running gateway, plus slimmer scenario fixtures that still run their own temporary 0.6B gateway for CI. Prompt authors declare context / thinking / max_tokens on the prompt; the CLI does not.
 
 ## 2. High-level components (dependency order)
 
-1. **`promptforge-dev`** (new leaf binary) - depends on `promptforge-core`, `promptforge-tool-picker`, `promptforge-webfetch`. Owns interactive run / watch / dump. Never depends on gateway spawn code.
-2. **`promptforge-core-tests`** (existing, slimmed) - depends on core + picker + webfetch + its own `gateway` spawn for Scenario only. Loses the `dev` path and Dev profile.
+1. **`runvil-dev`** (new leaf binary) - depends on `runvil-core`, `runvil-tool-picker`, `runvil-webfetch`. Owns interactive run / watch / dump. Never depends on gateway spawn code.
+2. **`runvil-core-tests`** (existing, slimmed) - depends on core + picker + webfetch + its own `gateway` spawn for Scenario only. Loses the `dev` path and Dev profile.
 3. **Author docs** - crate README/design for the new tool; root and core-tests README stop advertising `core-tests -- dev`.
 4. **`briefer.md`** - example prompt that follows the prompt-owned-knobs rule and stamps the report footer.
 
 ```mermaid
 flowchart LR
   author["prompt author"]
-  dev["promptforge-dev"]
-  gw["promptforge-gateway already running"]
+  dev["runvil-dev"]
+  gw["runvil-gateway already running"]
   llama["llama-server"]
   brave["Brave API"]
   author --> dev
@@ -51,7 +51,7 @@ flowchart LR
   gw --> llama
   gw --> brave
 
-  ci["cargo run -p promptforge-core-tests"]
+  ci["cargo run -p runvil-core-tests"]
   tests["scenarios suite"]
   tempGw["temp gateway + 0.6B"]
   ci --> tests
@@ -60,43 +60,43 @@ flowchart LR
 
 ## 3. Pieces inside each component
 
-### `promptforge-dev`
+### `runvil-dev`
 
 | Path | Role |
 |---|---|
-| [`Cargo.toml`](promptforge/crates/promptforge-dev/Cargo.toml) | `publish = false`, bin `promptforge-dev`, deps via `*.workspace = true`, `[lints] workspace = true` |
+| [`Cargo.toml`](runvil/crates/runvil-dev/Cargo.toml) | `publish = false`, bin `runvil-dev`, deps via `*.workspace = true`, `[lints] workspace = true` |
 | `README.md` | Author-facing how-to |
 | `design.md` | What this crate owns and refuses to own |
 | `src/main.rs` | Thin args + exit-code mapping (`anyhow`, `ExitCode`) |
-| `src/run.rs` | One-shot parse / bind / execute (from [`dev.rs`](promptforge/crates/promptforge-core-tests/src/dev.rs)) |
-| `src/watch.rs` | Debounced rerun (from [`watch.rs`](promptforge/crates/promptforge-core-tests/src/watch.rs)) |
-| `src/dump.rs` | Store dump + `.trace/` (from [`dump.rs`](promptforge/crates/promptforge-core-tests/src/dump.rs)) |
-| `src/tools.rs` | `WebFetch` always; `WebSearch` when env credentials present (mirror [`promptforge-cli/src/tools.rs`](promptforge/crates/promptforge-cli/src/tools.rs)) |
+| `src/run.rs` | One-shot parse / bind / execute (from [`dev.rs`](runvil/crates/runvil-core-tests/src/dev.rs)) |
+| `src/watch.rs` | Debounced rerun (from [`watch.rs`](runvil/crates/runvil-core-tests/src/watch.rs)) |
+| `src/dump.rs` | Store dump + `.trace/` (from [`dump.rs`](runvil/crates/runvil-core-tests/src/dump.rs)) |
+| `src/tools.rs` | `WebFetch` always; `WebSearch` when env credentials present (mirror [`runvil-cli/src/tools.rs`](runvil/crates/runvil-cli/src/tools.rs)) |
 
 Behavior:
 
 1. Args: `<prompt> [input] [--watch]` only. No `--context` / `--max-tokens` / `--no-think`.
-2. Require `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` before parse; friendly hard-fail if missing.
+2. Require `RUNVIL_GATEWAY_URL` and `RUNVIL_GATEWAY_KEY` before parse; friendly hard-fail if missing.
 3. Clear `<prompt-stem>.store/` before each run; dump store and flush `.trace/` after success or failure.
 4. Catalog: `fetch_model_catalog` (replace `pinned_qwen_dev_catalog`). Tools: live registry + picker like the CLI.
 5. Client: `GatewayClient::new(url, key)`. Verbose observer on stderr; result on stdout. No gateway / llama spawn anywhere in this crate.
 
 Rust constraints for this crate (from rust-rulebook + house):
 
-- Leaf binary under `crates/promptforge-dev/`; add to root [`Cargo.toml`](promptforge/Cargo.toml) `members` list (workspace is an explicit list, not `crates/*`).
+- Leaf binary under `crates/runvil-dev/`; add to root [`Cargo.toml`](runvil/Cargo.toml) `members` list (workspace is an explicit list, not `crates/*`).
 - No `workspace.dependencies` entry unless another member depends on it (none will).
 - `main` stays thin; logic in modules named by domain (`run`, `watch`, `dump`, `tools`).
 - Expected failures return `Result` / map to `ExitCode`; panic only on bugs.
 - Unit tests in `#[cfg(test)] mod tests` in the same file; port offline tests (arg parse, dump, watch debounce, tool registry construction, missing-env fail). Do not run live-gateway tests in this crate.
-- Before each commit: `cargo fmt --all --check` and `cargo clippy -p promptforge-dev --all-targets --all-features -- -D warnings` (Verify owns the full suite when scheduled).
+- Before each commit: `cargo fmt --all --check` and `cargo clippy -p runvil-dev --all-targets --all-features -- -D warnings` (Verify owns the full suite when scheduled).
 
-### `promptforge-core-tests` (slim)
+### `runvil-core-tests` (slim)
 
 Keep: `scenarios.rs`, Scenario-only `gateway.rs`, offline `suite.rs`, fixtures under `prompts/valid|invalid|execution/`.
 
 Remove: `dev` subcommand and types in `main.rs`, `dev.rs`, `watch.rs`, `dump.rs`, `DevServerOptions`, `GatewayProfile::Dev`, `ModelKind::Dev`, `prompts/dev/`, and all `--context` / `--max-tokens` / `--no-think` parsing and gateway tests that assert Dev profile flags.
 
-Binary usage: `promptforge-core-tests` or `promptforge-core-tests scenarios` only.
+Binary usage: `runvil-core-tests` or `runvil-core-tests scenarios` only.
 
 ### Docs + `briefer.md`
 
@@ -106,7 +106,7 @@ See steps 3 and 4.
 
 | Decision | Falsifier |
 |---|---|
-| Crate / binary name is `promptforge-dev` | Binary or package name differs |
+| Crate / binary name is `runvil-dev` | Binary or package name differs |
 | Dev never starts gateway or llama | This crate contains spawn / `GatewayGuard` / `GatewayProfile` / process launch of those bins |
 | Scenario suite keeps temporary 0.6B sidecar | Scenarios require a hand-started gateway |
 | Prompt owns `context` / `thinking` / `max_tokens`; CLI does not | New CLI accepts `--context`, `--max-tokens`, or `--no-think` |
@@ -117,9 +117,9 @@ See steps 3 and 4.
 
 | Step | Needs from prior | Produces for later | Ambiguity? |
 |---|---|---|---|
-| 1 Create `promptforge-dev` | Existing `dev`/`watch`/`dump` sources; CLI `tools` + `fetch_model_catalog` pattern | Working binary + offline tests + crate docs; old modules still in core-tests until step 2 | None - copy then adapt, do not delete sources until step 2 |
+| 1 Create `runvil-dev` | Existing `dev`/`watch`/`dump` sources; CLI `tools` + `fetch_model_catalog` pattern | Working binary + offline tests + crate docs; old modules still in core-tests until step 2 | None - copy then adapt, do not delete sources until step 2 |
 | 2 Slim core-tests | Step 1 complete so authors have a home for the runner | Scenario-only binary; no Dev profile | None - delete only after step 1 lands |
-| 3 Root / STATUS docs | Steps 1-2 names and usage strings | Repo entry points point at `promptforge-dev` | None |
+| 3 Root / STATUS docs | Steps 1-2 names and usage strings | Repo entry points point at `runvil-dev` | None |
 | 4 `briefer.md` | Prompt-owned-knobs rule (decision) | Author example matches the rule | `context = 65536` locked; change only if user revises |
 
 Parallelism: none across steps (2 deletes what 1 copies). Inside step 1, module ports can be written in one coder pass.
@@ -138,9 +138,9 @@ Per vibe loop, for every step:
 
 Never stop for ordinary confirmation. Leftover review findings and a red Verify are not stop conditions; fix forward. Hard-to-reverse choices use rule 2 (already locked above).
 
-### Step 1 - Create `promptforge-dev` and move the runner
+### Step 1 - Create `runvil-dev` and move the runner
 
-Intent: authors can `cargo run -p promptforge-dev -- <prompt.md> [input] [--watch]` against an already-running gateway.
+Intent: authors can `cargo run -p runvil-dev -- <prompt.md> [input] [--watch]` against an already-running gateway.
 
 - Add crate + workspace `members` entry.
 - Port `dev` / `watch` / `dump` logic; strip every gateway-spawn / `DevServerOptions` / pinned-catalog path.
@@ -150,7 +150,7 @@ Intent: authors can `cargo run -p promptforge-dev -- <prompt.md> [input] [--watc
 
 Verify: scheduled (first component complete).
 
-### Step 2 - Slim `promptforge-core-tests` to scenarios + fixtures
+### Step 2 - Slim `runvil-core-tests` to scenarios + fixtures
 
 Intent: this crate is only the offline fixture suite + explicit 0.6B scenario fixtures.
 
@@ -158,17 +158,17 @@ Intent: this crate is only the offline fixture suite + explicit 0.6B scenario fi
 - Keep Scenario gateway spawn for 0.6B only.
 - Rewrite crate README around offline fixtures + `scenarios`.
 
-Verify: scheduled (second component complete). Offline `cargo test -p promptforge-core-tests` must pass; do not require a live scenario run in Verify unless the environment already has model cache (coder must not break Scenario compile path).
+Verify: scheduled (second component complete). Offline `cargo test -p runvil-core-tests` must pass; do not require a live scenario run in Verify unless the environment already has model cache (coder must not break Scenario compile path).
 
 ### Step 3 - Root docs pass
 
 Intent: repo entry points no longer advertise `core-tests -- dev`.
 
-- Update root [`README.md`](promptforge/README.md) and any STATUS mentions to point at `promptforge-dev`.
+- Update root [`README.md`](runvil/README.md) and any STATUS mentions to point at `runvil-dev`.
 
 Verify: skip unless review dirties (docs-only; final Verify still covers workspace).
 
-### Step 4 - Update [`briefer.md`](promptforge/briefer.md)
+### Step 4 - Update [`briefer.md`](runvil/briefer.md)
 
 Intent: the flagship prompt demonstrates prompt-owned knobs and cabinet-style report metadata.
 
@@ -180,7 +180,7 @@ Verify: scheduled (final step). Prefer `cargo fmt` / `clippy` / offline tests fo
 
 ## 7. Project-review (plan-local, in addition to vibe `<code-review>`)
 
-1. `promptforge-dev` never launches `promptforge-gateway` or `llama-server`.
+1. `runvil-dev` never launches `runvil-gateway` or `llama-server`.
 2. Missing gateway env fails before any prompt parse with a clear message.
 3. Scenario suite still compiles and retains temporary 0.6B gateway spawn.
 4. Store dump still clears before each run and writes `.trace/` after.

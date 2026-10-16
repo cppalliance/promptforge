@@ -1,6 +1,6 @@
 ---
 name: Write-through store traces
-overview: Make promptforge-dev write `.trace/` turn JSON and store files to `<stem>.store/` as events happen, instead of buffering until the run ends. Dev-crate only; no core API change.
+overview: Make runvil-dev write `.trace/` turn JSON and store files to `<stem>.store/` as events happen, instead of buffering until the run ends. Dev-crate only; no core API change.
 todos:
   - id: trace-write-through
     content: Write TraceCapture turn JSON in on_event; drop buffer/flush dependency
@@ -12,16 +12,16 @@ todos:
     content: Change dump_store to reconcile without wiping .trace
     status: completed
   - id: tests-docs
-    content: Update dump/run tests and promptforge-dev design.md
+    content: Update dump/run tests and runvil-dev design.md
     status: completed
 isProject: false
 ---
 
-# Write-through dump for promptforge-dev
+# Write-through dump for runvil-dev
 
 ## Problem
 
-Today [dump.rs](promptforge/crates/promptforge-dev/src/dump.rs) buffers all `DebugEvent`s and [run.rs](promptforge/crates/promptforge-dev/src/run.rs) only calls `dump_store` + `TraceCapture::flush` after `run()` returns. A long briefer leaves nothing inspectable under `briefer.store/` mid-flight.
+Today [dump.rs](runvil/crates/runvil-dev/src/dump.rs) buffers all `DebugEvent`s and [run.rs](runvil/crates/runvil-dev/src/run.rs) only calls `dump_store` + `TraceCapture::flush` after `run()` returns. A long briefer leaves nothing inspectable under `briefer.store/` mid-flight.
 
 ## Approach (dev-only)
 
@@ -38,7 +38,7 @@ flowchart LR
 
 ### 1. Immediate turn writes - `TraceCapture`
 
-In [dump.rs](promptforge/crates/promptforge-dev/src/dump.rs):
+In [dump.rs](runvil/crates/runvil-dev/src/dump.rs):
 
 - Drop the in-memory event buffer (or stop using it).
 - In `on_event`, create `.trace/` if needed and write `turn-{n}-request.json` / `turn-{n}-response.json` with the same pretty JSON as today.
@@ -48,7 +48,7 @@ In [dump.rs](promptforge/crates/promptforge-dev/src/dump.rs):
 
 ### 2. Live store mirror - new `MirrorStore`
 
-Still in `dump.rs`, implement `promptforge_core::store::Store` wrapping `MemStore`:
+Still in `dump.rs`, implement `runvil_core::store::Store` wrapping `MemStore`:
 
 - Hold `dump_root: PathBuf`.
 - After successful `write` / `append` / `str_replace`: read the new contents from the mem backend and write the safe relative path under `dump_root` (reuse `safe_relative_path`).
@@ -57,7 +57,7 @@ Still in `dump.rs`, implement `promptforge_core::store::Store` wrapping `MemStor
 - Unsafe paths: skip disk mirror, `eprintln!("store dump skipped ...")` (same policy as today’s dump).
 - Create parent dirs as needed; never touch `.trace/`.
 
-Wire in [run.rs](promptforge/crates/promptforge-dev/src/run.rs):
+Wire in [run.rs](runvil/crates/runvil-dev/src/run.rs):
 
 ```rust
 let store = StoreRef::new(Box::new(dump::MirrorStore::new(dump_directory(prompt_path))));
@@ -80,12 +80,12 @@ Remove the post-run `capture.flush(...)` call once write-through is live.
 
 ### 4. Docs and tests
 
-- Update [design.md](promptforge/crates/promptforge-dev/design.md) item on store/traces: write-through as events arrive; start clears; end reconciles without wiping `.trace/`.
+- Update [design.md](runvil/crates/runvil-dev/design.md) item on store/traces: write-through as events arrive; start clears; end reconciles without wiping `.trace/`.
 - Rewrite dump tests:
   - `on_event` creates turn files before any flush.
   - Reconcile does not delete existing `.trace/` files.
   - `MirrorStore` write appears on disk immediately; delete removes the file.
-  - Empty-store / second-run / partial-failure run tests in [run.rs](promptforge/crates/promptforge-dev/src/run.rs) still pass under write-through (start clear + reconcile).
+  - Empty-store / second-run / partial-failure run tests in [run.rs](runvil/crates/runvil-dev/src/run.rs) still pass under write-through (start clear + reconcile).
 
 ## Out of scope
 

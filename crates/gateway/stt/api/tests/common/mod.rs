@@ -16,7 +16,7 @@ use tower::ServiceExt as _;
 
 pub(crate) fn require_model() -> PathBuf {
     require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
+        "RUNVIL_WHISPER_MODEL",
         &native_fixture_root(),
         "ggml-tiny.en.bin",
     )
@@ -24,7 +24,7 @@ pub(crate) fn require_model() -> PathBuf {
 
 pub(crate) fn require_library() -> PathBuf {
     require_fixture(
-        "PROMPTFORGE_WHISPER_LIBRARY",
+        "RUNVIL_WHISPER_LIBRARY",
         &native_fixture_root(),
         "whisper.dll",
     )
@@ -32,7 +32,7 @@ pub(crate) fn require_library() -> PathBuf {
 
 pub(crate) fn jfk_pcm16() -> Vec<i16> {
     wav_pcm16(&require_fixture(
-        "PROMPTFORGE_WHISPER_AUDIO",
+        "RUNVIL_WHISPER_AUDIO",
         &native_fixture_root(),
         "jfk.wav",
     ))

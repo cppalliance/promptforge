@@ -1,4 +1,4 @@
-//! `cargo xtask api`: proves the `promptforge` facade's surface closed and
+//! `cargo xtask api`: proves the `runvil` facade's surface closed and
 //! snapshots it, from rustdoc JSON built on the pinned nightly.
 //!
 //! The facade and every internal crate are documented once, with the
@@ -7,7 +7,7 @@
 //! signature, fields, bounds, impls, or doc links name must be a facade
 //! re-export, std, core, alloc, or an allowlisted crate, and no surface
 //! doc text may name an internal crate. The listing is compared with
-//! `crates/promptforge/public-api.txt`.
+//! `crates/runvil/public-api.txt`.
 //!
 //! A listing line is the item's facade path with its signature, in this
 //! notation:
@@ -24,9 +24,9 @@
 //! - A provided trait method line ends in ` { .. }`, standing in for its
 //!   body.
 //!
-//! So `#[non_exhaustive] pub enum promptforge::vfs::VfsError`,
-//! `pub struct promptforge::vfs::AllowAll;`, and
-//! `pub struct promptforge::vfs::ExecId(/* private fields */)`.
+//! So `#[non_exhaustive] pub enum runvil::vfs::VfsError`,
+//! `pub struct runvil::vfs::AllowAll;`, and
+//! `pub struct runvil::vfs::ExecId(/* private fields */)`.
 //!
 //! - `cargo +<pinned nightly> xtask api` prints every violation and the
 //!   listing's difference.

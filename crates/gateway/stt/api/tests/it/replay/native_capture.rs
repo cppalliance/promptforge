@@ -1,5 +1,5 @@
 //! Native capture of `jfk.wav`, or of the 16 kHz mono clip that
-//! `PROMPTFORGE_WHISPER_AUDIO` names, through a production Realtime session
+//! `RUNVIL_WHISPER_AUDIO` names, through a production Realtime session
 //! into a replay script.
 //!
 //! The capture runs one decode at a time on a clock measured in audio
@@ -14,11 +14,11 @@
 //! final records the update the session sends for it.
 //!
 //! The final role uses the interim model unless
-//! `PROMPTFORGE_WHISPER_FINAL_MODEL` names another one. The session setup
+//! `RUNVIL_WHISPER_FINAL_MODEL` names another one. The session setup
 //! lives in `native_session`, shared with the long-speech test; the capture
 //! wraps its Whisper factory with the recording one.
 //!
-//! With `PROMPTFORGE_REPLAY_CAPTURE` naming a scratch `<name>.json` outside
+//! With `RUNVIL_REPLAY_CAPTURE` naming a scratch `<name>.json` outside
 //! the fixture directory, the capture writes its script there and its
 //! snapshots to `<name>.snapshots.json`, prints its metrics, and leaves the
 //! fixture alone, so decode experiments compare captures without replacing it.
@@ -47,8 +47,8 @@ use crate::native_session::audio;
 use crate::native_session::{self, CHUNK_SAMPLES, SAMPLES_PER_MS, TICK_SAMPLES, WINDOW_SECONDS};
 use recording::{Decode, Decodes, RecordingFactory, take_decodes};
 
-const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REPLAY_CAPTURE";
-const AUDIO_VARIABLE: &str = "PROMPTFORGE_WHISPER_AUDIO";
+const CAPTURE_VARIABLE: &str = "RUNVIL_REPLAY_CAPTURE";
+const AUDIO_VARIABLE: &str = "RUNVIL_WHISPER_AUDIO";
 const FIXTURE_AUDIO: &str = "jfk.wav";
 
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(60);

@@ -23,8 +23,8 @@ use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunOutcome};
 use harness_runner::{
     Harness, HarnessError, HostContext, PackageRegistry, RunControl, RunReport, RunRequest,
 };
-use promptforge::vfs::VfsRef;
-use promptforge_plugin::HostServices;
+use runvil::vfs::VfsRef;
+use runvil_plugin::HostServices;
 use serde_json::{Value, json};
 
 use crate::scripted::{Kept, MODEL, ScriptedBroker};
@@ -143,24 +143,24 @@ fn calls(tool: &'static str) -> impl Fn(&Value) -> bool {
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its
 /// output, whose one section writes the output from the input.
-const FILES: &str = "---\nname: files\ndescription: d\npromptforge: 0\n\
+const FILES: &str = "---\nname: files\ndescription: d\nrunvil: 0\n\
     input:\n  path: paper.md\n  description: The paper\n\
     output:\n  path: report.md\n  description: The report\n---\n\n\
     # Title\n\n## Only\n\n```lua\n\
     store.write('report.md', 'seen: ' .. store.read('paper.md'))\nreturn 'done'\n```\n";
 
 /// A prompt with unclosed frontmatter, so it does not parse.
-const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
+const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\nrunvil: 0\n\n# Title\n";
 
 /// A prompt that writes two store files and reads them back.
-const WRITES_TWICE: &str = "---\nname: writes\ndescription: d\npromptforge: 0\n---\n\n\
+const WRITES_TWICE: &str = "---\nname: writes\ndescription: d\nrunvil: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\n\
     store.write('a.md', '1')\nstore.write('b.md', '2')\n\
     return store.read('a.md') .. store.read('b.md')\n```\n";
 
 /// A prompt that writes a store file, infers once through its one role,
 /// and returns the reply beside the file.
-const INFERS_AND_STORES: &str = "---\nname: infers\ndescription: d\npromptforge: 0\n\
+const INFERS_AND_STORES: &str = "---\nname: infers\ndescription: d\nrunvil: 0\n\
     models:\n  writer: {}\n---\n\n\
     # Title\n\n```lua\nmodels.default('writer')\n```\n\n## Only\n\n```lua\n\
     store.write('note.md', 'kept')\n\

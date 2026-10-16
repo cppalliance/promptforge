@@ -33,7 +33,7 @@ isProject: false
 
 ## Goal
 
-Revise [promptforge/design/design-image-generation-endpoint.md](promptforge/design/design-image-generation-endpoint.md) so every claim survives the existing-practice evidence gathered from five research angles (OpenAI Images API, sd-server source, gateway prior art, local serving practice, Rust implementation practice). The two-phase architecture stands; the revisions sharpen correctness, hazards, and operational detail.
+Revise [runvil/design/design-image-generation-endpoint.md](runvil/design/design-image-generation-endpoint.md) so every claim survives the existing-practice evidence gathered from five research angles (OpenAI Images API, sd-server source, gateway prior art, local serving practice, Rust implementation practice). The two-phase architecture stands; the revisions sharpen correctness, hazards, and operational detail.
 
 ## Revision 1: Fix the sd-server supervision claims (Section 5)
 
@@ -86,4 +86,4 @@ Source-verified against stable-diffusion.cpp master (examples/server/runtime.cpp
 ## Verification
 
 - Every revised claim carries a source (repo file:line or research URL).
-- Headings still reconstruct the argument; Table 1 updated in place; no contradiction with `report-promptforge-gateway-comparison.md` beyond the already-flagged ComfyUI amendment.
+- Headings still reconstruct the argument; Table 1 updated in place; no contradiction with `report-runvil-gateway-comparison.md` beyond the already-flagged ComfyUI amendment.

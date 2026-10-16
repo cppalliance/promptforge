@@ -6,10 +6,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
+description = "Runvil inference gateway: routes OpenAI-shaped chat completions to a backend"
 
 [[bin]]
-name = "promptforge-gateway"
+name = "runvil-gateway"
 path = "src/main.rs"
 
 # build.rs embeds the program icon (assets/icon.ico, a copy of the

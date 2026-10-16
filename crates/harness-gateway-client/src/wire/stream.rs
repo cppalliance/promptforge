@@ -21,8 +21,8 @@
 
 use std::collections::BTreeMap;
 
-use promptforge::metrics::ClientTiming;
-use promptforge::model::{Completion, CompletionError, RawExchange};
+use runvil::metrics::ClientTiming;
+use runvil::model::{Completion, CompletionError, RawExchange};
 use serde_json::{Map, Value};
 
 use super::classify::classify_stream_error;
@@ -317,7 +317,7 @@ impl StreamAccumulator {
     /// capture. `client_timing`
     /// is what the transport measured on its own clock; it joins the
     /// backend's sections in the completion's
-    /// [`CallMetrics`](promptforge::metrics::CallMetrics), which is
+    /// [`CallMetrics`](runvil::metrics::CallMetrics), which is
     /// absent when nothing was measured.
     ///
     /// # Errors

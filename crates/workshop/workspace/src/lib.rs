@@ -3,7 +3,7 @@
 //! writes jailed to roots the user explicitly granted (drag and drop,
 //! the folder picker, or a reopened workspace file) - plus the
 //! `/workspace/file/*` routes that treat the workspace as a document:
-//! one `.pfwork` Turso file holding the grants and the window geometry,
+//! one `.rvwork` Turso file holding the grants and the window geometry,
 //! reopened at boot through the `state_dir/last-workspace` pointer.
 //!
 //! ## Invariants

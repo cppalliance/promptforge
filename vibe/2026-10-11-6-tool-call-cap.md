@@ -24,7 +24,7 @@ isProject: false
 
 ### Context for a fresh reader
 
-- Repository: `c:\Users\Vinnie\cursor\promptforge` (git, branch `master`). Paths are relative to it.
+- Repository: `c:\Users\Vinnie\cursor\runvil` (git, branch `master`). Paths are relative to it.
 - Baseline: commit `bc49d9670` (Close plan: easy-fixes). Every line number and count here was verified there; search by name if they have moved.
 - Shell: PowerShell on Windows. `$env:NAME='value'; <command>` sets a variable for the rest of the session, which is harmless for the gates below.
 - Terms:
@@ -124,13 +124,13 @@ flowchart LR
 The declarations, with `// ...` standing for existing members that don't change. The `///` lines are the code's own docs; Engine docs follow the wording rule in Constraints.
 
 ```rust
-// crates/promptforge-internal/engine/src/execute/run/effect.rs
+// crates/runvil-internal/engine/src/execute/run/effect.rs
 /// ... the existing doc, plus: Ids order by issue within a run: an effect
 /// issued later has a greater id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EffectId(pub(crate) u64);
 
-// crates/promptforge-internal/engine/src/execute/run.rs
+// crates/runvil-internal/engine/src/execute/run.rs
 pub enum Step {
     Pending {
         effects: Vec<(EffectId, Provenance, Effect)>,
@@ -144,7 +144,7 @@ pub enum Step {
     // ...
 }
 
-// crates/promptforge-internal/engine/src/execute/scheduler.rs, new `Scheduler` field
+// crates/runvil-internal/engine/src/execute/scheduler.rs, new `Scheduler` field
 /// Tool-call effects orphaned since the last step, drained into `Step::Pending`.
 withdrawn: Vec<EffectId>,
 
@@ -219,22 +219,22 @@ impl Flights {
 
 ### Step 1: the Engine reports withdrawn calls
 
-- In [crates/promptforge-internal/engine/src/execute/run/effect.rs](crates/promptforge-internal/engine/src/execute/run/effect.rs): `EffectId` (line 43) adds `PartialOrd, Ord` to its derives, and its doc (lines 38-42) gains the sentence that ids order by issue within a run. `abort_subtree`'s `sort_unstable_by_key(|effect| effect.get())` (`chain.rs` line 256) can become `sort_unstable()`.
-- In [crates/promptforge-internal/engine/src/execute/scheduler.rs](crates/promptforge-internal/engine/src/execute/scheduler.rs): `Scheduler` gains `withdrawn` beside `orphaned` (line 220), set empty in `new` (lines 255-270).
-- In [crates/promptforge-internal/engine/src/execute/scheduler/chain.rs](crates/promptforge-internal/engine/src/execute/scheduler/chain.rs), `abort_effect` (lines 296-305): inside its `Continuation::ToolCall` arm, push the id onto `self.withdrawn`, and add a sentence to its doc. Every path that ends a chain with tool calls out reaches this arm: `tasks.cancel` (`cancel_task`, `waits.rs` line 311), an owner ending with live tasks (`abandon_owned_tasks`, `task_end.rs` line 153), and an owner aborted (`abort_subtree`).
-- In [crates/promptforge-internal/engine/src/execute/scheduler/drive.rs](crates/promptforge-internal/engine/src/execute/scheduler/drive.rs):
+- In [crates/runvil-internal/engine/src/execute/run/effect.rs](crates/runvil-internal/engine/src/execute/run/effect.rs): `EffectId` (line 43) adds `PartialOrd, Ord` to its derives, and its doc (lines 38-42) gains the sentence that ids order by issue within a run. `abort_subtree`'s `sort_unstable_by_key(|effect| effect.get())` (`chain.rs` line 256) can become `sort_unstable()`.
+- In [crates/runvil-internal/engine/src/execute/scheduler.rs](crates/runvil-internal/engine/src/execute/scheduler.rs): `Scheduler` gains `withdrawn` beside `orphaned` (line 220), set empty in `new` (lines 255-270).
+- In [crates/runvil-internal/engine/src/execute/scheduler/chain.rs](crates/runvil-internal/engine/src/execute/scheduler/chain.rs), `abort_effect` (lines 296-305): inside its `Continuation::ToolCall` arm, push the id onto `self.withdrawn`, and add a sentence to its doc. Every path that ends a chain with tool calls out reaches this arm: `tasks.cancel` (`cancel_task`, `waits.rs` line 311), an owner ending with live tasks (`abandon_owned_tasks`, `task_end.rs` line 153), and an owner aborted (`abort_subtree`).
+- In [crates/runvil-internal/engine/src/execute/scheduler/drive.rs](crates/runvil-internal/engine/src/execute/scheduler/drive.rs):
   - `step` takes the buffer beside `effects` (line 56), sorts it, and returns it as `Step::Pending.withdrawn` (line 82). An id is pushed at most once, because `abort_effect` pushes only when it removes a pending entry.
   - `end` (lines 172-186) clears the buffer after `teardown`. A run's end abandons its live tasks through `settle_all_tasks`, which reaches `abort_effect` and fills the buffer, while `teardown` orphans the remaining pending effects straight from the table (lines 218-219), which doesn't. Clearing gives the field's simple promise: a decided run's steps list none, because the caller drops a decided run's effects whole.
-- In [crates/promptforge-internal/engine/src/execute/run.rs](crates/promptforge-internal/engine/src/execute/run.rs): `Step::Pending` (lines 34-48) gains `withdrawn`, and the variant's doc gains a sentence on it.
+- In [crates/runvil-internal/engine/src/execute/run.rs](crates/runvil-internal/engine/src/execute/run.rs): `Step::Pending` (lines 34-48) gains `withdrawn`, and the variant's doc gains a sentence on it.
 - Every exhaustive `Step::Pending` pattern gains `withdrawn` or `..`; the compiler finds them. At baseline they are:
   - `crates/harness-internal/runner/src/effect_loop.rs` line 164;
   - `engine/src/test_support.rs` line 104 and `engine/src/test_support/tokio_driver.rs` line 200;
   - `engine/src/execute/tests/serial_driver.rs` line 199, `execute/tests/parallel_tool_calls.rs` line 21, `execute/tests/run_termination.rs` line 49, and `execute/run/tests.rs` line 286 (487 lines; edit in place);
-  - `crates/promptforge/tests/suite/event.rs` line 58 and `tests/suite/ids.rs` line 101;
-  - `crates/promptforge/examples/greeter.rs` line 107, which `tests/suite/greeter.rs` compiles through `#[path]`.
+  - `crates/runvil/tests/suite/event.rs` line 58 and `tests/suite/ids.rs` line 101;
+  - `crates/runvil/examples/greeter.rs` line 107, which `tests/suite/greeter.rs` compiles through `#[path]`.
 
   Every other match already uses `..`. In this step the Harness ignores `withdrawn`, so behavior is unchanged.
-- `crates/promptforge/public-api.txt` is regenerated with `cargo +nightly-2026-09-05 xtask api --bless`, and the diff is reviewed. It should show only `EffectId`'s derives line (line 214) gaining `Ord` and `PartialOrd`, and a new `Step::Pending::withdrawn` line beside lines 736-737.
+- `crates/runvil/public-api.txt` is regenerated with `cargo +nightly-2026-09-05 xtask api --bless`, and the diff is reviewed. It should show only `EffectId`'s derives line (line 214) gaining `Ord` and `PartialOrd`, and a new `Step::Pending::withdrawn` line beside lines 736-737.
 
 ### Step 2: the Harness caps, orders, and drops
 
@@ -276,7 +276,7 @@ The Engine tests step a run by hand and read each step's `withdrawn` directly. T
 
 Every new behavior has a test that fails without it. A missing drop usually shows up as a hang, so every Harness test runs under a timeout: `run_beside`'s 10-second `PATIENCE` (`tests/it/harness.rs` lines 43 and 91-103), or `tokio::time::timeout` around `drive_run` as `tests/it/effect_loop.rs` line 271 does.
 
-- Integration, Step 1, added to `crates/promptforge-internal/engine/src/execute/tests/parallel_tool_calls.rs` (296 lines) beside the cancel test they mirror, `cancelling_a_task_parked_on_a_batch_orphans_every_call` (line 242). Its helpers `calls_reply`, `tool_text`, and `only_effect` are private to that file, which is why the tests go there and not in a new module.
+- Integration, Step 1, added to `crates/runvil-internal/engine/src/execute/tests/parallel_tool_calls.rs` (296 lines) beside the cancel test they mirror, `cancelling_a_task_parked_on_a_batch_orphans_every_call` (line 242). Its helpers `calls_reply`, `tool_text`, and `only_effect` are private to that file, which is why the tests go there and not in a new module.
   - The three tests share a new `const` holding that test's Main and Child prompt; the existing test keeps its inline copy.
   - A new helper returns a step's `withdrawn` beside its effects, since `pending` drops it.
   - The module doc gains a clause on the withdrawn list.
@@ -335,11 +335,11 @@ Every new behavior has a test that fails without it. A missing drop usually show
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
   - The Workshop crates, with the gateway sidecar staged:
-    - Stage it: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+    - Stage it: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
     - Run `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`.
     - Always run `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` afterward, even when a command failed.
   - `cargo fmt --all --check`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p promptforge --no-deps` with the same flags
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p runvil --no-deps` with the same flags
   - `cargo +nightly-2026-09-05 xtask api --check`, after Step 1's reviewed `--bless`
   - `cargo test -p build-xtask`, which includes the 500-line ceiling and `no_doctests`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
@@ -422,8 +422,8 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
 - Build command: `cargo build --locked -p gateway`.
   - `crates/gateway/app` is the workspace's only default member, so plain `cargo build` builds the same thing. The desktop app builds with `cargo workshop`, an alias for `run -p build-workshop --` in `.cargo/config.toml`, which also sets the Windows `rust-lld` linker with the static CRT.
   - The `gateway-config-ui` and `workshop-server` build scripts bundle their UIs with esbuild through `build-ui`, so workspace-wide commands need Node.js plus one `npm ci --prefix crates/workshop` and one `npm ci --prefix crates/gateway/config-ui/ui` per checkout. Both installs are present on this machine, along with Node.js 24.19 (CI uses 22), cargo-nextest 0.9.128, stable Rust 1.99.0, `nightly-2026-09-05`, mdBook 0.4.44, cargo-deny 0.20.2, cargo-audit 0.22.2, and cargo-hakari 0.9.38.
-  - Workshop clippy and tests need the gateway sidecar staged for Tauri's `externalBin`: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`, and `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` afterward. The staging directory `crates/workshop/desktop/binaries/` is gitignored and empty now, so nothing is staged.
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`, such as `-p promptforge-engine parallel_tool_calls` or `-p harness-runner effect_loop`. Drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`, which CI never builds with all features.
+  - Workshop clippy and tests need the gateway sidecar staged for Tauri's `externalBin`: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`, and `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` afterward. The staging directory `crates/workshop/desktop/binaries/` is gitignored and empty now, so nothing is staged.
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`, such as `-p runvil-engine parallel_tool_calls` or `-p harness-runner effect_loop`. Drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`, which CI never builds with all features.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, with the same three exceptions. `cargo test -p build-xtask` runs the boundary and structural checks, and `cargo xtask tidy` prints the same report.
 - Full-suite test command:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` with the sidecar staged. The first run includes `build-xtask`.
@@ -439,28 +439,28 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
   - The pre-push hook runs the wording scan, the headless check, the non-Workshop clippy run, and `cargo deny` when it is installed.
 - Formatter check command: `cargo fmt --all --check`, with `style_edition = "2024"` in `rustfmt.toml`. The pre-commit hook runs it, and `core.hooksPath` is set to `.githooks`.
 - Docs command:
-  - Each with `RUSTDOCFLAGS="-D warnings"` (in PowerShell, `$env:RUSTDOCFLAGS='-D warnings'`): `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. The facade docs build with default features on purpose.
-  - The facade surface check: `cargo +nightly-2026-09-05 xtask api --check` against `crates/promptforge/public-api.txt`, and `--bless` regenerates the listing. The nightly is pinned in `crates/build-xtask/src/api/toolchain.rs`, and its fixtures run with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
-  - Public listings: only `crates/promptforge/public-api.txt` exists. The `harness` facade (`crates/harness/src/lib.rs`) re-exports `BoxFuture`, `InferenceBroker`, `Timer`, `RunControl`, and `Harness`, not `ToolPerformer`, so `RunControl`'s and `Harness::new`'s docs are where Hosts learn about the cap and waiting calls.
-  - The documentation site: `cargo xtask site [--books-only]`, which needs `PROMPTFORGE_DOCS` naming a `promptforge-docs` checkout and an mdBook binary (`MDBOOK`, default `mdbook`).
+  - Each with `RUSTDOCFLAGS="-D warnings"` (in PowerShell, `$env:RUSTDOCFLAGS='-D warnings'`): `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. The facade docs build with default features on purpose.
+  - The facade surface check: `cargo +nightly-2026-09-05 xtask api --check` against `crates/runvil/public-api.txt`, and `--bless` regenerates the listing. The nightly is pinned in `crates/build-xtask/src/api/toolchain.rs`, and its fixtures run with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
+  - Public listings: only `crates/runvil/public-api.txt` exists. The `harness` facade (`crates/harness/src/lib.rs`) re-exports `BoxFuture`, `InferenceBroker`, `Timer`, `RunControl`, and `Harness`, not `ToolPerformer`, so `RunControl`'s and `Harness::new`'s docs are where Hosts learn about the cap and waiting calls.
+  - The documentation site: `cargo xtask site [--books-only]`, which needs `RUNVIL_DOCS` naming a `runvil-docs` checkout and an mdBook binary (`MDBOOK`, default `mdbook`).
 - Test placement and naming conventions:
-  - Unit tests mostly sit in a sibling file wired with `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;`, as in 176 files, such as `crates/promptforge-internal/parser/src/build-tests.rs`. A module whose tests reach three files keeps them in a `tests/` subdirectory beside it, one file per topic. There are 18 of these, including `crates/promptforge-internal/engine/src/execute/tests/` and `crates/promptforge-internal/lua/src/protocol/tests/`. Inline `#[cfg(test)] mod tests { }` blocks remain in 141 files.
-  - Integration tests compile as one binary per crate: from `tests/it/main.rs` in 18 crates, and from `tests/suite/main.rs` in `harness` and `promptforge`. Each topic is one module file, and shared helpers go in `support.rs`.
+  - Unit tests mostly sit in a sibling file wired with `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;`, as in 176 files, such as `crates/runvil-internal/parser/src/build-tests.rs`. A module whose tests reach three files keeps them in a `tests/` subdirectory beside it, one file per topic. There are 18 of these, including `crates/runvil-internal/engine/src/execute/tests/` and `crates/runvil-internal/lua/src/protocol/tests/`. Inline `#[cfg(test)] mod tests { }` blocks remain in 141 files.
+  - Integration tests compile as one binary per crate: from `tests/it/main.rs` in 18 crates, and from `tests/suite/main.rs` in `harness` and `runvil`. Each topic is one module file, and shared helpers go in `support.rs`.
   - In `harness-runner`, `tests/it/main.rs` declares only top-level modules. The `effect_loop-*.rs`, `harness-*.rs`, and `prepare-*.rs` siblings are declared from `effect_loop.rs`, `harness.rs`, and `prepare.rs` with `#[path]` (so `harness-stop.rs` is the module `harness::stop`). A child module can use its parent's private helpers, such as `begun_log` and `answers` in `effect_loop.rs` and `run_beside`, `until`, and `answers_to` in `harness.rs`. Top-level `tests/` trees are exempt from the flat-directory rule.
   - Private fixtures: the helpers in the Engine's `execute/tests/parallel_tool_calls.rs` are private to it. `Held::hold` (`tests/it/scripted.rs` line 164) is private, while `Held`'s `started` and `dropped` getters, `hold_host`, `with_asker`, `Operator`, and `ScriptedBroker` are `pub(crate)`.
   - `harness-runner` tests run on `#[tokio::test]`'s current-thread runtime, and none sets a flavor. The `Held` fixture (`tests/it/scripted.rs` lines 145-181) counts a future as started on its first poll and as dropped on teardown, so an unstarted waiting call counts as neither.
-  - A few crates keep standalone test files directly in `tests/`: `gateway-stt-engine` (three files), `gateway-stt-backend-whisper` (four `native_*` files), `gateway-cloud-providers`, and `build-workshop`. There are two benches, both with `harness = false`: `benches/models_loop.rs` in `promptforge-engine` and `benches/surface.rs` in `promptforge-lua`.
+  - A few crates keep standalone test files directly in `tests/`: `gateway-stt-engine` (three files), `gateway-stt-backend-whisper` (four `native_*` files), `gateway-cloud-providers`, and `build-workshop`. There are two benches, both with `harness = false`: `benches/models_loop.rs` in `runvil-engine` and `benches/surface.rs` in `runvil-lua`.
   - Test names are snake_case sentences stating the behavior, such as `a_rounds_catalog_calls_are_issued_in_one_step_and_append_in_call_order`.
   - Doctests are banned. `build-xtask`'s `no_doctests` check fails any doc comment holding a code block rustdoc would compile, so doc examples use non-Rust fences.
   - Nightly-only `build-xtask` fixtures and the native speech and CUDA tests are `#[ignore]`d. `.config/nextest.toml` puts `gateway-stt` and `gateway-stt-backend-whisper` in a `heavy` test group (eight threads, four per test) and gives the gateway's realtime STT noise and capture tests a longer timeout.
 - Directory map:
-  - `crates/`: all 52 Cargo packages. The top level holds the public and shared layer: the `promptforge` facade, `promptforge-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, the `plugin-*` crates (`plugin-web`, `plugin-user-input`, `plugin-mcp`), `shared-error-source`, `shared-loopback`, the `build-*` tooling (`build-ceiling`, `build-llama-cuda`, `build-ui`, `build-user-guide`, `build-workshop`, `build-xtask`), and `workspace-hack`.
-  - `crates/promptforge-internal/`: the Engine's private crates `types`, `engine`, `lua`, `parser`, `vfs`, and `model-client`. The scheduler this plan touches is `engine/src/execute/scheduler/`, beside `engine/src/execute/run/`.
+  - `crates/`: all 52 Cargo packages. The top level holds the public and shared layer: the `runvil` facade, `runvil-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, the `plugin-*` crates (`plugin-web`, `plugin-user-input`, `plugin-mcp`), `shared-error-source`, `shared-loopback`, the `build-*` tooling (`build-ceiling`, `build-llama-cuda`, `build-ui`, `build-user-guide`, `build-workshop`, `build-xtask`), and `workspace-hack`.
+  - `crates/runvil-internal/`: the Engine's private crates `types`, `engine`, `lua`, `parser`, `vfs`, and `model-client`. The scheduler this plan touches is `engine/src/execute/scheduler/`, beside `engine/src/execute/run/`.
   - `crates/harness-internal/runner`: the Harness's private per-run runner, including the effect loop (`src/effect_loop.rs`), the performers (`src/performers.rs`), and the package registry (`src/packages.rs`).
   - `crates/gateway/`: the gateway's private crates `app`, `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, and `web-search`, plus the `stt/` subsystem (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: Workshop's crates `desktop` (package `workshop`), `server`, `server-api`, `agents`, `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, and `workspace`, plus the npm workspace packages `ui`, `look`, and `platform`.
   - `crates/shared-ui`: a TypeScript and CSS package the gateway config UI uses, excluded from the Cargo workspace.
-  - `guide/`: the `books`, `chrome`, and `landing` pieces of the mdBook site. The chapters live in the separate `promptforge-docs` checkout.
+  - `guide/`: the `books`, `chrome`, and `landing` pieces of the mdBook site. The chapters live in the separate `runvil-docs` checkout.
   - `prompts/`: five example prompt files. `images/`: README art.
   - `tools/`: Node scripts for staging the gateway sidecar and a live TTS check, each with a `.test.mjs`.
   - `vibe/`: plan records, recent ones at the top level and older ones filed by month (`2026-07` through `2026-10`), plus an ignored `scratch/`.
@@ -468,19 +468,19 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
   - `.config/`: `nextest.toml` and `hakari.toml`. `.githooks/`: pre-commit and pre-push. `.cursor/rules/`: the Workshop architecture and SPA rules. Rulebooks: the root `AGENTS.md` plus 21 crate-level `AGENTS.md` files.
   - Not tracked: `local/`, `target/`, and `target-msrv/` (ignored), and `cabinet/`, which holds only an empty `_trash/`. The working tree is clean at `bc49d9670` (`Close plan: easy-fixes`).
 - Component boundaries, which `cargo test -p build-xtask` enforces across normal, dev, and build dependencies:
-  - The Engine (`promptforge*`) depends on no gateway, Workshop, Harness, or Plugin crate. Outside crates reach it only through `promptforge` and `promptforge-plugin`, the only two crates that may enter `promptforge-internal/`.
-  - Inside the Engine: `types` and `vfs` depend on no Engine crate, `model-client` on `types`, `lua` on `types`, `vfs`, and `model-client`, `parser` on `types` and `lua`, and `engine` on all five. The facade depends on all six, and `promptforge-plugin` names only `types` and `vfs`. `crates/promptforge/public-api.txt` pins the facade's surface.
+  - The Engine (`runvil*`) depends on no gateway, Workshop, Harness, or Plugin crate. Outside crates reach it only through `runvil` and `runvil-plugin`, the only two crates that may enter `runvil-internal/`.
+  - Inside the Engine: `types` and `vfs` depend on no Engine crate, `model-client` on `types`, `lua` on `types`, `vfs`, and `model-client`, `parser` on `types` and `lua`, and `engine` on all five. The facade depends on all six, and `runvil-plugin` names only `types` and `vfs`. `crates/runvil/public-api.txt` pins the facade's surface.
   - Inside the Engine's scheduler, withdrawals happen only inside a step: `cancel_task` (`scheduler/waits.rs`), `abandon_owned_tasks` (`scheduler/task_end.rs`), and `abort_subtree` (`scheduler/chain.rs`) run from a chain's step or end. The one path from `resume`, a fatal answer (`drive.rs` line 105), goes through `end` (`drive.rs` line 172), so clearing the buffer in `end` covers it.
-  - The Harness chain runs `harness-gateway-client` on `harness`, `harness` on `harness-runner`, and `harness-runner` on `promptforge` and `promptforge-plugin`. Outside its family the Harness names only `promptforge`, `promptforge-plugin`, and `workspace-hack`, except that `harness-gateway-client` depends on `plugin-web` to implement its `SearchProvider`. Outside crates reach the Harness only through `harness` and `harness-gateway-client`, and only `harness` may enter `harness-internal/`.
-  - Plugin crates depend only on `promptforge-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. Their only dependents are `harness-gateway-client`, `workshop-server`, and `workshop-agents`.
+  - The Harness chain runs `harness-gateway-client` on `harness`, `harness` on `harness-runner`, and `harness-runner` on `runvil` and `runvil-plugin`. Outside its family the Harness names only `runvil`, `runvil-plugin`, and `workspace-hack`, except that `harness-gateway-client` depends on `plugin-web` to implement its `SearchProvider`. Outside crates reach the Harness only through `harness` and `harness-gateway-client`, and only `harness` may enter `harness-internal/`.
+  - Plugin crates depend only on `runvil-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. Their only dependents are `harness-gateway-client`, `workshop-server`, and `workshop-agents`.
   - The gateway (`gateway*`) depends on no Engine, Workshop, Harness, or Plugin crate. Outside crates reach it only through `gateway-api-types` and `gateway-api-discovery`. Inside the family, only `gateway-stt` is visible outside `gateway/stt/`.
-  - Workshop is a Host. It reaches the gateway only through that public pair, the Engine only through `promptforge` and `promptforge-plugin`, and the Harness only through `harness` and `harness-gateway-client`. Its tiers depend one way: the server on features (`agents`, `workspace`, `user-state`, `run-log`), features on services (`menu`, `gateway`, `status`), and services on vocabulary (`protocol`, `registry`, `support`). The desktop app names only `workshop-server-api`, which names only `workshop-server`.
+  - Workshop is a Host. It reaches the gateway only through that public pair, the Engine only through `runvil` and `runvil-plugin`, and the Harness only through `harness` and `harness-gateway-client`. Its tiers depend one way: the server on features (`agents`, `workspace`, `user-state`, `run-log`), features on services (`menu`, `gateway`, `status`), and services on vocabulary (`protocol`, `registry`, `support`). The desktop app names only `workshop-server-api`, which names only `workshop-server`.
   - `shared-*` crates depend on no product crate. `build-*` crates are tooling and may depend into any container.
 - Conventions summary:
   - Engine, Harness, Host, and Plugin are capitalized with one meaning each. Engine crates say "the caller" and never mention the Host. `docs-claims.mjs` enforces what a scan can see in every `AGENTS.md`, every `## Invariants` crate doc, and every `.cursor/rules` file.
   - 25 crate `lib.rs` files open with a `//!` doc that has a `## Invariants` section.
   - Every crate build script (51 of them) calls `build_ceiling::check()`, which fails that crate's build when any `.rs` file under its `src`, `tests`, `benches`, or `examples` is over 500 lines (`LIMIT = 500`), so a 500-line file passes. `cargo test -p build-xtask` checks that every crate wires the call. Splits go into private child modules without widening visibility.
-  - Sizes of the files this plan touches. Engine, under `crates/promptforge-internal/engine/src/execute/`: `run/effect.rs` 403, `run.rs` 266, `scheduler.rs` 321, `scheduler/chain.rs` 306, `scheduler/drive.rs` 221, `run/tests.rs` 487, `tests/parallel_tool_calls.rs` 296. Harness, under `crates/harness-internal/runner/src/`: `effect_loop.rs` 487, `effect_loop-flight.rs` 181, `performers.rs` 129, `harness.rs` 280, `harness-control.rs` 127. Harness tests, under `crates/harness-internal/runner/tests/it/`: `effect_loop.rs` 376, `harness.rs` 344, `harness-stop.rs` 415, `support.rs` 486.
+  - Sizes of the files this plan touches. Engine, under `crates/runvil-internal/engine/src/execute/`: `run/effect.rs` 403, `run.rs` 266, `scheduler.rs` 321, `scheduler/chain.rs` 306, `scheduler/drive.rs` 221, `run/tests.rs` 487, `tests/parallel_tool_calls.rs` 296. Harness, under `crates/harness-internal/runner/src/`: `effect_loop.rs` 487, `effect_loop-flight.rs` 181, `performers.rs` 129, `harness.rs` 280, `harness-control.rs` 127. Harness tests, under `crates/harness-internal/runner/tests/it/`: `effect_loop.rs` 376, `harness.rs` 344, `harness-stop.rs` 415, `support.rs` 486.
   - Clippy `all` and `pedantic` deny, `unwrap_used` and `expect_used` deny outside tests, and `allow_attributes` deny, so suppressions use `#[expect(..., reason = "...")]`. `missing_docs`, `missing_debug_implementations`, and `unreachable_pub` warn, which is fatal under the gate. `unsafe_code` is denied outside its owned boundaries, rustdoc's broken and private intra-doc links deny, and `clippy.toml` bans process-global installers outside binary entry points.
   - Source directories stay flat until a group reaches three files. Below that, kebab siblings such as `foo-bar.rs` are wired with `#[path]`.
   - Tool wire names: the model sees `harness/hold` as `harness_hold` (`tests/it/harness-stop.rs` line 178) and `user-input/ask` as `user-input_ask` (`crates/plugin-user-input/src/lib.rs` line 61).
@@ -501,26 +501,26 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
 ### Step 1: Report the tool calls each step withdraws [completed]
 
 - Component: `none`
-- Tests: Verify runs every command below as written, in this order, from the `promptforge` repository root. Setting `$env:` variables persists for the session, so the API check below clears `CARGO_BUILD_WARNINGS` first.
-  - `cargo nextest run --locked -p promptforge-engine --all-features parallel_tool_calls`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+- Tests: Verify runs every command below as written, in this order, from the `runvil` repository root. Setting `$env:` variables persists for the session, so the API check below clears `CARGO_BUILD_WARNINGS` first.
+  - `cargo nextest run --locked -p runvil-engine --all-features parallel_tool_calls`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`
   - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`, always, even when an earlier command failed
   - `cargo fmt --all --check`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps`
   - `Remove-Item Env:CARGO_BUILD_WARNINGS -ErrorAction SilentlyContinue; cargo +nightly-2026-09-05 xtask api --check`, clearing the variable first because a leftover `CARGO_BUILD_WARNINGS='deny'` makes nightly cargo's unused-`workspace-hack` manifest warnings fatal
   - `cargo test -p build-xtask`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
 
 - Baseline is commit `bc49d9670`. Line numbers and file sizes below were verified there; search by name if one has moved. The coding sub-agent leaves `vibe/` alone.
 - Behavior: each `Step::Pending` lists the tool-call effects that step orphaned while the run goes on, in effect-id order, each id at most once. A decided run's steps list none. Store effects and model rounds are never withdrawn. The Harness ignores the list until Step 2, so this step changes no run's behavior. The Engine stays sans-IO and deterministic.
-- Engine, under `crates/promptforge-internal/engine/src/execute/`, with baseline sizes:
+- Engine, under `crates/runvil-internal/engine/src/execute/`, with baseline sizes:
   - `run/effect.rs` (403 lines): `EffectId` (line 43) adds `PartialOrd, Ord` to its derives. Its doc (lines 38-42) gains: "Ids order by issue within a run: an effect issued later has a greater id."
   - `run.rs` (266): `Step::Pending` (lines 34-48) gains `withdrawn: Vec<EffectId>` with the field doc the Technical Design gives ("The tool-call effects this step orphaned, in effect-id order..."), and the variant's doc gains a sentence on it.
   - `scheduler.rs` (321): `Scheduler` gains `withdrawn: Vec<EffectId>` beside `orphaned` (line 220), documented "Tool-call effects orphaned since the last step, drained into `Step::Pending`.", and set empty in `new` (lines 255-270).
@@ -530,11 +530,11 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
   - `crates/harness-internal/runner/src/effect_loop.rs` line 164 (the Harness ignores the field in this step)
   - `engine/src/test_support.rs` line 104 and `engine/src/test_support/tokio_driver.rs` line 200
   - `engine/src/execute/tests/serial_driver.rs` line 199, `execute/tests/parallel_tool_calls.rs` line 21 (the `pending` helper), `execute/tests/run_termination.rs` line 49, and `execute/run/tests.rs` line 286 (487 lines; edit in place)
-  - `crates/promptforge/tests/suite/event.rs` line 58 and `tests/suite/ids.rs` line 101
-  - `crates/promptforge/examples/greeter.rs` line 107, which `tests/suite/greeter.rs` compiles through `#[path]`
+  - `crates/runvil/tests/suite/event.rs` line 58 and `tests/suite/ids.rs` line 101
+  - `crates/runvil/examples/greeter.rs` line 107, which `tests/suite/greeter.rs` compiles through `#[path]`
   - Every other match already uses `..`.
-- `crates/promptforge/public-api.txt`: regenerate with `cargo +nightly-2026-09-05 xtask api --bless` and review the diff. It must show only `EffectId`'s derives line (line 214) gaining `Ord` and `PartialOrd`, and a new `Step::Pending::withdrawn` line beside lines 736-737. Any other change is a finding.
-- New tests in `crates/promptforge-internal/engine/src/execute/tests/parallel_tool_calls.rs` (296 lines), beside `cancelling_a_task_parked_on_a_batch_orphans_every_call` (line 242). They use that file's private helpers `calls_reply`, `tool_text`, `only_effect`, and `pending`, which is why they go there and not in a new module.
+- `crates/runvil/public-api.txt`: regenerate with `cargo +nightly-2026-09-05 xtask api --bless` and review the diff. It must show only `EffectId`'s derives line (line 214) gaining `Ord` and `PartialOrd`, and a new `Step::Pending::withdrawn` line beside lines 736-737. Any other change is a finding.
+- New tests in `crates/runvil-internal/engine/src/execute/tests/parallel_tool_calls.rs` (296 lines), beside `cancelling_a_task_parked_on_a_batch_orphans_every_call` (line 242). They use that file's private helpers `calls_reply`, `tool_text`, `only_effect`, and `pending`, which is why they go there and not in a new module.
   - Scaffolding:
     - A new `const` holds the Main and Child prompt of `cancelling_a_task_parked_on_a_batch_orphans_every_call`, shared by the three new tests; the existing test keeps its inline copy. `## Main` runs `local t = tasks.spawn('## Child')`, `models.infer('wait')`, `tasks.cancel(t)`, `models.infer('linger')`, and returns `'cancelled'`. `## Child` builds `messages.new()`, adds `msgs:user('go')`, runs `models.loop(msgs)`, and returns `'child done'`. Build each run as that test does: `parse`, `loop_context(&prompt, echo_tools())`, and `Run::from_state(state)`.
     - A new helper returns a step's `withdrawn` beside its effects, since `pending` drops it.
@@ -563,7 +563,7 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
   - `withdrawn` is a field on `Step::Pending`, not a `Run` query: it's per-step data, and a query valid only until the next step would tie callers to calling it in the right order.
   - A decided run lists no withdrawn calls: its end reaches `abort_effect` for live tasks but orphans the rest through `teardown`, so a list there would be partial, and the caller drops a decided run's effects whole.
   - `EffectId`'s order is a documented guarantee, serving the withdrawn sort, `abort_subtree`, and Step 2's waiting line.
-- Commit: one `promptforge` commit, `Report the tool calls each step withdraws`, with a prose body, a bullet list of changes, the `Design:` lines, and the trailer `Plan: vibe/2026-10-11-6-tool-call-cap.md`. Fixes land in this commit. Nothing is pushed.
+- Commit: one `runvil` commit, `Report the tool calls each step withdraws`, with a prose body, a bullet list of changes, the `Design:` lines, and the trailer `Plan: vibe/2026-10-11-6-tool-call-cap.md`. Fixes land in this commit. Nothing is pushed.
 
 </step-1>
 
@@ -572,18 +572,18 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
 ### Step 2: Run at most the cap of tool calls, oldest first [completed]
 
 - Component: `none`
-- Tests: Verify runs every command below as written, in this order, from the `promptforge` repository root. Setting `$env:` variables persists for the session, so the API check below clears `CARGO_BUILD_WARNINGS` first.
+- Tests: Verify runs every command below as written, in this order, from the `runvil` repository root. Setting `$env:` variables persists for the session, so the API check below clears `CARGO_BUILD_WARNINGS` first.
   - `cargo nextest run --locked -p harness-runner --all-features effect_loop::cap:: harness::stop_cap::`
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`
   - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`, always, even when an earlier command failed
   - `cargo fmt --all --check`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps`
   - `Remove-Item Env:CARGO_BUILD_WARNINGS -ErrorAction SilentlyContinue; cargo +nightly-2026-09-05 xtask api --check`, clearing the variable first because a leftover `CARGO_BUILD_WARNINGS='deny'` makes nightly cargo's unused-`workspace-hack` manifest warnings fatal
   - `cargo test -p build-xtask`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
@@ -653,7 +653,7 @@ The design moved from an Engine queue, to an Engine-ordered line with the cap in
   - Waiting calls are unpolled performer futures inside `Flights`, which already owns every in-flight effect and its Stop and Cancel paths.
   - A withdrawal is a third `Reach`, so `abort` and `drop_in_flight` give it the same merge, sort, fill, and teardown as a cancel or a stop.
   - Calls that survive stops count toward the cap; an operator question can wait behind slow calls.
-- Commit: one `promptforge` commit, `Run at most the cap of tool calls, oldest first`, with a prose body, a bullet list of changes, the `Design:` lines, and the trailer `Plan: vibe/2026-10-11-6-tool-call-cap.md`. Fixes land in this commit. Nothing is pushed.
+- Commit: one `runvil` commit, `Run at most the cap of tool calls, oldest first`, with a prose body, a bullet list of changes, the `Design:` lines, and the trailer `Plan: vibe/2026-10-11-6-tool-call-cap.md`. Fixes land in this commit. Nothing is pushed.
 
 </step-2>
 

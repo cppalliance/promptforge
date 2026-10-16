@@ -32,7 +32,7 @@ impl ServerGuard {
     /// teardown at profile-switch time), the respawn aborts promptly with
     /// [`LocalError::StartupInterrupted`] instead of waiting out the readiness
     /// deadline, so teardown never blocks behind an in-flight respawn
-    /// (PF-GW-SERVER-004).
+    /// (RV-GW-SERVER-004).
     ///
     /// # Errors
     /// Returns a [`LocalError`] when kill, spawn, readiness, or cancellation fails.

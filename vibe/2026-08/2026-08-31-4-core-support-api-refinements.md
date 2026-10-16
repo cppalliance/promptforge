@@ -1,6 +1,6 @@
 ---
 name: Core-support API refinements
-overview: "Apply the four recommended API actions to promptforge-core-support: GuardNonce::wrap method + Display, missing detail constants, label/Display doc clarification, and hierarchical cancellation (CancelHandle::child) for the future agentic harness, with call-site migration and tests."
+overview: "Apply the four recommended API actions to runvil-core-support: GuardNonce::wrap method + Display, missing detail constants, label/Display doc clarification, and hierarchical cancellation (CancelHandle::child) for the future agentic harness, with call-site migration and tests."
 todos:
   - id: guardnonce-wrap
     content: "untrusted: GuardNonce::wrap method, deprecate free wrap, Display + Eq/Hash, debug_assert, migrate 2 call sites"
@@ -27,11 +27,11 @@ isProject: false
 
 ## Context
 
-Code review of `promptforge-core-support` surfaced four API actions; the user additionally confirmed the agentic harness will need an orchestrator to cancel subagents, so hierarchical cancellation lands now. After comparing a hand-rolled parent-link against `tokio_util::sync::CancellationToken`, the user chose CancellationToken: `child_token()` is exactly the orchestrator/subagent semantics, it deletes the hand-rolled race-prone `Notify` code, and `tokio-util` is already a workspace dependency (`promptforge-mcp-server` uses it, including `CancellationToken` in its transport layer). Only two production call sites use the free `wrap` function, so migration is cheap.
+Code review of `runvil-core-support` surfaced four API actions; the user additionally confirmed the agentic harness will need an orchestrator to cancel subagents, so hierarchical cancellation lands now. After comparing a hand-rolled parent-link against `tokio_util::sync::CancellationToken`, the user chose CancellationToken: `child_token()` is exactly the orchestrator/subagent semantics, it deletes the hand-rolled race-prone `Notify` code, and `tokio-util` is already a workspace dependency (`runvil-mcp-server` uses it, including `CancellationToken` in its transport layer). Only two production call sites use the free `wrap` function, so migration is cheap.
 
 ## Changes
 
-### 1. `untrusted`: `GuardNonce::wrap` method, `Display`, equality ([src/untrusted.rs](promptforge/crates/promptforge-core-support/src/untrusted.rs))
+### 1. `untrusted`: `GuardNonce::wrap` method, `Display`, equality ([src/untrusted.rs](runvil/crates/runvil-core-support/src/untrusted.rs))
 
 - Move the body of free `fn wrap(nonce, content)` into `impl GuardNonce { #[must_use] pub fn wrap(&self, content: &str) -> String }`.
 - Keep the free `wrap` as a one-line delegate marked `#[deprecated(note = "use GuardNonce::wrap")]` - the crate has crates.io publish metadata, so soft-removal rather than a breaking delete.
@@ -40,20 +40,20 @@ Code review of `promptforge-core-support` surfaced four API actions; the user ad
 - Add `debug_assert!(nonce.is_ascii() && nonce.len() == 32)` in `neutralize` to pin the byte-slicing invariant.
 - Update module docs that reference `[wrap]` to point at the method.
 - Migrate the two production call sites to method syntax:
-  - [promptforge-lua/src/host.rs](promptforge/crates/promptforge-lua/src/host.rs) line 103: `promptforge_core_support::untrusted::wrap(&nonce, &s)` -> `nonce.wrap(&s)`
-  - [promptforge-core/src/execute/tool_loop.rs](promptforge/crates/promptforge-core/src/execute/tool_loop.rs) line 263: `untrusted::wrap(nonce, output.text())` -> `nonce.wrap(output.text())`
+  - [runvil-lua/src/host.rs](runvil/crates/runvil-lua/src/host.rs) line 103: `runvil_core_support::untrusted::wrap(&nonce, &s)` -> `nonce.wrap(&s)`
+  - [runvil-core/src/execute/tool_loop.rs](runvil/crates/runvil-core/src/execute/tool_loop.rs) line 263: `untrusted::wrap(nonce, output.text())` -> `nonce.wrap(output.text())`
 - Migrate the crate's own tests to the method so deprecation warnings do not fire in-tree.
 
-### 2. `observe`: missing constants + doc sentence ([src/observe.rs](promptforge/crates/promptforge-core-support/src/observe.rs))
+### 2. `observe`: missing constants + doc sentence ([src/observe.rs](runvil/crates/runvil-core-support/src/observe.rs))
 
 - Add `MODEL_CATALOG_VALIDATION_STARTED`, `MODEL_CATALOG_VALIDATION_SUCCEEDED`, `MODEL_CATALOG_VALIDATION_FAILED` consts to the `detail` module between `TOOL_SCOPE_VALIDATION_FAILED` and `STORE_WRITE_SUCCEEDED`, matching enum/label order.
 - Add one sentence to `Observation::label` docs stating the relationship: `Display` is the human trace line for any variant; `label` is the stable machine key for fixed variants only (`None` for `Lua`/`Other`).
 
-### 3. `cancel`: hierarchical cancellation via `CancellationToken` ([src/cancel.rs](promptforge/crates/promptforge-core-support/src/cancel.rs))
+### 3. `cancel`: hierarchical cancellation via `CancellationToken` ([src/cancel.rs](runvil/crates/runvil-core-support/src/cancel.rs))
 
 Design (tokio-util, per user decision):
 
-- Add `tokio-util` to [Cargo.toml](promptforge/crates/promptforge-core-support/Cargo.toml) with `default-features = false` and only the feature the `sync` module needs (verify during implementation: `promptforge-mcp-server` uses `CancellationToken` with just `codec` enabled, so the gate is minimal or none; confirm the exact minimal feature set and use that). Prefer a workspace-managed entry if the root Cargo.toml convention supports it; otherwise mirror `promptforge-mcp-server`'s declaration.
+- Add `tokio-util` to [Cargo.toml](runvil/crates/runvil-core-support/Cargo.toml) with `default-features = false` and only the feature the `sync` module needs (verify during implementation: `runvil-mcp-server` uses `CancellationToken` with just `codec` enabled, so the gate is minimal or none; confirm the exact minimal feature set and use that). Prefer a workspace-managed entry if the root Cargo.toml convention supports it; otherwise mirror `runvil-mcp-server`'s declaration.
 - Replace the internals of `CancelHandle` - `cancelled: Arc<AtomicBool>` and `notify: Arc<Notify>` - with a single `token: CancellationToken`. The struct stays `#[non_exhaustive]` with private fields, so this is invisible downstream.
 - Method bodies become delegations: `cancel()` -> `token.cancel()`, `is_cancelled()` -> `token.is_cancelled()`, `cancelled()` -> `token.cancelled().await`. All documented semantics (clone shares state, idempotent, irreversible, drop-safe) map 1:1.
 - Delete the hand-rolled enable-check-await lost-wakeup machinery. Keep the existing tests - they become API-contract tests pinning our documented semantics regardless of internals; they should pass unmodified. The `cancel_between_check_and_wait_is_not_lost` test reaches into `handle.notify` directly and must be rewritten against the public API (drop a waiter task, race a cancel, assert completion).
@@ -78,11 +78,11 @@ pub fn child(&self) -> CancelHandle
 - `observe`: const values match their variants (`detail::MODEL_CATALOG_VALIDATION_STARTED == Observation::ModelCatalogValidationStarted`, etc.).
 - `cancel`: parent cancel propagates to child (both `is_cancelled` poll and `cancelled()` wait); child cancel leaves parent and sibling unaffected; grandchild chain propagates; child of a pre-cancelled parent is born cancelled; waiters on a child wake on parent cancel; `scope(child, ...)` observed through `wait_cancelled()`.
 
-### 5. Minimal `AGENTS.md` fix ([crates/promptforge-core-support/AGENTS.md](promptforge/crates/promptforge-core-support/AGENTS.md))
+### 5. Minimal `AGENTS.md` fix ([crates/runvil-core-support/AGENTS.md](runvil/crates/runvil-core-support/AGENTS.md))
 
 Three surgical edits, no rewrite - the file stays short:
 
-- Fix the dependency sentence that states aspiration as fact (it caused a real misreading of the blast radius): "No dependencies on other promptforge crates - this crate sits at the bottom of the graph so nothing cycles." Drop the "every promptforge crate may depend on this one" claim.
+- Fix the dependency sentence that states aspiration as fact (it caused a real misreading of the blast radius): "No dependencies on other runvil crates - this crate sits at the bottom of the graph so nothing cycles." Drop the "every runvil crate may depend on this one" claim.
 - Add one line for the determinism invariant: "One nonce per run; identical content must produce a byte-identical envelope (KV-cache sharing and snapshot tests depend on it)."
 - Add one line for the inventory posture: "The control-markup inventory is closed on purpose: additive table entries with a family rationale only, never matcher generalization."
 
@@ -90,8 +90,8 @@ Nothing else moves in: the cancellation contract, semver/`#[non_exhaustive]` dis
 
 ### 6. Verification
 
-- `cargo test -p promptforge-core-support`
-- `cargo test -p promptforge-core -p promptforge-lua` (migrated call sites)
+- `cargo test -p runvil-core-support`
+- `cargo test -p runvil-core -p runvil-lua` (migrated call sites)
 - `cargo clippy --workspace` clean under workspace lints
 
 ## Data flow / sequencing
@@ -102,9 +102,9 @@ Steps 1-3 are independent modules and could run in any order; step 1's call-site
 
 - Single commit carrying all fixes, per user instruction. Vibe-rulebook bounded path: one step, per-step checklist (Code -> Commit -> Review -> Amend -> Verify).
 - Governing rulebooks: `tools-public/rulebooks/vibe-rulebook.md` (process) and `tools-public/rulebooks/rust-rulebook.md` (code).
-- Governing AGENTS.md manifest for touched files: `promptforge/AGENTS.md`, `promptforge/crates/promptforge-core-support/AGENTS.md`, `promptforge/crates/promptforge-core/AGENTS.md` (tool_loop.rs), `promptforge/crates/promptforge-lua/AGENTS.md` (host.rs).
+- Governing AGENTS.md manifest for touched files: `runvil/AGENTS.md`, `runvil/crates/runvil-core-support/AGENTS.md`, `runvil/crates/runvil-core/AGENTS.md` (tool_loop.rs), `runvil/crates/runvil-lua/AGENTS.md` (host.rs).
 - `#[deprecated(since = "0.2.0", note = "use GuardNonce::wrap")]` - 0.2.0 is the uniform version staged for crates.io republication.
-- `tokio-util` is declared once in `[workspace.dependencies]` with `default-features = false` (rust-rulebook section 8); `promptforge-core-support` inherits with `.workspace = true`. The minimal feature gate for `tokio_util::sync::CancellationToken` is verified empirically during implementation.
+- `tokio-util` is declared once in `[workspace.dependencies]` with `default-features = false` (rust-rulebook section 8); `runvil-core-support` inherits with `.workspace = true`. The minimal feature gate for `tokio_util::sync::CancellationToken` is verified empirically during implementation.
 - Worktree was clean on `master` at `8ed1632` at run start.
 
 ## Out of scope
@@ -123,7 +123,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin
 
-The plan grew out of a code review of `promptforge-core-support`, followed by a dedicated public-API review. The reviews judged the crate high-quality (strong docs, property tests, a pinned lost-wakeup regression) and surfaced the four actions the plan carries. Two review judgments explain the shape of the changes:
+The plan grew out of a code review of `runvil-core-support`, followed by a dedicated public-API review. The reviews judged the crate high-quality (strong docs, property tests, a pinned lost-wakeup regression) and surfaced the four actions the plan carries. Two review judgments explain the shape of the changes:
 
 - The `GuardNonce` secrecy argument only justifies hiding *construction*, not *reading*: the nonce's hex digits already appear verbatim in every envelope and preface, so exposing them "weakens nothing" (paraphrase of the review). The concrete cost of hiding was that Hosts could not correlate a suspicious envelope back to a run in logs, and downstream tests had to parse the nonce out of the envelope. Hence `Display` (chosen over a public `as_str`) plus trivially derivable `Eq`/`Hash`.
 - The free `wrap` was soft-deprecated rather than deleted because the crate carries crates.io publish metadata; only two production call sites existed, so migration was cheap.
@@ -139,7 +139,7 @@ The plan grew out of a code review of `promptforge-core-support`, followed by a 
 
 The plan initially specified a parent-link design (`parent: Option<Arc<CancelHandle>>`, `is_cancelled` walking the chain, `tokio::select!` over own and parent waiters, ~30 lines plus tests). The user asked to hash out the tokio question before committing. The comparison that drove the flip:
 
-- For CancellationToken: `child_token()` is exactly the orchestrator/subagent semantics, battle-tested including tree-wide races (child created mid-cancel, waiter registered while an ancestor fires); it deletes the crate's riskiest code - the hand-rolled `Notify` machinery had already shipped one real lost-wakeup bug; `promptforge-mcp-server` already depends on `tokio-util` and already uses `CancellationToken` in its transport layer, so it was "move an already-vetted crate into the leaf position," not a foreign dependency; `drop_guard()` gives cancel-on-scope-exit for free.
+- For CancellationToken: `child_token()` is exactly the orchestrator/subagent semantics, battle-tested including tree-wide races (child created mid-cancel, waiter registered while an ancestor fires); it deletes the crate's riskiest code - the hand-rolled `Notify` machinery had already shipped one real lost-wakeup bug; `runvil-mcp-server` already depends on `tokio-util` and already uses `CancellationToken` in its transport layer, so it was "move an already-vetted crate into the leaf position," not a foreign dependency; `drop_guard()` gives cancel-on-scope-exit for free.
 - For the parent-link: zero new dependencies, incremental change on tested code, full semantic control (cancellation reasons, deadlines, subtree-vs-self distinctions).
 - A key framing lowered the stakes: `CancelHandle` is `#[non_exhaustive]` with private fields, so the internals swap is invisible downstream and reversible at any time.
 
@@ -147,7 +147,7 @@ The leaf-crate dependency concern was then materially weakened by a user correct
 
 ## The dependency-graph correction (why the AGENTS.md fix exists)
 
-The assistant argued against tokio-util from the "leaf position": every promptforge crate would carry it forever. The user pushed back hard: `"core utils is not used by every crate... the workshop UI doesn't care about this. It's just a TypeScript HTML CSS... I want to know what crates really depend on this?"` Reading the actual Cargo.tomls showed 3 direct dependents (`core`, `parser`, `lua`), 5 transitive (the binaries on `promptforge-core`), and 21 of 29 workspace crates with no path to it. The assistant had been parroting the crate's AGENTS.md line "every promptforge crate may depend on this one" as if it described reality. That misreading is why the plan's AGENTS.md edit replaces the aspiration-as-fact sentence with the actual intent ("bottom of the graph, nothing cycles") - the file had demonstrably failed at its job.
+The assistant argued against tokio-util from the "leaf position": every runvil crate would carry it forever. The user pushed back hard: `"core utils is not used by every crate... the workshop UI doesn't care about this. It's just a TypeScript HTML CSS... I want to know what crates really depend on this?"` Reading the actual Cargo.tomls showed 3 direct dependents (`core`, `parser`, `lua`), 5 transitive (the binaries on `runvil-core`), and 21 of 29 workspace crates with no path to it. The assistant had been parroting the crate's AGENTS.md line "every runvil crate may depend on this one" as if it described reality. That misreading is why the plan's AGENTS.md edit replaces the aspiration-as-fact sentence with the actual intent ("bottom of the graph, nothing cycles") - the file had demonstrably failed at its job.
 
 A related user question - `"what is tokio/sync? is that synchronous I/O? that would be a mistake"` - was resolved by explaining `sync` is a Cargo feature flag enabling tokio's *async synchronization primitives* (`Notify`, oneshot, mpsc), not synchronous I/O; the async Lua-coroutine architecture was untouched. This exchange immediately preceded the tokio decision.
 

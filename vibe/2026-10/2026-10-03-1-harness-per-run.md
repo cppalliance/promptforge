@@ -38,11 +38,11 @@ isProject: false
 The Harness still serves Workshop's agent window. One long-lived Harness keeps a table of chat sessions, each session cancels and relaunches its run on Stop, the session relays streamed pieces through its own channel, and every effect runs on a tokio task. This plan finishes the effort to move I/O out of the Harness in one pass: each run gets its own Harness instance, Workshop takes over conversations, the Host's broker takes over streaming and model swaps, and the Harness drops tokio so a Host can await a run on any executor.
 
 - Problem and users:
-  - Team developers working on the Harness and its Hosts: Workshop, and `paperweight` in the wg21-paperflow repository, a one-shot CLI that pins promptforge as a submodule at a commit before changes 1 to 5.
+  - Team developers working on the Harness and its Hosts: Workshop, and `paperweight` in the wg21-paperflow repository, a one-shot CLI that pins runvil as a submodule at a commit before changes 1 to 5.
   - This plan covers changes 7 to 9 of a nine-change effort that moves I/O out of the Harness. Changes 1 to 6 have landed:
     - change 1, `Vfs` effects answered inline (`vibe/2026-10-01-2-store-to-vfs-inline.md`);
     - change 2, the Host-supplied `RunRecorder` (`crates/harness-internal/runner/src/recorder.rs`), with Workshop's `TursoRecorder` in `crates/workshop/run-log`;
-    - change 3, the closed model-failure vocabulary (`CompletionErrorKind`, `crates/promptforge-internal/model-client/src/model/error.rs`);
+    - change 3, the closed model-failure vocabulary (`CompletionErrorKind`, `crates/runvil-internal/model-client/src/model/error.rs`);
     - change 4, `harness-gateway-client` (`vibe/2026-10-02-1-gateway-client.md`);
     - change 5, host services and `harness-web` (`vibe/2026-10-02-2-host-services.md`);
     - change 6, the Host-supplied `InferenceBroker` (`vibe/2026-10-02-4-inference-broker.md`).
@@ -50,11 +50,11 @@ The Harness still serves Workshop's agent window. One long-lived Harness keeps a
   - Stop cancels the whole run and relaunches it (`Session::cancel` in `src/session.rs`, `src/lifecycle.rs`, `src/transition.rs`). The relaunched `chat` starts its Lua `history` empty (`agents/chat.md:33`), so the model forgets the conversation while Workshop still shows it (DEBT-UPM-03, `vibe/2026-09/2026-09-10-2-debt-fixes.md:122-127`).
   - A model picked in Workshop's dropdown reaches a running chat only through that relaunch, so switching models costs the conversation.
   - The Harness can launch only an agent named by a file stem in a configured folder (`HarnessConfig.agents_path`, `Harness::discover`, `LaunchRequest.agent` in `crates/harness-internal/sessions/src/runtime.rs` and `src/discovery.rs`). It reads the file itself (`prepare_run`, `crates/harness-internal/runner/src/prepare.rs:216-227`). A Host that already holds a prompt must write it into a temporary agents folder first: `paperweight` does exactly that (wg21-paperflow `crates/paperweight/src/app.rs:170-185`).
-  - Streaming crosses every layer: the Engine marks rounds with `stream: bool` on `Effect::Chat` (`crates/promptforge-internal/engine/src/execute/run/effect.rs:62-78`, set in `scheduler/chat.rs` and `scheduler/dispatch.rs`), the runner hands brokers an `OnDelta` (`crates/harness-internal/runner/src/performers.rs:47`), the session relays pieces on a broadcast channel (`Session::subscribe_deltas`), and it numbers replies by counting events (`reply_stamp`, `src/session-transcript.rs`).
-  - Model labels disagree: `EffectRecord::Chat.model` names the launch binding (`effect.rs:142`), while reply events and `ChatAnswerRecord.model` use whatever name the backend's reply reports (`crates/promptforge-internal/engine/src/execute/support.rs:93`, `effect.rs:346`). The Gateway relays the backend's body unchanged, so that name can be a dated id or a llama-server alias rather than the catalog name.
+  - Streaming crosses every layer: the Engine marks rounds with `stream: bool` on `Effect::Chat` (`crates/runvil-internal/engine/src/execute/run/effect.rs:62-78`, set in `scheduler/chat.rs` and `scheduler/dispatch.rs`), the runner hands brokers an `OnDelta` (`crates/harness-internal/runner/src/performers.rs:47`), the session relays pieces on a broadcast channel (`Session::subscribe_deltas`), and it numbers replies by counting events (`reply_stamp`, `src/session-transcript.rs`).
+  - Model labels disagree: `EffectRecord::Chat.model` names the launch binding (`effect.rs:142`), while reply events and `ChatAnswerRecord.model` use whatever name the backend's reply reports (`crates/runvil-internal/engine/src/execute/support.rs:93`, `effect.rs:346`). The Gateway relays the backend's body unchanged, so that name can be a dated id or a llama-server alias rather than the catalog name.
   - tokio remains in the Harness: the effect loop spawns a task per effect and collects answers on a channel (`crates/harness-internal/runner/src/effect_loop.rs`, `src/spawn.rs`), the runner sleeps on `TokioTimer` (`src/performers-builtin.rs`), preparation reads prompt files with `tokio::fs` (`src/prepare.rs:221`), and the facade exposes a tokio cancel module that only its own docs and tests use (`src/cancel.rs`, `harness::cancel`).
   - Debt carried into this work, with ids from `vibe/2026-10-02-3-debt-removal.md`:
-    - The built-in `chat` agent requires `promptforge/web`, which only `harness-web`, above the Harness, supplies (D1-1).
+    - The built-in `chat` agent requires `runvil/web`, which only `harness-web`, above the Harness, supplies (D1-1).
     - A recorder failure after `begin_run` drops the run from the session's `run_ids` and transcript (D1-5).
     - `PluginRegistry` derives a `Clone` that nothing uses.
     - The Harness builds its own input broker per run and exposes `RunServices::insert_input_broker`, whose parameter type outside crates cannot name.
@@ -79,14 +79,14 @@ The Harness still serves Workshop's agent window. One long-lived Harness keeps a
   - In Workshop, a `cancel` frame on the agent socket during a model round returns `chat` to its question, and the next round's request holds every earlier turn. The integration suite proves this through the socket, which is Stop's entry point until the agent window gains a Stop control (`cancelTurn`, `crates/workshop/ui/src/services/agent-socket.ts:187-188`).
   - In Workshop, picking another model between turns sends the next round to it, and that round's reply event and answer record name it.
   - Workshop's agent window still streams replies, with unchanged `agent_delta` and `agent_event` frames.
-  - `promptforge`'s public API carries rounds as `Effect::Chat.round`, and `StreamDelta` lives in `harness-gateway-client`.
-  - `cargo tree -e normal` shows tokio only under Host-side crates (`harness-gateway-client`, `harness-web`, and Workshop), and a Harness test completes a run on its own thread under a thread-parking `block_on` written in the test, as `crates/promptforge/src/cancel.md:127-145` writes one. The test builds on the workspace's existing dependencies.
+  - `runvil`'s public API carries rounds as `Effect::Chat.round`, and `StreamDelta` lives in `harness-gateway-client`.
+  - `cargo tree -e normal` shows tokio only under Host-side crates (`harness-gateway-client`, `harness-web`, and Workshop), and a Harness test completes a run on its own thread under a thread-parking `block_on` written in the test, as `crates/runvil/src/cancel.md:127-145` writes one. The test builds on the workspace's existing dependencies.
   - The exit criteria in the Testing Plan pass.
 - Constraints:
-  - Product boundaries (`crates/build-xtask/src/product.rs`): `harness-internal` crates depend only on `promptforge` and their siblings; `harness-gateway-client` and `harness-web` depend on `harness`, `promptforge`, and third-party crates, and sit above every `harness-internal` crate.
+  - Product boundaries (`crates/build-xtask/src/product.rs`): `harness-internal` crates depend only on `runvil` and their siblings; `harness-gateway-client` and `harness-web` depend on `harness`, `runvil`, and third-party crates, and sit above every `harness-internal` crate.
   - The Workshop tier graph (`crates/build-xtask/src/tidy.rs:26-47`): a feature crate may depend on vocabulary and service crates and on non-Workshop crates such as `harness`, never on another feature crate. `workshop-agents` therefore never names `workshop-run-log`.
   - Files in `harness-*` and `workshop-*` crates stay at or under 500 lines. New tests follow the sibling `<stem>-tests.rs` convention.
-  - Every Engine public API change is regenerated into `crates/promptforge/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless` and checked with `--check`.
+  - Every Engine public API change is regenerated into `crates/runvil/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless` and checked with `--check`.
   - Record, event, and run-metadata shapes change in place, and every reader changes with them, because every recorded run so far is disposable.
   - Gateway client messages, error kinds, deadlines, headers, bearer redaction, and body bounds stay as they are.
 - Open questions: None
@@ -123,17 +123,17 @@ A Host builds a Harness for each run, takes a control handle from it, and awaits
   - `RunReport` holds the run id when the recorder began the run, the `RunOutcome`, and the declared output text or the `OutputError` that explains its absence.
   - Streamed pieces stay inside the Host: the broker hands them straight to the Host's consumers.
 - States and validation:
-  - `stop_round` drops every effect in flight except a question to the operator (a `ToolCall` to `promptforge/user-input/ask`): chat rounds, other tool calls, and timers. The run's cancel flag stays clear. `Vfs` effects are answered inline as they are issued.
-    - The Engine hands a dropped effect's waiting Lua the error directly (`crates/promptforge-internal/engine/src/execute/scheduler/apply.rs:35-43`, `:63-101`). The record holds the effect and its `Dropped` answer, the turn count and the usage anchor keep their values, and Workshop's transcript continues at the next question, as it does after a Stop today.
-    - The waiting Lua gets the Engine's `Interrupted` error: kind `cancelled`, message "interrupted by Ctrl-C" (`crates/promptforge-internal/engine/src/error.rs:98`).
-    - The `pcall` shim re-raises only when the run is cancelled (`crates/promptforge-internal/lua/src/__impl_coro.lua:74-77`), so `chat`'s `pcall` (`agents/chat.md:37`) catches the error and returns to `input.ask()` with its history intact.
+  - `stop_round` drops every effect in flight except a question to the operator (a `ToolCall` to `runvil/user-input/ask`): chat rounds, other tool calls, and timers. The run's cancel flag stays clear. `Vfs` effects are answered inline as they are issued.
+    - The Engine hands a dropped effect's waiting Lua the error directly (`crates/runvil-internal/engine/src/execute/scheduler/apply.rs:35-43`, `:63-101`). The record holds the effect and its `Dropped` answer, the turn count and the usage anchor keep their values, and Workshop's transcript continues at the next question, as it does after a Stop today.
+    - The waiting Lua gets the Engine's `Interrupted` error: kind `cancelled`, message "interrupted by Ctrl-C" (`crates/runvil-internal/engine/src/error.rs:98`).
+    - The `pcall` shim re-raises only when the run is cancelled (`crates/runvil-internal/lua/src/__impl_coro.lua:74-77`), so `chat`'s `pcall` (`agents/chat.md:37`) catches the error and returns to `input.ask()` with its history intact.
     - `models.loop` passes the error up to the prompt. A prompt that catches it with `pcall` continues, and one that leaves it uncaught ends as `Cancelled`.
     - With only a question in flight, `stop_round` leaves the question open and the run waiting on it. Today the same Stop cancels the question and asks again after the relaunch.
   - `cancel` sets the run's cancel flag, drops every effect in flight including questions, and ends the run as `Cancelled` unless it had already ended.
   - A swap applies from the next round. A round already in flight finishes on its model.
   - After a swap, the precheck still uses the launch model's context window. The usage anchor stays keyed by the launch binding, so the first round after a swap may anchor on the previous model's counts.
   - When the pick's context window is smaller than the launch binding's, Workshop's broker logs a warning naming both windows and still sends the round. The split between the launch model and the pick is logged as debt under Deferred.
-  - Lua's `sys.model` and model handles keep naming the launch binding, because they describe the prompt's model slot (`crates/promptforge-internal/lua/src/sys.rs:140`, `models-userdata.rs:57`).
+  - Lua's `sys.model` and model handles keep naming the launch binding, because they describe the prompt's model slot (`crates/runvil-internal/lua/src/sys.rs:140`, `models-userdata.rs:57`).
   - The run's `HostSnapshot` is fixed at launch. Granted roots reach a prompt as `ui().workspace_root` (`crates/harness-internal/sessions/src/environment.rs:21-39`), and Workshop's agent runs use an empty in-memory VFS (`crates/harness-internal/sessions/src/session/files.rs:72-73`), so file access is the same before and after a revoke. A revoke reaches the next conversation's snapshot, and a running conversation keeps its launch snapshot. Today a revoke reaches a running chat through Stop's relaunch (`crates/workshop/server/tests/it/agents/revoke.rs:92-105`).
   - The agent window starts its settled reply id at `-1` (`crates/workshop/ui/src/services/agent-session.ts:159`), so Engine round ids starting at 0 work with the UI as it is.
 - Errors and recovery:
@@ -249,8 +249,8 @@ flowchart LR
   - Engine:
 
     ```rust
-    pub struct RoundId(u64);                                  // promptforge::ids
-    pub struct Round { pub id: RoundId, pub origin: ReplyOrigin } // promptforge::effect
+    pub struct RoundId(u64);                                  // runvil::ids
+    pub struct Round { pub id: RoundId, pub origin: ReplyOrigin } // runvil::effect
     // Effect::Chat { binding, messages, tools, options, round: Round }
     // EffectRecord::Chat { alias, round: RoundId, invocation fields, messages, tools }
     // Event::Thinking, AssistantReply, AssistantToolCalls each gain round: RoundId
@@ -258,7 +258,7 @@ flowchart LR
     impl CompletionOptions { pub fn with_model(self, model: impl Into<String>) -> CompletionOptions; }
     ```
 
-    `StreamDelta` leaves `promptforge-types` (`crates/promptforge-internal/types/src/wire.rs:12-17`) and `promptforge::model`.
+    `StreamDelta` leaves `runvil-types` (`crates/runvil-internal/types/src/wire.rs:12-17`) and `runvil::model`.
   - `harness-gateway-client`:
     - `StreamDelta` (`Text`, `Reasoning`) now lives here, used by `GatewayChat::complete`.
     - `GatewayBroker::chat_streaming(binding, messages, tools, options, on_piece: Arc<dyn Fn(StreamDelta) + Send + Sync>)` streams pieces to the caller. `impl InferenceBroker for GatewayBroker` returns the whole reply, which suits a headless Host.
@@ -296,7 +296,7 @@ flowchart LR
   - Performer trait docs: `InferenceBroker` and `Timer` in the runner, and `Tool` (`crates/harness-internal/plugins/src/tool.rs:87-93`) and `InputBroker` (`src/input.rs:33-38`) in plugins, state that a performer must not block while polled. `Tool`'s "must not panic (a panic unwinds the run)" becomes "must not panic (a panic answers its effect `Dropped` and is logged)".
   - `crates/harness-internal/runner`: delete `src/spawn.rs`, `src/cancel.rs`, `TokioTimer`, `prepare_run` and its file read with `PrepareError::Read`, `Services.input`, `Services.on_delta`, `Services.agent`, the effect loop's answer channel and `Answering` guard, and the `tokio` and `tokio-util` dependencies. `Services.session_id` becomes `name`. Add `futures-util`.
   - `HarnessConfig`, `agents_path`, `Harness::discover`, and `LaunchRequest.agent` leave with `harness-sessions`. `RunRequest.source` is the Harness's one prompt input.
-  - `promptforge` public API: the Engine items above, regenerated into `crates/promptforge/public-api.txt`.
+  - `runvil` public API: the Engine items above, regenerated into `crates/runvil/public-api.txt`.
   - `crates/workshop/run-log`: its `session_id` column becomes `name`. Its `agent` column stays, filled by Workshop's per-run recorder from the agent it launched rather than from `RunMeta`. The sites are the schema (`src/schema.rs:19-22`, `:48-50`, `:71-74`), the reader (`src/read.rs:22-24`), and the meta assertions in `crates/workshop/server/tests/it/agents/lifecycle.rs:229-231`.
   - `crates/build-xtask/src/harness_bans.rs`: replace the spawn ban with a ban on `tokio` and `tokio-util` as normal dependencies of `harness` and every `crates/harness-internal` crate.
     - Today the check scans each crate's `clippy.toml` for the `tokio::spawn` and `spawn_blocking` entries (`harness_bans.rs:18-19`, `:63-102`). The new one parses `Cargo.toml` dependency tables.
@@ -306,7 +306,7 @@ flowchart LR
     - Scaffold it with `cargo xtask new-crate workshop-agents` (`crates/build-xtask/src/new_crate.rs:13-28`).
     - Add it to the root `Cargo.toml` `members` and `[workspace.dependencies]`, which list Workshop crates explicitly.
     - Add `("workshop-agents", "agents")` to the feature tier in `crates/build-xtask/src/tidy.rs:41-45`.
-    - Its crate doc opens with `## Invariants` and writes Engine, Harness, and Host capitalized, which `crates/workshop/ui/test/docs-claims.mjs` checks. Its Invariants list its tier as feature and its dependencies as the vocabulary and service crates, `harness`, `promptforge`, and third-party crates.
+    - Its crate doc opens with `## Invariants` and writes Engine, Harness, and Host capitalized, which `crates/workshop/ui/test/docs-claims.mjs` checks. Its Invariants list its tier as feature and its dependencies as the vocabulary and service crates, `harness`, `runvil`, and third-party crates.
   - Rule files and docs that the new crate makes false, changed in the Workshop step:
     - Delete the `Tiers:` bullet at `.cursor/rules/workshop-architecture.mdc:12`.
     - Delete "Repository policy binds plans." from root `AGENTS.md:40`, keeping the rest of the line.
@@ -331,8 +331,8 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
     - The thinking, reply, and tool-call events of a round carry the id its `Effect::Chat` held, and a nested infer round's `Round` has origin `Infer`.
     - `EffectRecord::Chat` serializes `round` and the slot's alias as the round's identity.
     - `Completion::with_model` and `CompletionOptions::with_model` replace the name, and the reply event's `model` follows `Completion::model`.
-    - Rewrite `a_chat_round_streams_its_deltas_to_the_harness` and `a_nested_infer_round_streams_no_deltas_to_the_harness` (`crates/promptforge-internal/engine/src/execute/tests/effects.rs`) to assert each round's origin and id.
-    - New, beside `a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error` (`crates/promptforge-internal/engine/src/execute/run/tests.rs:250-262`), which covers a `Vfs` effect. A `Chat` effect and a `ToolCall` effect dropped while the run's cancel flag is clear:
+    - Rewrite `a_chat_round_streams_its_deltas_to_the_harness` and `a_nested_infer_round_streams_no_deltas_to_the_harness` (`crates/runvil-internal/engine/src/execute/tests/effects.rs`) to assert each round's origin and id.
+    - New, beside `a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error` (`crates/runvil-internal/engine/src/execute/run/tests.rs:250-262`), which covers a `Vfs` effect. A `Chat` effect and a `ToolCall` effect dropped while the run's cancel flag is clear:
       - resume a `pcall` with the cancelled error and let the run continue;
       - leave the record holding the effect and its `Dropped` answer, with the turn count unchanged;
       - end the run as `Cancelled` when uncaught.
@@ -381,14 +381,14 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
   - Retire the session-only tests: `src/transition-tests.rs`, `src/session-tests.rs` reply-stamp cases, `src/session/run-tests.rs` delta cases, `crates/harness-internal/runner/tests/it/spawn.rs`, and the runner's `cancel.rs` tests.
   - Gateway chat, catalog, and search message and kind tests pass, changed only for the moved `StreamDelta` and the labels.
   - Every literal builder of the three reply events gains `round`:
-    - `crates/promptforge-internal/types/src/emitter.rs` and `event-tests.rs`;
-    - `crates/promptforge-internal/engine/src/test_support/recording/forward.rs`, `forward-tests.rs`, and `forward-tests-variants.rs`;
+    - `crates/runvil-internal/types/src/emitter.rs` and `event-tests.rs`;
+    - `crates/runvil-internal/engine/src/test_support/recording/forward.rs`, `forward-tests.rs`, and `forward-tests-variants.rs`;
     - `crates/workshop/run-log` (its `fidelity` test);
     - the Workshop server's `wire-tests.rs` and `status-tests.rs`.
   - Workshop's broker and refusal messages use fixed phrases.
   - From the repository root, each leftover search returns an empty result:
     - `rg -n '\b(Session|SessionId|SessionEvent|SessionState|SessionFailure|FailureKind|LaunchRequest|LaunchOptions|LaunchError|HarnessConfig|DeltaKind|OnDelta|WaitFrame|subscribe_deltas|insert_input_broker|TokioTimer|spawn_tagged)\b' crates/harness crates/harness-internal`
-    - `rg -n 'StreamDelta|stream: (true|false)' crates/promptforge crates/promptforge-internal`
+    - `rg -n 'StreamDelta|stream: (true|false)' crates/runvil crates/runvil-internal`
     - `rg -n '\b(agents_path|discover|prompt_path|prepare_run)\b|read_to_string' crates/harness/src crates/harness-internal --glob '*.rs' --glob '!**/tests/**' --glob '!*-tests.rs'`
     - `rg -n '^tokio|^tokio-util' crates/harness/Cargo.toml crates/harness-internal --glob Cargo.toml`, where only `[dev-dependencies]` lines may remain.
 - Exit criteria:
@@ -398,14 +398,14 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, then `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`
   - `cargo nextest run --locked -p workshop-server --features headless`, which CI runs (`.github/workflows/ci.yml:207-208`), and `cargo nextest run --locked -p workshop-agents`
-  - With `RUSTDOCFLAGS` set to `-D warnings`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p harness --no-deps`, and `cargo doc -p promptforge --no-deps`
+  - With `RUSTDOCFLAGS` set to `-D warnings`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p harness --no-deps`, and `cargo doc -p runvil --no-deps`
   - `cargo +nightly-2026-09-05 xtask api --check` after the listing is blessed
   - `cargo test -p build-xtask`, `cargo hakari verify`, and `node --test crates/workshop/ui/test/docs-claims.mjs`
   - From `crates/workshop`: `npm run build --workspace ui`, then `npm test --workspaces --if-present`
   - Manual, in Workshop:
     - A chat streams a reply.
     - Pick another model and send: the reply comes from the new model, its label shows the new name, and the run log names it.
-    - A prompt declaring `promptforge/web` searches and fetches.
+    - A prompt declaring `runvil/web` searches and fetches.
     - Closing the panel and reopening it reattaches to the same conversation.
   - The integration suite proves Stop and close through their entry points today: the socket's `cancel` frame and Workshop's explicit close.
 
@@ -430,7 +430,7 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
   - Streaming lives only in the Host's broker. The operator said "the engine, the harness would not know anything about streaming. only the host, through the inference broker. and for headless hosts, they dont need to stream at all" (2026-09-30).
   - The run is one future that polls its effects on one thread, and synchronous VFS work runs inline. The operator said "async i/o on a single-threaded prompt is a beautiful design" and "its ok to block a little. what's 100ms really?" (2026-09-30).
   - Where a line in any `AGENTS.md` or workspace rule file conflicts with this plan, the plan wins, and the conflicting line is deleted in the commit of the step that creates the conflict. Workspace rule files are the `.cursor/rules` files in this repository and in the workspace that holds it. The operator said "if there are conflicts, the plan should win and it should be resolved by deleting the rule from the conflicting AGENTS.md file" and "if any AGENTS.md or workspace rule conflicts with the principle of the plan, the plan has priority and remove the AGENTS.md line or workspace rule" (2026-10-03).
-    - A review of the 22 `AGENTS.md` files and the eight rule files (two in `promptforge/.cursor/rules`, six in the workspace's) against the revised plan found two conflicts. Both are deleted in the Workshop step, under its rule-file bullet:
+    - A review of the 22 `AGENTS.md` files and the eight rule files (two in `runvil/.cursor/rules`, six in the workspace's) against the revised plan found two conflicts. Both are deleted in the Workshop step, under its rule-file bullet:
       - `.cursor/rules/workshop-architecture.mdc:12`, the `Tiers:` bullet, ends "The `agents` subsystem has no crate of its own; it lives inside `workshop-server`." The whole bullet goes: `tidy.rs` enforces the tier list, and the operator prefers cutting stale rule lines to fixing them (`vibe/2026-10-02-2-host-services.md`).
       - Root `AGENTS.md:40` opens with "Repository policy binds plans.", the opposite of this decision. Only that sentence goes. The rest of the line, which requires the operator's explicit approval for new structural enforcement, stays, and this plan records that approval for the `harness_bans` change. The operator chose this knowing it applies to every later plan.
     - `## Invariants` blocks and code comments that the plan makes false are updated, not deleted, because `workshop-architecture.mdc` requires every `workshop-*` crate's Invariants to list what it may depend on. Both the deletions and these updates are listed under "Rule files and docs that the new crate makes false" in File and public API changes.
@@ -485,7 +485,7 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
     - It reads the output from the `RunReport`.
     - It replaces any `harness::cancel` use with `RunControl::cancel`.
   - D1-5 dissolves: the Host's recorder holds every record it accepted, and `HarnessError::Recorder` returns the run id.
-  - D1-1 dissolves: the built-in `chat` agent moves to Workshop, which registers `promptforge/web`.
+  - D1-1 dissolves: the built-in `chat` agent moves to Workshop, which registers `runvil/web`.
   - The `harness-web` tag debt dissolves with the spawn wrappers.
 
 ### Deferred and Out of Scope
@@ -509,20 +509,20 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
 
 - Status: complete
 - Build command: `cargo build --locked -p gateway` (the workspace's only default member, so plain `cargo build` builds the same thing); desktop app: `cargo build --locked -p workshop`; headless gateway shape: `cargo build --locked -p gateway --no-default-features`. The UI bundles build through the crates' build scripts after `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui`.
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <name-filter>`; add `--test it` (most crates) or `--test suite` (`harness`, `promptforge`) to target the integration binary. For `workshop`, `workshop-server`, and `workshop-server-api`, omit `--all-features`. JS: `node --test <file>` from the package directory (`crates/workshop/ui`, `crates/workshop/look`, `crates/workshop/platform`, or `crates/gateway/config-ui/ui`).
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <name-filter>`; add `--test it` (most crates) or `--test suite` (`harness`, `runvil`) to target the integration binary. For `workshop`, `workshop-server`, and `workshop-server-api`, omit `--all-features`. JS: `node --test <file>` from the package directory (`crates/workshop/ui`, `crates/workshop/look`, `crates/workshop/platform`, or `crates/gateway/config-ui/ui`).
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, then `cargo test --locked -p <crate> --all-features --doc`; for `workshop`, `workshop-server`, and `workshop-server-api` drop `--all-features` (CI also runs `cargo nextest run --locked -p workshop-server --features headless` and `cargo nextest run --locked -p workshop-workspace --all-features`). JS packages: `npm test --workspace <ui|look|platform>` in `crates/workshop`; `npm test` in `crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`; UI: `npm test --workspaces --if-present` in `crates/workshop` and `npm test` in `crates/gateway/config-ui/ui`. The structural checks (`cargo test -p build-xtask`) run inside the workspace nextest run.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features` (never a standalone `cargo check --workspace`). TypeScript: `npm run typecheck --workspaces --if-present` in `crates/workshop` and `npm run typecheck` in `crates/gateway/config-ui/ui`. Supply chain: `cargo deny check`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook). No JS formatter is configured.
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the facade with default features: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`. User guide: `cargo xtask site --books-only`. Facade surface: `cargo +<pinned nightly> xtask api --check`, with the nightly named in `crates/build-xtask/src/api/toolchain.rs`. On this Windows machine, set `$env:RUSTDOCFLAGS="-D warnings"` in PowerShell first.
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the facade with default features: `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps`. User guide: `cargo xtask site --books-only`. Facade surface: `cargo +<pinned nightly> xtask api --check`, with the nightly named in `crates/build-xtask/src/api/toolchain.rs`. On this Windows machine, set `$env:RUSTDOCFLAGS="-D warnings"` in PowerShell first.
 - Test placement and naming conventions:
-  - Unit tests live in `#[cfg(test)]` modules (384 source files). Larger groups use a `tests.rs` module with topic files under a sibling `tests/` directory (for example `promptforge-internal/parser/src/tests/`, `engine/src/execute/tests/`, `vfs/src/handle/tests/`).
-  - Each crate has one integration test binary: `tests/it/main.rs` (most crates; `--test it`) or `tests/suite/main.rs` (`harness`, `promptforge`; `--test suite`), with one file per topic. Kebab sibling files such as `effect_loop-broker.rs` follow the flat-directory rule. Shared helpers go in `support.rs` or `tests/common/`, data in `tests/fixtures/`, prompt fixtures in `tests/prompts/`.
+  - Unit tests live in `#[cfg(test)]` modules (384 source files). Larger groups use a `tests.rs` module with topic files under a sibling `tests/` directory (for example `runvil-internal/parser/src/tests/`, `engine/src/execute/tests/`, `vfs/src/handle/tests/`).
+  - Each crate has one integration test binary: `tests/it/main.rs` (most crates; `--test it`) or `tests/suite/main.rs` (`harness`, `runvil`; `--test suite`), with one file per topic. Kebab sibling files such as `effect_loop-broker.rs` follow the flat-directory rule. Shared helpers go in `support.rs` or `tests/common/`, data in `tests/fixtures/`, prompt fixtures in `tests/prompts/`.
   - Test functions are snake_case sentences that state the behavior, such as `a_context_minimum_above_the_current_models_is_reported`.
   - JS tests use `node:test`: Workshop UI in `crates/workshop/ui/test/*.mjs` and `src/**/*.test.mjs`, `look` and `platform` in `test/**/*.mjs`, config UI in `src/**/*.test.mjs`, and tool scripts beside their source as `tools/*.test.mjs`.
   - Structural checks live only in `build-xtask` and need explicit user approval to add.
 - Directory map:
-  - `crates/`: every Rust crate plus the TypeScript packages, grouped by family. `promptforge` (the Engine facade, with `public-api.txt`) and `promptforge-internal/` (engine, lua, parser, types, vfs, model-client). `harness`, `harness-gateway-client`, `harness-web`, and `harness-internal/` (runner, plugins, sessions). `gateway/` (app binary and private crates, including `stt/` and `config-ui/` with its TS `ui/`), plus `gateway-api-types` and `gateway-api-discovery`. `workshop/` (Tauri `desktop`, `server`, `server-api` facade, tier crates, and the npm workspace `ui`, `look`, `platform`). `shared-error-source`, `shared-loopback`, and the `shared-ui` TS package. `build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda` (build tooling). `workspace-hack` (cargo-hakari).
+  - `crates/`: every Rust crate plus the TypeScript packages, grouped by family. `runvil` (the Engine facade, with `public-api.txt`) and `runvil-internal/` (engine, lua, parser, types, vfs, model-client). `harness`, `harness-gateway-client`, `harness-web`, and `harness-internal/` (runner, plugins, sessions). `gateway/` (app binary and private crates, including `stt/` and `config-ui/` with its TS `ui/`), plus `gateway-api-types` and `gateway-api-discovery`. `workshop/` (Tauri `desktop`, `server`, `server-api` facade, tier crates, and the npm workspace `ui`, `look`, `platform`). `shared-error-source`, `shared-loopback`, and the `shared-ui` TS package. `build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda` (build tooling). `workspace-hack` (cargo-hakari).
   - `guide/`: user guide books and site sources (built by `cargo xtask site`).
   - `prompts/`: example prompt programs.
   - `local/`: local gateway config, profiles, prompts, and STT fixtures for development runs.
@@ -531,12 +531,12 @@ Each behavior that moves keeps its tests in its new home, and the session suite 
   - `.github/workflows/`: CI, release, nightly, and site workflows. `.githooks/`: pre-commit format check; pre-push headless check, clippy, and `cargo deny`. `.cargo/config.toml`: `xtask` and `workshop` aliases, `rust-lld` with static CRT on Windows. `.config/`: nextest and hakari config. `.cursor/rules/`: Workshop architecture and SPA rules.
   - `images/`: README art. `cabinet/`: staging (only `_trash`). `target/`, `target-msrv/`: build output.
 - Component boundaries:
-  - Engine (`promptforge` facade over `promptforge-internal/*`): a sans-I/O state machine. It depends on the Lua VM boundary, the VFS layer, and shared substrate model wire vocabulary only. Its public surface is pinned by `crates/promptforge/public-api.txt`.
-  - Harness (`harness`, `harness-gateway-client`, `harness-web`, `harness-internal/*`): reaches the Engine only through `promptforge`. No gateway or shared crate dependencies; models come through the Host-supplied `InferenceBroker`.
+  - Engine (`runvil` facade over `runvil-internal/*`): a sans-I/O state machine. It depends on the Lua VM boundary, the VFS layer, and shared substrate model wire vocabulary only. Its public surface is pinned by `crates/runvil/public-api.txt`.
+  - Harness (`harness`, `harness-gateway-client`, `harness-web`, `harness-internal/*`): reaches the Engine only through `runvil`. No gateway or shared crate dependencies; models come through the Host-supplied `InferenceBroker`.
   - Hosts (Workshop, CLI) depend on the Harness. Workshop also attaches to the gateway over its protocol.
   - Gateway: an independent process that depends on the shared substrate. Outside consumers read only `gateway-api-types`.
   - Workshop tiers run one way: vocabulary (`workshop-protocol`, `workshop-registry`, `workshop-support`) <- services (`workshop-gateway`, `workshop-menu`, `workshop-status`) <- features (`workshop-run-log`, `workshop-user-state`, `workshop-workspace`) <- `workshop-server`. Same-tier crates never depend on each other, except registry on protocol. The desktop `workshop` crate depends only on `workshop-server-api`.
-  - The VFS layer (`promptforge-vfs`) and the shared substrate depend on nothing in the workspace.
+  - The VFS layer (`runvil-vfs`) and the shared substrate depend on nothing in the workspace.
   - Cargo's graph and `cargo test -p build-xtask` enforce these boundaries.
 - Conventions summary:
   - Rust 2024 edition on stable, resolver 3. Nearly every member inherits `[lints] workspace = true`: `unsafe_code` forbidden, clippy `all` and `pedantic` denied, `unwrap_used` and `expect_used` denied (allowed in tests), `missing_docs` and `unreachable_pub` warned.
@@ -574,20 +574,20 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - Component: Engine round vocabulary
 - Depends on: nothing.
 - Piece: the round vocabulary and the two model setters. One piece in one commit: the new `Effect::Chat` shape breaks every reader of `stream`, and the new event fields break every literal builder, so each changes with it. `StreamDelta` stays in the Engine until step 5, because the runner's `OnDelta` uses it.
-- `crates/promptforge-internal/types`:
-  - `src/ids.rs`: add `RoundId(u64)`, exported as `promptforge::ids::RoundId`.
+- `crates/runvil-internal/types`:
+  - `src/ids.rs`: add `RoundId(u64)`, exported as `runvil::ids::RoundId`.
   - `src/event.rs`: `Event::Thinking`, `AssistantReply`, and `AssistantToolCalls` gain `round: RoundId`. `ReplyOrigin` (`:147-153`) keeps its two variants, `Chat` and `Infer`.
   - `src/emitter.rs` and `src/event-tests.rs`: every literal builder of the three events gains `round`.
-- `crates/promptforge-internal/model-client`: add `Completion::with_model` (`src/client/wire.rs:361`) and `CompletionOptions::with_model` (`src/model/options.rs:192`). Each replaces the model name and returns the value.
-- `crates/promptforge-internal/engine/src/execute/`:
-  - `run/effect.rs`: add `Round { pub id: RoundId, pub origin: ReplyOrigin }`, exported as `promptforge::effect::Round`. `Effect::Chat` (`:58`) replaces `stream: bool` with `round: Round`. `EffectRecord::Chat` (`:179`, built from the effect at `:134`) drops `model` and gains `round: RoundId`, so a record names its round by id and its slot by alias.
+- `crates/runvil-internal/model-client`: add `Completion::with_model` (`src/client/wire.rs:361`) and `CompletionOptions::with_model` (`src/model/options.rs:192`). Each replaces the model name and returns the value.
+- `crates/runvil-internal/engine/src/execute/`:
+  - `run/effect.rs`: add `Round { pub id: RoundId, pub origin: ReplyOrigin }`, exported as `runvil::effect::Round`. `Effect::Chat` (`:58`) replaces `stream: bool` with `round: Round`. `EffectRecord::Chat` (`:179`, built from the effect at `:134`) drops `model` and gains `round: RoundId`, so a record names its round by id and its slot by alias.
   - `scheduler.rs`: a `next_round` counter beside `next_effect` numbers the run's rounds from 0 in dispatch order, chat and nested-infer rounds alike.
   - `scheduler/pending.rs:18-72`: the chat and infer `Continuation` hold their round's id until the answer arrives, then stamp it on that round's events.
   - `scheduler/chat.rs`: rename the private `struct Round` (`:259-263`) so it no longer collides with the public name. Build `round` with origin `Chat` where `stream: true` is set today (`:167-174`), and stamp the id on the tool-call batch (`:365-366`).
   - `scheduler/dispatch.rs:248-255`: build `round` with origin `Infer` where `stream: false` is set today.
   - `support.rs:85-156`: `report_model_turn` stamps the id on the thinking and reply events. The reply event's `model` and `ChatAnswerRecord.model` keep following `Completion::model`.
-- Engine test support (`crates/promptforge-internal/engine/src/test_support/`): `harness.rs:143-160` and `tokio_driver.rs` hand the delta hook to rounds whose origin is `Chat` instead of reading `stream`. `recording/forward.rs`, `forward-tests.rs`, and `forward-tests-variants.rs` build the three events with `round`.
-- `crates/promptforge`: export `Round` and `RoundId`. `src/effect.md`, `event.md`, and `model.md` describe rounds, the record's slot identity, and `with_model`. Bless `public-api.txt`.
+- Engine test support (`crates/runvil-internal/engine/src/test_support/`): `harness.rs:143-160` and `tokio_driver.rs` hand the delta hook to rounds whose origin is `Chat` instead of reading `stream`. `recording/forward.rs`, `forward-tests.rs`, and `forward-tests-variants.rs` build the three events with `round`.
+- `crates/runvil`: export `Round` and `RoundId`. `src/effect.md`, `event.md`, and `model.md` describe rounds, the record's slot identity, and `with_model`. Bless `public-api.txt`.
 - `crates/harness-internal/runner/src/effect_loop.rs:333-347`: hand the broker `on_delta` when `round.origin` is `ReplyOrigin::Chat`. The `InferenceBroker` signature does not change in this step.
 - Other literal builders: `crates/harness-gateway-client/src/wire/request-tests.rs:82` (`Effect::Chat`), the `fidelity` test in `crates/workshop/run-log`, and `crates/workshop/server/src/agents/wire-tests.rs` and `status-tests.rs`.
 - Tests:
@@ -595,7 +595,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - Rewrite `a_chat_round_streams_its_deltas_to_the_harness` and `a_nested_infer_round_streams_no_deltas_to_the_harness` (`execute/tests/effects.rs`) to assert each round's origin and id. Update the hand-built effects and records in `execute/run/tests.rs:55-68` and `execute/tests/effects.rs:89`.
   - New, beside `a_dropped_answer_resumes_a_waiting_chain_with_the_cancelled_error` (`execute/run/tests.rs:250-262`), which covers a `Vfs` effect: a `Chat` effect and a `ToolCall` effect dropped while the run's cancel flag is clear resume a `pcall` with the cancelled error and the run continues; the record holds the effect and its `Dropped` answer, and the turn count is unchanged; an uncaught drop ends the run `Cancelled`.
   - The runner's `tests/it/effect_loop-broker.rs` still shows that a section's round gets the callback and an infer round gets none.
-  - Run `cargo nextest run --locked -p promptforge-types -p promptforge-model-client -p promptforge-engine -p promptforge -p harness-runner -p harness-sessions -p harness -p harness-gateway-client -p workshop-run-log --all-features`, the same crates under `cargo test --locked --all-features --doc`, `cargo nextest run --locked -p workshop-server`, clippy on all of them (`workshop-server` without `--all-features`), `cargo doc -p promptforge --no-deps`, and `cargo +nightly-2026-09-05 xtask api --check`.
+  - Run `cargo nextest run --locked -p runvil-types -p runvil-model-client -p runvil-engine -p runvil -p harness-runner -p harness-sessions -p harness -p harness-gateway-client -p workshop-run-log --all-features`, the same crates under `cargo test --locked --all-features --doc`, `cargo nextest run --locked -p workshop-server`, clippy on all of them (`workshop-server` without `--all-features`), `cargo doc -p runvil --no-deps`, and `cargo +nightly-2026-09-05 xtask api --check`.
 
 </step-1>
 
@@ -639,7 +639,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - `src/session/files.rs`: the session's output comes from `RunReport.output`, so the `spawn_blocking_launch` read (`:89`) goes. The session keeps its own `OutputError`, with `Unfinished`, for the facade until step 3.
   - `src/environment.rs` keeps the bindings and uses the runner's `HostSnapshot` and `current_model`.
   - Turn-cancel and close call `RunControl::cancel`, so Stop still cancels and relaunches. `stop_round` is tested only in the runner until step 3.
-- Facade `crates/harness`: `src/lib.rs` re-exports `HostSnapshot` from `harness_runner`. Every hidden broker in `lib.md`, `vfs.md`, `cancel.md`, `record.md`, and `capability.md` takes `round: promptforge::effect::Round`.
+- Facade `crates/harness`: `src/lib.rs` re-exports `HostSnapshot` from `harness_runner`. Every hidden broker in `lib.md`, `vfs.md`, `cancel.md`, `record.md`, and `capability.md` takes `round: runvil::effect::Round`.
 - Brokers: `GatewayBroker::chat` (`crates/harness-gateway-client/src/broker.rs:97`) and `WorkshopBroker::chat` (`crates/workshop/server/src/agents/broker.rs:82`) take the new parameter and stream as today when handed a sender.
 - `harness-web` does not change. Its untagged fetch spawns stop being debt once the spawn wrappers go.
 - Run `cargo hakari generate`, `cargo hakari manage-deps`, and `cargo hakari verify`.
@@ -652,7 +652,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
     - `stop_round` leaves a question to the operator open, and `cancel` drops it;
     - a `models()` failure returns `HarnessError::Model`, a cancel during `models()` returns `Ok` with `run_id: None` and `Cancelled`, and a recorder failure returns `HarnessError::Recorder` holding the issued run id;
     - a panicking broker answers `Dropped`, and a `Vfs` effect is answered inline as it is issued;
-    - one run completes on the test's own thread under a thread-parking `block_on` written in the test, as `crates/promptforge/src/cancel.md:127-145` writes one, built on the workspace's existing dependencies.
+    - one run completes on the test's own thread under a thread-parking `block_on` written in the test, as `crates/runvil/src/cancel.md:127-145` writes one, built on the workspace's existing dependencies.
   - Converted runner tests: `tests/it/support.rs`, `effect_loop.rs`, `effect_loop-broker.rs` (the broker receives each round's `Round`, origin `Chat` or `Infer`, and the Harness passes no `on_delta`), `effect_loop-recorder.rs`, `effect_loop-vfs.rs`, `performers.rs` (a scripted `Timer` in place of `TokioTimer`), and the five `prepare*.rs` files (source text in place of a prompt path).
   - Plugins: `src/user_input-tests.rs:56`, `src/plugin-tests.rs:143-173`, and `tests/it/needs.rs:114` supply the broker through `HostServices::provide`.
   - `harness-sessions`: the suite passes, changed only where it built runs through `prepare_run` or read the delta sink (`tests/it/end_to_end.rs`, `tests/it/support.rs`) and for the broker signature.
@@ -671,7 +671,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - Pieces: the new `workshop-agents` crate, `workshop-server` rewired onto it, the facade swap with its doc pages, and the rule-file and doc edits the new crate makes necessary. Built jointly in one commit, because the facade's `Harness` changes meaning, so Workshop and the facade must move together. `harness-sessions` stays in the workspace, compiling and unreferenced.
 - New crate `crates/workshop/agents`, scaffolded with `cargo xtask new-crate workshop-agents` (`crates/build-xtask/src/new_crate.rs:13-28`):
   - Root `Cargo.toml`: add it to `members` and `[workspace.dependencies]`. `crates/build-xtask/src/tidy.rs:41-45`: add `("workshop-agents", "agents")` to the feature tier.
-  - `src/lib.rs`: the crate doc opens with `## Invariants`, names its tier as feature and its dependencies as the vocabulary and service crates, `harness`, `promptforge`, and third-party crates, and writes Engine, Harness, and Host capitalized. It never names `workshop-run-log`.
+  - `src/lib.rs`: the crate doc opens with `## Invariants`, names its tier as feature and its dependencies as the vocabulary and service crates, `harness`, `runvil`, and third-party crates, and writes Engine, Harness, and Host capitalized. It never names `workshop-run-log`.
   - Adapted from `harness-sessions`, with their tests:
     - the conversation table, keyed by a Workshop-minted id that becomes each run's name (from `src/runtime.rs`);
     - each conversation's state and failure reports (the moved `SessionState`, `FailureKind`, and `SessionFailure`), derived from recorded `ModelTurnFailed` and `ToolCallFailed` events and from the `RunReport`;
@@ -682,7 +682,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
     - conversation channels that close when the conversation ends, so the status reporter, which ends when its channels close (`crates/workshop/server/src/agents/status.rs:44-58`), ends with it;
     - a recorder tee over an inner `Arc<dyn RunRecorder>` that adds each event to the transcript after the inner recorder accepts it, returns the inner recorder's failure when it refuses one, and fills `RunMeta.agent` on `begin_run` until step 4.
 - `crates/workshop/server`:
-  - `src/agents.rs`: the launch checks the agent name, reads its file into text, and builds the run's Harness from the tee over `TursoRecorder`, a per-run broker, `TokioTimer`, a clone of the registry, and a per-run clone of the base services with the conversation's input broker under `INPUT_BROKER`. The base services leave `INPUT_BROKER` empty, because `provide` refuses a duplicate. The launch reads the current pick and the granted roots into the request's `HostSnapshot` and spawns `run` on tokio. Close (`AgentSessions::close`, `:224-231`) calls `RunControl::cancel`. An unknown agent and a launch with no usable gateway keep today's refusal texts. Workshop registers `promptforge/web`, so the moved `chat` agent's requirement is met (D1-1).
+  - `src/agents.rs`: the launch checks the agent name, reads its file into text, and builds the run's Harness from the tee over `TursoRecorder`, a per-run broker, `TokioTimer`, a clone of the registry, and a per-run clone of the base services with the conversation's input broker under `INPUT_BROKER`. The base services leave `INPUT_BROKER` empty, because `provide` refuses a duplicate. The launch reads the current pick and the granted roots into the request's `HostSnapshot` and spawns `run` on tokio. Close (`AgentSessions::close`, `:224-231`) calls `RunControl::cancel`. An unknown agent and a launch with no usable gateway keep today's refusal texts. Workshop registers `runvil/web`, so the moved `chat` agent's requirement is met (D1-1).
   - `src/agents/broker.rs`: a new per-run broker over `WorkshopBroker` hands it the conversation's delta sender for `Chat` rounds, stamped with the round id.
   - `src/agents/bindings.rs`: delete the `set_host` push, which the launch's snapshot replaces.
   - `src/agents/socket.rs`, `socket_frames.rs`, `status.rs`, `state.rs`, and `wire.rs` read the conversation instead of `Session`. The socket's `cancel` frame (`socket.rs:272-285`) calls `RunControl::stop_round`. The comments that name `harness-sessions` (`status.rs:69`, `socket_frames.rs:33`, `status-tests.rs:141`, `socket_frames-tests.rs:42`) name the conversation's types instead.
@@ -747,9 +747,9 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - `crates/harness-internal/runner/src/performers.rs`: `InferenceBroker::chat` drops its `on_delta` parameter, and `OnDelta` goes. `src/effect_loop.rs` stops passing it.
 - Facade `crates/harness`: drop the `OnDelta` export. Every hidden broker in the five pages drops the parameter, and the `lib.md` tour "stream from your own broker" streams from a broker's own sender for `Chat` rounds.
 - Engine:
-  - `StreamDelta` leaves `crates/promptforge-internal/types/src/wire.rs:12-17` and `promptforge::model` (`crates/promptforge/src/lib.rs` and `model.md`). Bless `public-api.txt`.
+  - `StreamDelta` leaves `crates/runvil-internal/types/src/wire.rs:12-17` and `runvil::model` (`crates/runvil/src/lib.rs` and `model.md`). Bless `public-api.txt`.
   - The Engine's test support stops streaming: `DeltaHook` (`src/test_support.rs`), `RunHarness::on_delta` (`src/test_support/harness.rs`), the scripted chat's pieces (`src/test_support/scripted-chat.rs`), `src/test_support/tokio_driver.rs`, `benches/models_loop.rs`, and `src/execute/tests/gateway.rs` and `effects.rs`, whose two round tests keep asserting origin and id.
-  - Remove the mentions in `crates/promptforge-internal/model-client/src/lib.rs` and `README.md`, and in `crates/promptforge-internal/types/src/lib.rs:12` and `README.md`.
+  - Remove the mentions in `crates/runvil-internal/model-client/src/lib.rs` and `README.md`, and in `crates/runvil-internal/types/src/lib.rs:12` and `README.md`.
 - `crates/harness-gateway-client`:
   - `StreamDelta` (`Text`, `Reasoning`) moves here and is exported from `src/lib.rs`. `GatewayChat::complete` (`src/transport.rs:300`) and the wire reader (`src/wire/read.rs`, `src/wire/stream.rs`) use it.
   - `src/broker.rs`: `GatewayBroker::chat_streaming(binding, messages, tools, options, on_piece: Arc<dyn Fn(StreamDelta) + Send + Sync>)` streams pieces to the caller, and `impl InferenceBroker for GatewayBroker` returns the whole reply.
@@ -759,8 +759,8 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - `harness-gateway-client`: `chat_streaming` hands pieces to its callback in wire order, and the `InferenceBroker` path returns the whole reply (`src/broker-tests.rs`). `src/transport/tests/streaming.rs` and `src/wire/stream-tests.rs` use the moved type. The chat, catalog, and search message and kind tests pass, changed only for the move.
   - Runner: `tests/it/effect_loop-broker.rs` asserts only each round's `Round`. Facade: `tests/suite/broker.rs` drops the parameter.
   - Workshop: `a_full_turn_streams_deltas_and_indexed_events_sharing_the_reply_id` (`tests/it/agents/turns.rs`) passes on the streaming method, and `src/agents/broker-tests.rs` covers it.
-  - `rg -n 'StreamDelta|stream: (true|false)' crates/promptforge crates/promptforge-internal` returns nothing, and so does the Testing Plan's first leftover search, for `Session`, `OnDelta`, `TokioTimer`, `spawn_tagged`, and the other removed names in `crates/harness` and `crates/harness-internal`.
-  - Run `cargo nextest run --locked -p promptforge-types -p promptforge-model-client -p promptforge-engine -p promptforge -p harness-runner -p harness -p harness-gateway-client --all-features`, the same crates under `cargo test --locked --all-features --doc`, `cargo nextest run --locked -p workshop-server`, `cargo nextest run --locked -p workshop-server --features headless`, clippy on these crates (`workshop-server` without `--all-features`), `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, and `cargo +nightly-2026-09-05 xtask api --check`.
+  - `rg -n 'StreamDelta|stream: (true|false)' crates/runvil crates/runvil-internal` returns nothing, and so does the Testing Plan's first leftover search, for `Session`, `OnDelta`, `TokioTimer`, `spawn_tagged`, and the other removed names in `crates/harness` and `crates/harness-internal`.
+  - Run `cargo nextest run --locked -p runvil-types -p runvil-model-client -p runvil-engine -p runvil -p harness-runner -p harness -p harness-gateway-client --all-features`, the same crates under `cargo test --locked --all-features --doc`, `cargo nextest run --locked -p workshop-server`, `cargo nextest run --locked -p workshop-server --features headless`, clippy on these crates (`workshop-server` without `--all-features`), `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, and `cargo +nightly-2026-09-05 xtask api --check`.
 
 </step-5>
 
@@ -819,12 +819,12 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - Guide:
   - `guide/src/language/11-conversations.md:267`: the Host's broker streams a section's own rounds, a `models.infer` round reaches the broker marked as an infer round, and the Harness streams nothing.
   - `guide/src/language/16-limits-and-errors.md`, "Calls waiting during a cancel" (`:589-621`): add the Host's round stop. The waiting call gets the same interrupted error, a caught stop keeps the run going, and a question to the operator stays open.
-  - Regenerate the exports with `cargo run --locked -q -p build-user-guide`. `git diff --stat -- guide` lists only those two chapters and `guide/promptforge-language-guide.md`. Then run `cargo xtask site --books-only`.
+  - Regenerate the exports with `cargo run --locked -q -p build-user-guide`. `git diff --stat -- guide` lists only those two chapters and `guide/runvil-language-guide.md`. Then run `cargo xtask site --books-only`.
 - Tests and exit criteria:
   - Each leftover search in the Testing Plan returns nothing, except that the tokio search shows only `[dev-dependencies]` lines.
   - Step 7's `cargo tree --locked -e normal -p <crate> --prune workspace-hack` check still lists no tokio for the three Harness crates.
   - Every exit criterion in the Testing Plan, run once here, including `cargo nextest run --locked -p workshop-server --features headless` and `cargo nextest run --locked -p workshop-agents`.
-  - Manual, in Workshop: a chat streams a reply; picking another model and sending gets the reply from the new model, with its label and the run log naming it; a prompt declaring `promptforge/web` searches and fetches; closing the panel and reopening it reattaches to the same conversation.
+  - Manual, in Workshop: a chat streams a reply; picking another model and sending gets the reply from the new model, with its label and the run log naming it; a prompt declaring `runvil/web` searches and fetches; closing the panel and reopening it reattaches to the same conversation.
 
 </step-8>
 
@@ -835,7 +835,7 @@ Each step is one commit holding its code and its tests, and runs only its touche
 - Component: Round stop follow-ups
 - Depends on: step 2 (the round stop) and step 8 (the guide section this step completes).
 - Piece: one commit fixing two defects of step 2's round stop, which the Decision Record lists under "Found while running step 8". Both changes keep a run cancel exactly as it is today.
-- Timed waits, in `crates/promptforge-internal/engine/src/execute/scheduler/`:
+- Timed waits, in `crates/runvil-internal/engine/src/execute/scheduler/`:
   - `apply.rs:205-218`: `drop_timer` moves the timer's slot to `Cancelled` without waking its owner, because it assumes only a run cancel drops a live timer. When the run's cancel flag is clear, a dropped timer must wake the chain waiting on it, and that chain's waiting call (a timed `tasks.join` or `tasks.join_any`) resumes with `Error::Interrupted`, kind `cancelled`, as a dropped `Chat` or `ToolCall` does (`dropped_answer`, `apply.rs:35-43`). Under a run cancel the drop keeps today's behavior. Rewrite the `drop_timer` doc to match.
   - Change `timer.rs`, the task slots, or the join shim only as far as delivering that error needs. A timer that nothing waits on is still dropped silently.
 - Stop latching, in `crates/harness-internal/runner/src/`:
@@ -843,12 +843,12 @@ Each step is one commit holding its code and its tests, and runs only its touche
   - A question to the operator stays open across a stop, as today.
 - Guide: `guide/src/language/16-limits-and-errors.md`, the "A stopped round" subsection added in step 8, also says that a stop interrupts a timed `tasks.join` or `tasks.join_any` with the same interrupted error, and that a stop with nothing in flight changes nothing. Regenerate the export with `cargo run --locked -q -p build-user-guide`, then run `cargo xtask site --books-only`.
 - Tests:
-  - Engine, beside the drop tests in `crates/promptforge-internal/engine/src/execute/run/tests-drops.rs`: a timed `tasks.join_any` whose timer is dropped while the cancel flag is clear raises the cancelled error into a `pcall`, and the run continues; uncaught, the run ends `Cancelled`; with the cancel flag set, the drop ends the run as it does today.
+  - Engine, beside the drop tests in `crates/runvil-internal/engine/src/execute/run/tests-drops.rs`: a timed `tasks.join_any` whose timer is dropped while the cancel flag is clear raises the cancelled error into a `pcall`, and the run continues; uncaught, the run ends `Cancelled`; with the cancel flag set, the drop ends the run as it does today.
   - Runner, in `crates/harness-internal/runner/tests/it/harness-stop.rs`:
     - `stop_round` during a timed `tasks.join_any` resumes the prompt's `pcall` instead of leaving it waiting on the joined task;
     - `stop_round` while only a question to the operator is open leaves the question open, and once it is answered the next model round reaches the broker and completes;
     - `stop_round` with nothing in flight changes nothing for the next effect.
-  - Run `cargo nextest run --locked -p promptforge-engine -p harness-runner --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on both with `--all-targets --all-features -- -D warnings`, `cargo nextest run --locked -p workshop-server`, `cargo nextest run --locked -p workshop-server --features headless`, `cargo run --locked -q -p build-user-guide` then `git diff --stat -- guide`, and `cargo xtask site --books-only`.
+  - Run `cargo nextest run --locked -p runvil-engine -p harness-runner --all-features`, the same crates under `cargo test --locked --all-features --doc`, clippy on both with `--all-targets --all-features -- -D warnings`, `cargo nextest run --locked -p workshop-server`, `cargo nextest run --locked -p workshop-server --features headless`, `cargo run --locked -q -p build-user-guide` then `git diff --stat -- guide`, and `cargo xtask site --books-only`.
 
 </step-9>
 

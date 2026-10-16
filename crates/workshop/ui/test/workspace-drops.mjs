@@ -1,7 +1,7 @@
 // Unit test for the native workspace drop handler (src/parts/workspace/workspace-drops.ts).
 // Bundles the TS module with esbuild, imports it via a data URL, and drives
 // it against jsdom. Covers: browser mode never installs the grant listener;
-// in desktop mode a synthesized promptforge:file-drop event POSTs one grant
+// in desktop mode a synthesized runvil:file-drop event POSTs one grant
 // per path with a paths-only JSON body; malformed details are ignored; a
 // failed grant paints the status bar and does not stop the rest; the
 // default action of file drags is suppressed (never navigating away) while
@@ -73,7 +73,7 @@ function scenario({ desktop, responder }) {
 {
   const { window, calls } = scenario({ desktop: false });
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", {
+    new window.CustomEvent("runvil:file-drop", {
       detail: { paths: ["C:\\Users\\Vinnie\\project"] },
     }),
   );
@@ -86,7 +86,7 @@ function scenario({ desktop, responder }) {
 {
   const { window, calls, local } = scenario({ desktop: true });
   let changed = 0;
-  window.addEventListener("promptforge:workspace-changed", () => {
+  window.addEventListener("runvil:workspace-changed", () => {
     changed += 1;
   });
   const paths = [
@@ -94,7 +94,7 @@ function scenario({ desktop, responder }) {
     "C:\\Users\\Vinnie\\café 中文.txt",
   ];
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { paths } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { paths } }),
   );
   await flush();
   check("one grant request per dropped path", calls.length === 2);
@@ -130,19 +130,19 @@ function scenario({ desktop, responder }) {
 
 {
   const { window, calls } = scenario({ desktop: true });
-  window.dispatchEvent(new window.Event("promptforge:file-drop"));
-  window.dispatchEvent(new window.CustomEvent("promptforge:file-drop", { detail: null }));
+  window.dispatchEvent(new window.Event("runvil:file-drop"));
+  window.dispatchEvent(new window.CustomEvent("runvil:file-drop", { detail: null }));
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { paths: "C:\\x" } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { paths: "C:\\x" } }),
   );
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { paths: ["C:\\x", 42] } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { paths: ["C:\\x", 42] } }),
   );
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { paths: [] } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { paths: [] } }),
   );
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { other: ["C:\\x"] } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { other: ["C:\\x"] } }),
   );
   await flush();
   check("malformed or empty drop details never grant", calls.length === 0);
@@ -247,7 +247,7 @@ for (const desktop of [false, true]) {
         : { ok: true, status: 200, json: async () => ({ granted: path }) },
   });
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", {
+    new window.CustomEvent("runvil:file-drop", {
       detail: { paths: ["C:\\blocked", "C:\\allowed"] },
     }),
   );
@@ -284,7 +284,7 @@ for (const desktop of [false, true]) {
   const drop = syntheticDrag(window, "drop", ["Files"]);
   child.dispatchEvent(drop);
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", {
+    new window.CustomEvent("runvil:file-drop", {
       detail: { paths: ["C:\\a.md", "C:\\b.txt"] },
     }),
   );
@@ -305,7 +305,7 @@ for (const desktop of [false, true]) {
   const drop = syntheticDrag(window, "drop", ["Files"]);
   window.document.body.dispatchEvent(drop);
   window.dispatchEvent(
-    new window.CustomEvent("promptforge:file-drop", { detail: { paths: ["C:\\c.md"] } }),
+    new window.CustomEvent("runvil:file-drop", { detail: { paths: ["C:\\c.md"] } }),
   );
   await flush();
   check("a drop on a non-target grants its paths", calls.length === 1);

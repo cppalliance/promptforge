@@ -1,6 +1,6 @@
 ---
 name: completion normalize layer
-overview: Introduce a CompletionNormalizer seam in promptforge-core (one module, drop-in trait) and enforce the invariant that a turn with neither tool calls nor non-empty text is always a hard error - concentrating wire quirks so PromptForge can stay universal across models.
+overview: Introduce a CompletionNormalizer seam in runvil-core (one module, drop-in trait) and enforce the invariant that a turn with neither tool calls nor non-empty text is always a hard error - concentrating wire quirks so Runvil can stay universal across models.
 todos:
   - id: normalize-module
     content: Add CompletionNormalizer + OpenAiChatNormalizer; hard-fail empty final content; wire GatewayClient; update tests
@@ -16,7 +16,7 @@ isProject: false
 ## Decisions (from review)
 
 - **Trait stay.** `CompletionNormalizer` + `Arc<dyn …>` on the client is fine. If it stays single-impl forever, removing the trait is a small local edit - not a design debt to optimize for now.
-- **Growth is the point.** If `normalize.rs` accretes more dialect cases and someday looks like a small genai, that means PromptForge needed a real normalizer. Keep special cases *here*, not everywhere else. Do not fear that growth; fear scattering.
+- **Growth is the point.** If `normalize.rs` accretes more dialect cases and someday looks like a small genai, that means Runvil needed a real normalizer. Keep special cases *here*, not everywhere else. Do not fear that growth; fear scattering.
 - **Empty response invariant.** A normalized turn must yield either non-empty tool calls or non-empty text. Anything else is always `Error::EmptyModelReply` - including when `reasoning_content` is present. Never promote reasoning into the answer. Soft success with `Text("")` is forbidden.
 - **Tool calls are not empty.** An assistant turn whose product is `tool_calls` (even with `content: ""` / null) is a valid non-empty response. The invariant is "no product," not "content string must be non-empty on every wire message."
 - **This change is response-side.** See glossary below. Request-side thinking dialects stay in `CompletionOptions` for now; if they need a matching request normalizer later, it belongs in the same module family, not in execute.
@@ -50,7 +50,7 @@ flowchart LR
   client --> loop
 ```
 
-Single new module: [`crates/promptforge-core/src/normalize.rs`](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\normalize.rs).
+Single new module: [`crates/runvil-core/src/normalize.rs`](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\src\normalize.rs).
 
 | Piece | Role |
 |---|---|
@@ -59,7 +59,7 @@ Single new module: [`crates/promptforge-core/src/normalize.rs`](C:\Users\Vinnie\
 | `OpenAiChatNormalizer` | Default impl: today's parse + synonyms + empty-text error |
 | `Error::EmptyModelReply` | Distinct from `MalformedResponse`; message names empty content (and that reasoning was ignored if present, without pasting it) |
 
-[`GatewayClient::complete`](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\client.rs) calls the normalizer instead of private `parse_completion`. For slender drop-in without threading every Host: store `Arc<dyn CompletionNormalizer>` on `GatewayClient`, defaulting to `OpenAiChatNormalizer` in `new` / `from_env`. A later Host can construct with another impl; execute and RunOptions stay unchanged.
+[`GatewayClient::complete`](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\src\client.rs) calls the normalizer instead of private `parse_completion`. For slender drop-in without threading every Host: store `Arc<dyn CompletionNormalizer>` on `GatewayClient`, defaulting to `OpenAiChatNormalizer` in `new` / `from_env`. A later Host can construct with another impl; execute and RunOptions stay unchanged.
 
 Execute tool loop: `EmptyModelReply` from `complete` fires `MODEL_TURN_FAILED` and fails the run. Remove the soft path that observes `MODEL_REPLY_EMPTY` and continues with `reply == ""` - empty text must not reach epilogs. Truncation (`finish_reason == length`) remains an observer detail only when text is non-empty; empty+length is still `EmptyModelReply`. Retire or repurpose `MODEL_REPLY_EMPTY` in docs so it is not described as a successful-run signal.
 
@@ -67,7 +67,7 @@ Execute tool loop: `EmptyModelReply` from `complete` fires `MODEL_TURN_FAILED` a
 
 ## Steps (lean vibe)
 
-Governing guides: [vibe-rulebook](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\vibe-rulebook.md) + [rust-rulebook](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\rust-rulebook.md). Lean protocol: targeted tests in implementer; parallel full suite + diff-only review; **one amend round**; max three findings; never ask between steps. Scratch: `cabinet/_scratch/vibe-review-promptforge-normalize/vibe-review.md`.
+Governing guides: [vibe-rulebook](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\vibe-rulebook.md) + [rust-rulebook](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\rust-rulebook.md). Lean protocol: targeted tests in implementer; parallel full suite + diff-only review; **one amend round**; max three findings; never ask between steps. Scratch: `cabinet/_scratch/vibe-review-runvil-normalize/vibe-review.md`.
 
 ### Step 1 - Normalize module + hard-fail empty text
 

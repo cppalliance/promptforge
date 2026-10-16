@@ -1,5 +1,5 @@
-//! Native Silero tests. They read `PROMPTFORGE_WHISPER_LIBRARY`,
-//! `PROMPTFORGE_WHISPER_AUDIO`, and `PROMPTFORGE_SILERO_MODEL`, and the
+//! Native Silero tests. They read `RUNVIL_WHISPER_LIBRARY`,
+//! `RUNVIL_WHISPER_AUDIO`, and `RUNVIL_SILERO_MODEL`, and the
 //! audio's scripted line file beside it as `<stem>-lines.json`; run them on
 //! both `jfk.wav` and `dictation-01.wav`.
 
@@ -36,14 +36,14 @@ struct Fixture {
 }
 
 fn library() -> WhisperLibrary {
-    WhisperLibrary::load(&native_fixture("PROMPTFORGE_WHISPER_LIBRARY"))
+    WhisperLibrary::load(&native_fixture("RUNVIL_WHISPER_LIBRARY"))
         .expect("packaged whisper runtime loads")
 }
 
 /// whisper.cpp can throw a C++ exception across the FFI boundary on a
 /// malformed model, so the digest is checked before init.
 fn silero(library: &WhisperLibrary) -> VadContext {
-    let path = native_fixture("PROMPTFORGE_SILERO_MODEL");
+    let path = native_fixture("RUNVIL_SILERO_MODEL");
     let bytes = std::fs::read(&path).expect("Silero model reads");
     let mut digest = String::with_capacity(64);
     for byte in Sha256::digest(&bytes) {
@@ -59,7 +59,7 @@ fn silero(library: &WhisperLibrary) -> VadContext {
 }
 
 fn fixture() -> Fixture {
-    let path = native_fixture("PROMPTFORGE_WHISPER_AUDIO");
+    let path = native_fixture("RUNVIL_WHISPER_AUDIO");
     let mut reader = hound::WavReader::open(&path).expect("audio fixture opens");
     let spec = reader.spec();
     assert_eq!(
@@ -136,7 +136,7 @@ fn percentile(sorted: &[Duration], percent: usize) -> Duration {
 fn pinned_model_loads_and_a_missing_one_is_rejected() {
     let library = library();
     let _vad = silero(&library);
-    let missing = native_fixture("PROMPTFORGE_SILERO_MODEL").with_file_name("missing-silero.bin");
+    let missing = native_fixture("RUNVIL_SILERO_MODEL").with_file_name("missing-silero.bin");
     assert!(
         matches!(
             VadContext::new(&library, &missing),

@@ -141,12 +141,12 @@ mod tests {
 
     fn require_context() -> WhisperContext {
         let library_path = require_fixture(
-            "PROMPTFORGE_WHISPER_LIBRARY",
+            "RUNVIL_WHISPER_LIBRARY",
             &native_fixture_root(),
             "whisper.dll",
         );
         let model_path = require_fixture(
-            "PROMPTFORGE_WHISPER_MODEL",
+            "RUNVIL_WHISPER_MODEL",
             &native_fixture_root(),
             "ggml-tiny.en.bin",
         );

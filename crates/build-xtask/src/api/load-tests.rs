@@ -7,22 +7,19 @@ fn internal_packages_are_every_container_crate_by_package_name_sorted() {
     let root = tempfile::TempDir::new().expect("tempdir");
     crate::product::test_support::write_crate(
         root.path(),
-        "promptforge-internal/zeta",
-        "promptforge-zeta",
+        "runvil-internal/zeta",
+        "runvil-zeta",
         "",
     );
     crate::product::test_support::write_crate(
         root.path(),
-        "promptforge-internal/alpha",
-        "promptforge-alpha",
+        "runvil-internal/alpha",
+        "runvil-alpha",
         "",
     );
     assert_eq!(
         internal_packages(root.path()),
-        Ok(vec![
-            "promptforge-alpha".to_owned(),
-            "promptforge-zeta".to_owned()
-        ])
+        Ok(vec!["runvil-alpha".to_owned(), "runvil-zeta".to_owned()])
     );
 }
 
@@ -32,7 +29,7 @@ fn an_internal_manifest_without_a_package_name_is_an_error() {
     let dir = root
         .path()
         .join("crates")
-        .join("promptforge-internal")
+        .join("runvil-internal")
         .join("broken");
     std::fs::create_dir_all(&dir).expect("the crate directory creates");
     std::fs::write(dir.join("Cargo.toml"), "[workspace]\n").expect("the manifest writes");

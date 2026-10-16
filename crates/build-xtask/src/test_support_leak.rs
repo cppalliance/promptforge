@@ -1,15 +1,15 @@
 //! `test-support` leak guard: no non-dev dependency table anywhere in the
-//! workspace enables a promptforge or Harness crate's `test-support`
-//! feature. The promptforge family is the facade plus every
-//! `crates/promptforge-internal/` member; the Harness family is the
+//! workspace enables a runvil or Harness crate's `test-support`
+//! feature. The runvil family is the facade plus every
+//! `crates/runvil-internal/` member; the Harness family is the
 //! `crates/harness` facade plus every `crates/harness-internal/` member.
 //!
 //! An Engine crate may keep test drivers behind its `test-support` feature
-//! (`promptforge-engine`'s serial driver and scripted model, for its
+//! (`runvil-engine`'s serial driver and scripted model, for its
 //! bench), and a Harness crate may keep test fixtures behind its own. Both
 //! are safe only while `test-support` is enabled from `[dev-dependencies]`
 //! alone: a production `[dependencies]` entry such as
-//! `promptforge-engine = { workspace = true, features = ["test-support"] }`
+//! `runvil-engine = { workspace = true, features = ["test-support"] }`
 //! would pull the test drivers into a shipping binary. This guard closes
 //! that path. It scans every crate under `crates/` (containers included),
 //! the `[dependencies]` and `[build-dependencies]` tables and their
@@ -20,7 +20,7 @@
 //! It also scans each crate's `[features]` table: a value of the form
 //! `<dep>/test-support` or `<dep>?/test-support` enables the feature on
 //! a non-dev dependency (cargo forbids `[features]` from naming
-//! dev-dependencies), so `default = ["promptforge-engine/test-support"]`
+//! dev-dependencies), so `default = ["runvil-engine/test-support"]`
 //! is the same leak spelled through a feature. `<dep>` is resolved through
 //! the crate's own dependency entries and their `package` renames. One
 //! shape is exempt, within each family: a crate's own `test-support`
@@ -46,7 +46,7 @@ const CHECKED_KINDS: [&str; 2] = ["dependencies", "build-dependencies"];
 const EXEMPTING_FEATURE: &str = "test-support";
 
 /// Scans the workspace for non-dev dependency tables, and `[features]`
-/// values, that enable a promptforge or Harness crate's `test-support`
+/// values, that enable a runvil or Harness crate's `test-support`
 /// feature.
 #[must_use]
 pub(crate) fn test_support_leak_violations(root: &Path) -> Vec<String> {
@@ -131,7 +131,7 @@ fn scan_features(
                 continue;
             }
             violations.push(format!(
-                "{}: [features] {feature} enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {EXEMPTING_FEATURE} feature",
+                "{}: [features] {feature} enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a runvil or harness crate's {EXEMPTING_FEATURE} feature",
                 manifest_path.display()
             ));
         }
@@ -186,7 +186,7 @@ fn scan_table(
             });
         if enables {
             violations.push(format!(
-                "{}: [{table}] enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a promptforge or harness crate's {EXEMPTING_FEATURE} feature",
+                "{}: [{table}] enables {package}/{EXEMPTING_FEATURE}; only [dev-dependencies] may enable a runvil or harness crate's {EXEMPTING_FEATURE} feature",
                 manifest.display()
             ));
         }
@@ -202,7 +202,7 @@ fn family_of(package: &str, families: &[Vec<String>]) -> Option<usize> {
 }
 
 /// The package names of each guarded family's crates whose manifests
-/// parse: the promptforge crates, then the Harness crates.
+/// parse: the runvil crates, then the Harness crates.
 fn guarded_families(root: &Path) -> [Vec<String>; 2] {
     let crates_dir = root.join("crates");
     [

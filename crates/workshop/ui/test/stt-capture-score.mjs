@@ -19,8 +19,8 @@
 // Words compare lowercased, with leading and trailing punctuation removed;
 // line texts compare exactly.
 //
-// With PROMPTFORGE_REALTIME_CAPTURE naming a capture,
-// PROMPTFORGE_CAPTURE_LINES a line file, and PROMPTFORGE_CAPTURE_SCORE an
+// With RUNVIL_REALTIME_CAPTURE naming a capture,
+// RUNVIL_CAPTURE_LINES a line file, and RUNVIL_CAPTURE_SCORE an
 // output path, the capture is scored into the output; otherwise only the
 // synthetic tests run.
 
@@ -29,9 +29,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { applyEdits, createTakeRegistry, reduceTakeRegistry } from "./take-reducer-loader.mjs";
 
-const CAPTURE_VARIABLE = "PROMPTFORGE_REALTIME_CAPTURE";
-const LINES_VARIABLE = "PROMPTFORGE_CAPTURE_LINES";
-const SCORE_VARIABLE = "PROMPTFORGE_CAPTURE_SCORE";
+const CAPTURE_VARIABLE = "RUNVIL_REALTIME_CAPTURE";
+const LINES_VARIABLE = "RUNVIL_CAPTURE_LINES";
+const SCORE_VARIABLE = "RUNVIL_CAPTURE_SCORE";
 const HYPOTHESIS = "conversation.item.input_audio_transcription.hypothesis";
 const COMMITTED = "input_audio_buffer.committed";
 const COMPLETED = "conversation.item.input_audio_transcription.completed";
@@ -464,7 +464,7 @@ test("word errors count a dropped script word, an inserted word, and a substitut
 
 test("a line's final is the first final pass after which it reads as the completed transcript does", () => {
   const first = "Can you check it?";
-  const second = "Use PromptForge now.";
+  const second = "Use Runvil now.";
   const third = "Keep talking, so the window cuts here.";
   const lines = [
     { text: first, start_ms: 0, end_ms: 1_000 },
@@ -481,8 +481,8 @@ test("a line's final is the first final pass after which it reads as the complet
     events: [
       hypothesis(1_300, 1, "", first, ""),
       hypothesis(1_700, 2, first, "", ""),
-      hypothesis(2_600, 3, first, " Use prompt forge now.", ""),
-      hypothesis(3_400, 4, `${first} Use`, " prompt forge now.", ""),
+      hypothesis(2_600, 3, first, " Use runvil now.", ""),
+      hypothesis(3_400, 4, `${first} Use`, " runvil now.", ""),
       hypothesis(3_600, 5, `${first} ${second}`, "", ""),
       hypothesis(6_800, 6, `${first} ${second} Keep talking,`, " so the window cuts here.", ""),
       committed(7_100),

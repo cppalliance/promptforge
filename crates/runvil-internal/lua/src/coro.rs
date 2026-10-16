@@ -1,0 +1,379 @@
+//! The coroutine-protocol shim layer: per-VM Lua yield wrappers for the
+//! suspending Engine calls.
+//!
+//! Yield cannot cross the C boundary, so `models.infer`, `call`,
+//! `tools.call`, the `tasks` namespace, and `tasks.fanout` are Lua shims
+//! (source in the `__impl_*.lua` files beside this one) that
+//! `coroutine.yield` a request table and interpret the resume values as the
+//! `(ok, result)` envelope; coroutine driving itself
+//! (`Thread::create`/`resume`) is pure Rust in the scheduler. The source is
+//! pulled in with `include_str!` so chunk line 1 is file line 1, compiled
+//! once through the usual [`LuaProgram`] machinery, and loaded per VM. The
+//! chunk is named with an `@` prefix, so PUC's `luaO_chunkid` renders shim
+//! frames as verbatim `file:line:` references with no `[string "..."]`
+//! wrapper, and the line mapper (`program.rs`) never touches them.
+//!
+//! A local tool call is a two-yield handshake inside the calling block
+//! coroutine. The `tools.call` shim yields `tool_call`; for a local alias
+//! the driver resumes it with the handler instead of a result. The shim
+//! calls the handler under a yield-safe `pcall` with `jump` refused, so
+//! the handler's own suspending calls are ordinary yields of the same
+//! coroutine, then yields `local_tool_done` with the outcome for the
+//! driver to report, and finally returns the text or raises.
+
+#[path = "coro-failure.rs"]
+mod failure;
+
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, LazyLock};
+
+use mlua::{Function, Lua, StdLib, Table, Value};
+
+use crate::SharedSource;
+use crate::engine_globals::route_store_to_shims;
+use crate::error::{Error, Result};
+use crate::error_value::{install_error_value, install_normalize_failure};
+use crate::hardening::InstructionBudget;
+use crate::program::LuaProgram;
+use crate::sys::var_snapshot_table;
+
+use failure::stash_failure_capture;
+pub(crate) use failure::take_failure;
+
+/// The shim chunk's name: `@`-prefixed so PUC renders it verbatim as a file
+/// path, making unexpected shim errors clickable `file:line:` references.
+const SHIM_CHUNK_NAME: &str = "@crates/runvil-internal/lua/src/__impl_coro.lua";
+
+/// The shim source, embedded verbatim so chunk line 1 is file line 1.
+const SHIM_SOURCE: &str = include_str!("__impl_coro.lua");
+
+/// The `tasks` namespace chunk's name, `@`-prefixed as the prelude's is.
+const TASKS_CHUNK_NAME: &str = "@crates/runvil-internal/lua/src/__impl_tasks.lua";
+
+/// The `tasks` namespace source: spawn, the waits, the checks, note, and
+/// cancel, split from the prelude so neither chunk outgrows the file
+/// ceiling. It runs over the prelude's failure helpers.
+const TASKS_SOURCE: &str = include_str!("__impl_tasks.lua");
+
+/// The `fanout` chunk's name, `@`-prefixed as the prelude's is.
+const FANOUT_CHUNK_NAME: &str = "@crates/runvil-internal/lua/src/__impl_fanout.lua";
+
+/// The `fanout` shim source: Lua over the task protocol (`spawn`,
+/// `join_any`, `cancel`), split from the prelude for the same file-ceiling
+/// reason. It runs over the prelude's failure helpers plus the collection
+/// enumerator and the item renderer; the scheduler's admission limit, not
+/// a captured cap, bounds how many arms run at once.
+const FANOUT_SOURCE: &str = include_str!("__impl_fanout.lua");
+
+/// The registry key for the shim's `loop`, stashed by the prelude install so
+/// the section setup can install it as `models.loop`.
+const LOOP_REGISTRY: &str = "runvil.impl_coro.loop";
+
+/// The registry key for the shim's model-handle methods, `infer` and
+/// `loop`, stashed by the prelude install for [`handle_method`].
+const HANDLE_METHODS_REGISTRY: &str = "runvil.impl_coro.handle_methods";
+
+/// The registry key for the shim's model-issued `tool_call` form, stashed
+/// by the prelude install so a test driver can install it as
+/// `tools.call_as_model` and drive the driver's `call_id` path from a
+/// fixture section. The registry is Rust-side only, and no VM ever
+/// installs it as a global.
+pub(crate) const MODEL_TOOL_CALL_REGISTRY: &str = "runvil.impl_coro.model_tool_call";
+
+/// The registry key for the shim's store function table, stashed by the
+/// prelude install so the executor can install the store yield shims onto a
+/// VM's `store` table after the Plugin preludes install.
+const STORE_REGISTRY: &str = "runvil.impl_coro.store";
+
+/// The registry key for the shim's block guard, stashed by the prelude
+/// install so [`block_guard`] can wrap every block coroutine the VM starts.
+const GUARD_REGISTRY: &str = "runvil.impl_coro.guard";
+
+/// The shim program, compiled once and loaded per VM. Compilation of the
+/// bundled source fails only on a crate bug, so the payload is a shareable
+/// [`SharedSource`] cause (the crate `Error` is not `Clone`), re-wrapped as
+/// a typed error at each install.
+static SHIM_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(SHIM_SOURCE, SHIM_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
+    });
+
+/// The `tasks` namespace program, compiled once and loaded per VM after the
+/// prelude, under the same failure contract.
+static TASKS_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(TASKS_SOURCE, TASKS_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
+    });
+
+/// The `fanout` program, compiled once and loaded per VM after the prelude,
+/// under the same failure contract.
+static FANOUT_PROGRAM: LazyLock<std::result::Result<LuaProgram, SharedSource>> =
+    LazyLock::new(|| {
+        LuaProgram::compile_internal(FANOUT_SOURCE, FANOUT_CHUNK_NAME)
+            .map_err(crate::detail::shared_source_new)
+    });
+
+/// Installs the yield shims on a VM whose Engine globals already exist.
+///
+/// Scheduler-mode VMs load the coroutine standard library for the shim's
+/// `yield` capture (a VM without the shims keeps exactly
+/// `STRING | TABLE | MATH`); the `coroutine` global is stripped again
+/// before returning, so author code cannot yield directly and a hand-rolled
+/// yield fails the driver's strict validation. The `models` and `tools`
+/// tables are passed to the shim chunk as arguments, so the chunk never
+/// reads a global; the chunk shims `models.infer` and installs
+/// `tools.call`, and the `call` shim comes back for the Engine to install as
+/// a global. The `tasks` namespace is a second chunk, run over the same
+/// `yield` and `var_snapshot` captures plus the prelude's returned failure
+/// helpers, and installed as the `tasks` global; `fanout` is a third, run
+/// over the same captures plus the collection enumerator and the item
+/// renderer, and installed on the `tasks` table as `tasks.fanout`. The
+/// `models.loop` shim is stashed in the registry for
+/// [`install_section_loop_shim`], and the chunk's `handle_methods` table, a
+/// model handle's `infer` and `loop`, for [`handle_method`].
+/// `max_tool_iterations`, the run's resolved round cap, and the
+/// `compactors` table go to [`loop_begin`](crate::models_loop::loop_begin),
+/// which runs the loop's rules behind the shim's trampoline.
+///
+/// Three further captures give the chunk the structured error shape:
+/// `error_value(kind, fields)` builds the `{ kind, message, ... }` table
+/// every failure takes on its way to author code, `stash_failure` lets
+/// the block guard record a raised value for [`take_failure`] before mlua
+/// stringifies it, and `normalize_failure` rewrites a Rust callback's
+/// raised failure into the same table. The chunk's `pcall` and `xpcall`
+/// replacements, which run every caught value through that capture, are
+/// installed over the base library's globals here, so an Engine function that
+/// fails directly from Rust reaches author code in the one shape. The next
+/// two captures, `enter_local_handler` and `leave_local_handler`, count up
+/// and down on `local_handler_depth`, the counter the VM's `jump` reads, so
+/// `jump` refuses while a local tool's handler runs, whatever reference
+/// the handler calls it through. Then `cancel_requested` reads the
+/// cancel flag of `instruction_budget`, so the chunk's protected calls
+/// raise a failure caught under cancellation again instead of returning
+/// it, and the hook's abort always reaches the block guard. Next,
+/// `is_model_handle` reports whether a value is a model handle, so the
+/// `infer` entries check their receiver before any yield, and the last,
+/// `loop_begin`, starts each loop call for the trampoline.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the coroutine library, the shim chunk, or any
+/// install step fails.
+pub(crate) fn install_shim_prelude(
+    lua: &Lua,
+    max_tool_iterations: usize,
+    local_handler_depth: &Arc<AtomicU32>,
+    instruction_budget: &InstructionBudget,
+) -> Result<()> {
+    lua.load_std_libs(StdLib::COROUTINE).map_err(Error::lua)?;
+    let globals = lua.globals();
+    let coroutine: Table = globals.raw_get("coroutine").map_err(Error::lua)?;
+    let yield_fn: Function = coroutine.raw_get("yield").map_err(Error::lua)?;
+    let var_snapshot = lua
+        .create_function(|lua, ()| var_snapshot_table(lua).map_err(mlua::Error::external))
+        .map_err(Error::lua)?;
+    let models: Table = globals.raw_get("models").map_err(Error::lua)?;
+    let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
+    let compactors: Table = globals.raw_get("compactors").map_err(Error::lua)?;
+    let error_value = install_error_value(lua).map_err(Error::lua)?;
+    let stash_failure = stash_failure_capture(lua)?;
+    let normalize_failure = install_normalize_failure(lua).map_err(Error::lua)?;
+    let (enter_local_handler, leave_local_handler) =
+        local_handler_captures(lua, local_handler_depth)?;
+    let budget = instruction_budget.clone();
+    let cancel_requested = lua
+        .create_function(move |_, ()| Ok(budget.is_cancelled()))
+        .map_err(Error::lua)?;
+    let is_model_handle = lua
+        .create_function(|_, value: Value| Ok(crate::models::is_handle(&value)))
+        .map_err(Error::lua)?;
+    let loop_begin =
+        crate::models_loop::loop_begin(lua, max_tool_iterations, compactors, instruction_budget)?;
+    let program = SHIM_PROGRAM.as_ref().map_err(Error::shared)?;
+    let shims: Table = program
+        .load(lua)?
+        .call((
+            yield_fn.clone(),
+            var_snapshot.clone(),
+            models,
+            tools,
+            error_value,
+            stash_failure,
+            normalize_failure,
+            enter_local_handler,
+            leave_local_handler,
+            cancel_requested,
+            is_model_handle,
+            loop_begin,
+        ))
+        .map_err(Error::lua)?;
+    let guard: Function = shims.raw_get("guard").map_err(Error::lua)?;
+    lua.set_named_registry_value(GUARD_REGISTRY, guard)
+        .map_err(Error::lua)?;
+    for name in ["pcall", "xpcall"] {
+        let protected: Function = shims.raw_get(name).map_err(Error::lua)?;
+        globals.raw_set(name, protected).map_err(Error::lua)?;
+    }
+    let call: Function = shims.raw_get("call").map_err(Error::lua)?;
+    globals.raw_set("call", call).map_err(Error::lua)?;
+    let helpers: Table = shims.raw_get("helpers").map_err(Error::lua)?;
+    let tasks: Table = TASKS_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((yield_fn.clone(), var_snapshot.clone(), helpers.clone()))
+        .map_err(Error::lua)?;
+    globals.raw_set("tasks", &tasks).map_err(Error::lua)?;
+    // The enumerator answers `(members)` or `(nil, message)` so the shim
+    // raises the message as its own call error, exactly as the other
+    // author-argument failures surface at the call site.
+    let collection_members = lua
+        .create_function(|lua, collection: Value| {
+            match crate::collection::collection_members(lua, &collection) {
+                Ok(members) => Ok((Value::Table(members), Value::Nil)),
+                Err(error) => Ok((
+                    Value::Nil,
+                    Value::String(lua.create_string(error.to_string())?),
+                )),
+            }
+        })
+        .map_err(Error::lua)?;
+    let render_item = lua
+        .create_function(|lua, item: Value| {
+            crate::collection::render_item_value(lua, item).map_err(mlua::Error::external)
+        })
+        .map_err(Error::lua)?;
+    let fanout: Function = FANOUT_PROGRAM
+        .as_ref()
+        .map_err(Error::shared)?
+        .load(lua)?
+        .call((
+            yield_fn,
+            var_snapshot,
+            helpers,
+            collection_members,
+            render_item,
+        ))
+        .map_err(Error::lua)?;
+    tasks.raw_set("fanout", fanout).map_err(Error::lua)?;
+    stash_shims(lua, &shims)?;
+    globals
+        .raw_set("coroutine", Value::Nil)
+        .map_err(Error::lua)?;
+    Ok(())
+}
+
+/// Stashes the shim chunk's `loop`, `handle_methods`, `model_tool_call`,
+/// and `store` under their registry keys, for the installs and the handle
+/// getters that read them after the prelude.
+fn stash_shims(lua: &Lua, shims: &Table) -> Result<()> {
+    let models_loop: Function = shims.raw_get("loop").map_err(Error::lua)?;
+    lua.set_named_registry_value(LOOP_REGISTRY, models_loop)
+        .map_err(Error::lua)?;
+    let handle_methods: Table = shims.raw_get("handle_methods").map_err(Error::lua)?;
+    lua.set_named_registry_value(HANDLE_METHODS_REGISTRY, handle_methods)
+        .map_err(Error::lua)?;
+    let model_tool_call: Function = shims.raw_get("model_tool_call").map_err(Error::lua)?;
+    lua.set_named_registry_value(MODEL_TOOL_CALL_REGISTRY, model_tool_call)
+        .map_err(Error::lua)?;
+    let store: Table = shims.raw_get("store").map_err(Error::lua)?;
+    lua.set_named_registry_value(STORE_REGISTRY, store)
+        .map_err(Error::lua)
+}
+
+/// Builds the prelude's `enter_local_handler()` and `leave_local_handler()`
+/// captures over `depth`: one step up and one step down, so nested
+/// handlers balance.
+fn local_handler_captures(lua: &Lua, depth: &Arc<AtomicU32>) -> Result<(Function, Function)> {
+    let entered = Arc::clone(depth);
+    let enter = lua
+        .create_function(move |_, ()| {
+            entered.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    let left = Arc::clone(depth);
+    let leave = lua
+        .create_function(move |_, ()| {
+            left.fetch_sub(1, Ordering::Relaxed);
+            Ok(())
+        })
+        .map_err(Error::lua)?;
+    Ok((enter, leave))
+}
+
+/// Returns the shim's block guard for a VM whose shim prelude already ran.
+///
+/// The Engine creates every block coroutine from the guard and resumes it
+/// first with the block function: the guard runs the block under `xpcall`
+/// (yields pass through), stashes a raised value and the raise-point
+/// traceback for [`take_failure`] from the message handler, and re-raises
+/// the same value, so a shim's structured error table reaches the Engine
+/// intact instead of only as mlua's stringification.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude never ran on this VM.
+pub(crate) fn block_guard(lua: &Lua) -> Result<Function> {
+    lua.named_registry_value(GUARD_REGISTRY).map_err(Error::lua)
+}
+
+/// Installs the `models.loop` yield shim on a VM whose shim prelude
+/// already ran (`install_shim_prelude` stashed the shim in the registry).
+///
+/// The executor's section setup is the only caller.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude was never installed on this
+/// VM, the `models` table is absent, or the install fails.
+pub fn install_section_loop_shim(lua: &Lua) -> Result<()> {
+    let models_loop: Function = lua
+        .named_registry_value(LOOP_REGISTRY)
+        .map_err(Error::lua)?;
+    let models: Table = lua.globals().raw_get("models").map_err(Error::lua)?;
+    models.raw_set("loop", models_loop).map_err(Error::lua)
+}
+
+/// The shim's `name` method for a model handle, `infer` or `loop`, from
+/// the table `install_shim_prelude` stashed; nil on a VM where the
+/// prelude never ran.
+pub(crate) fn handle_method(lua: &Lua, name: &str) -> mlua::Result<Value> {
+    match lua.named_registry_value::<Value>(HANDLE_METHODS_REGISTRY)? {
+        Value::Table(methods) => methods.raw_get(name),
+        _ => Ok(Value::Nil),
+    }
+}
+
+/// Installs the store yield shims onto a VM's `store` table, replacing the
+/// dispatchers installed with the other Engine globals, and switches those
+/// dispatchers to the shims too, so a store function a Plugin prelude
+/// captured before this call (`local write = store.write`) yields as well.
+/// Every store operation, through whichever reference the prompt holds,
+/// then suspends the block as a leaf yield - uniformly for all backends,
+/// with no inline fast path, so interleaving behavior never depends on
+/// which backend serves the mount. The Harness performs each one as an
+/// `Effect::Vfs`, and a claims-model conflict through any of them ends
+/// the run with a determinism violation that `pcall` cannot catch.
+///
+/// The executor's section setup and live H1 setup are the only callers.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the shim prelude never ran on this VM, the
+/// `store` table is absent, or the install fails.
+pub fn install_store_shims(lua: &Lua) -> Result<()> {
+    let shims: Table = lua
+        .named_registry_value(STORE_REGISTRY)
+        .map_err(Error::lua)?;
+    let store: Table = lua.globals().raw_get("store").map_err(Error::lua)?;
+    // `pairs` order is unspecified; every iteration only assigns one named
+    // function into `store`, so the resulting table does not depend on it.
+    for pair in shims.pairs::<String, Function>() {
+        let (name, function) = pair.map_err(Error::lua)?;
+        store.raw_set(name, function).map_err(Error::lua)?;
+    }
+    route_store_to_shims(lua, &shims)
+}
+
+#[cfg(test)]
+#[path = "coro-tests.rs"]
+mod tests;

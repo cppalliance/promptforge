@@ -59,7 +59,7 @@ fn the_allow_list_names_exactly_the_three_workspace_keys() {
 #[tokio::test]
 async fn each_allowed_key_round_trips_through_create_put_close_and_open() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("state.pfwork");
+    let path = dir.path().join("state.rvwork");
     let file = WorkspaceFile::create(&path, &bare_contents("State"))
         .await
         .expect("creates");
@@ -93,7 +93,7 @@ async fn each_allowed_key_round_trips_through_create_put_close_and_open() {
 #[tokio::test]
 async fn a_second_put_replaces_the_first_and_the_text_is_stored_verbatim() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("replace.pfwork");
+    let path = dir.path().join("replace.rvwork");
     let file = WorkspaceFile::create(&path, &bare_contents("Replace"))
         .await
         .expect("creates");
@@ -128,7 +128,7 @@ async fn a_second_put_replaces_the_first_and_the_text_is_stored_verbatim() {
 #[tokio::test]
 async fn a_row_that_no_longer_parses_reads_as_none_beside_intact_rows() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("corrupt.pfwork");
+    let path = dir.path().join("corrupt.rvwork");
     let file = WorkspaceFile::create(&path, &bare_contents("Corrupt"))
         .await
         .expect("creates");
@@ -177,7 +177,7 @@ async fn a_row_that_no_longer_parses_reads_as_none_beside_intact_rows() {
 #[tokio::test]
 async fn an_old_file_with_no_ui_state_rows_reads_all_three_as_none() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("old.pfwork");
+    let path = dir.path().join("old.rvwork");
     // A v1 file holding only the stamp and the window row.
     let conn = open_database(&path).await.expect("seed database opens");
     conn.execute_batch(SCHEMA_V1)
@@ -222,8 +222,8 @@ async fn an_old_file_with_no_ui_state_rows_reads_all_three_as_none() {
 #[tokio::test]
 async fn save_as_leaves_the_new_files_three_keys_empty() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let first_path = home.path().join("first.pfwork");
-    let second_path = home.path().join("second.pfwork");
+    let first_path = home.path().join("first.rvwork");
+    let second_path = home.path().join("second.rvwork");
     let first = WorkspaceFile::create(&first_path, &bare_contents("First"))
         .await
         .expect("the first file creates");

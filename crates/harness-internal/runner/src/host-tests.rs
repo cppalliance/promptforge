@@ -6,10 +6,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use promptforge::effect::{ToolCallOrigin, ToolCaller};
-use promptforge::vfs::{Origin, VfsRef};
-use promptforge::{MissingService, Prompt, UnavailablePlugin};
-use promptforge_plugin::{
+use runvil::effect::{ToolCallOrigin, ToolCaller};
+use runvil::vfs::{Origin, VfsRef};
+use runvil::{MissingService, Prompt, UnavailablePlugin};
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ServiceId, ServiceKey, ToolContext,
     ToolDescriptor, ToolError, ToolId, ToolOutput,
 };
@@ -121,7 +121,7 @@ fn host_with(services: HostServices, packages: &[Package]) -> HostContext {
 /// A prompt with the given `plugins:` and `tools:` frontmatter lines.
 fn prompt(frontmatter: &str) -> Prompt {
     let source = format!(
-        "---\nname: host-test\ndescription: d\npromptforge: 0\n{frontmatter}---\n\n\
+        "---\nname: host-test\ndescription: d\nrunvil: 0\n{frontmatter}---\n\n\
          # Title\n\n## Only\n\nDone.\n"
     );
     let (prompt, _events) = Prompt::parse(&source, "host-test");
@@ -253,7 +253,7 @@ fn a_declared_native_is_met_when_installed_and_missing_when_not() {
     assert_eq!(requirements.missing_required, [name("subagents")]);
 
     assert_eq!(
-        host.install("promptforge/subagents", None, Value::Null),
+        host.install("runvil/subagents", None, Value::Null),
         Ok(name("subagents"))
     );
     let (_run, requirements) = host.begin_run(HostServices::new(), BTreeMap::new(), &declares);
@@ -263,8 +263,7 @@ fn a_declared_native_is_met_when_installed_and_missing_when_not() {
 #[test]
 fn an_installed_native_adds_no_catalog_tool_and_no_prelude() {
     let mut host = host(&[]);
-    host.install("promptforge/subagents", None, Value::Null)
-        .unwrap();
+    host.install("runvil/subagents", None, Value::Null).unwrap();
     let declares = prompt("plugins:\n  - subagents\n");
     assert!(catalog_ids(&host, HostServices::new(), &declares).is_empty());
     let (run, _requirements) = host.begin_run(HostServices::new(), BTreeMap::new(), &declares);
@@ -275,8 +274,7 @@ fn an_installed_native_adds_no_catalog_tool_and_no_prelude() {
 fn the_roster_lists_the_native_stub_as_usable_and_each_plugin_that_cannot_serve_with_its_reason() {
     let needy = package("acme/needy").needs(NEEDS_SESSION);
     let mut host = host(&[package("acme/kit"), needy]);
-    host.install("promptforge/subagents", None, Value::Null)
-        .unwrap();
+    host.install("runvil/subagents", None, Value::Null).unwrap();
     host.install("acme/kit", None, Value::Null).unwrap();
     host.install(needy.name, None, Value::Null).unwrap();
     let failures = BTreeMap::from([(name("kit"), "the kit server is down".to_owned())]);

@@ -18,13 +18,13 @@ Before coding, the code subagent loads [tools-public/how-to/how-to-write-rust.md
 
 ## Level 1: what we are building
 
-Today [execute.rs](promptforge/crates/promptforge-core/src/execute.rs) builds the tool-schema list once (line 63) and advertises every frontmatter tool to the model in every section. We are making it opt-in per section: a section's Lua block calls `tools.add("web_search", "web_fetch")`, and the runtime advertises only those tools for that section. A section that names no tools (no Lua block, or a Lua block without `tools.add`) gets zero tools. This keeps a section from ever holding a tool it did not ask for, and stops a 20-tool prompt from injecting 20 schemas into every section.
+Today [execute.rs](runvil/crates/runvil-core/src/execute.rs) builds the tool-schema list once (line 63) and advertises every frontmatter tool to the model in every section. We are making it opt-in per section: a section's Lua block calls `tools.add("web_search", "web_fetch")`, and the runtime advertises only those tools for that section. A section that names no tools (no Lua block, or a Lua block without `tools.add`) gets zero tools. This keeps a section from ever holding a tool it did not ask for, and stops a 20-tool prompt from injecting 20 schemas into every section.
 
 ## Level 2 and 3: the pieces
 
-- **`tools.add` in Lua** ([lua.rs](promptforge/crates/promptforge-core/src/lua.rs)): expose a `tools` table with an `add` Engine function taking a variadic list of strings. Calls accumulate into one ordered, de-duplicated set (so conditional `tools.add` in `if` branches works). Capture the set in a `Rc<RefCell<Vec<String>>>` moved into the function (the VM is non-async, single-threaded, so `Rc`/`RefCell` are fine). Return the accumulated names on `LuaOutcome` as a new `scoped_tools: Vec<String>` field. `add` never touches the model or validates against the registry - it only records names.
-- **Per-section filtering** ([execute.rs](promptforge/crates/promptforge-core/src/execute.rs)): move schema building inside the section loop. For each section, get the scoped names (from the section's Lua outcome; empty when the section has no Lua block). Filter the run's `tools` slice to those whose `name()` is in the scoped set, build schemas from that subset, and pass both the filtered schemas and the filtered dispatch targets into `run_tool_loop`. A scoped name not present in the run's tools is a hard error (extend `Error::UnknownTool` or add a focused variant), never silently dropped - so a typo or an undeclared tool fails loudly.
-- **Prompt update** ([research-person.md](promptforge/prompts/research-person.md)): add a Lua block at the top of the `## Research` section, `tools.add("web_search", "web_fetch")`, so it keeps its tools under the opt-in rule. Other prompts (`hello.md`, `greet.md`, `echo.md`) declare no tools and are unaffected.
+- **`tools.add` in Lua** ([lua.rs](runvil/crates/runvil-core/src/lua.rs)): expose a `tools` table with an `add` Engine function taking a variadic list of strings. Calls accumulate into one ordered, de-duplicated set (so conditional `tools.add` in `if` branches works). Capture the set in a `Rc<RefCell<Vec<String>>>` moved into the function (the VM is non-async, single-threaded, so `Rc`/`RefCell` are fine). Return the accumulated names on `LuaOutcome` as a new `scoped_tools: Vec<String>` field. `add` never touches the model or validates against the registry - it only records names.
+- **Per-section filtering** ([execute.rs](runvil/crates/runvil-core/src/execute.rs)): move schema building inside the section loop. For each section, get the scoped names (from the section's Lua outcome; empty when the section has no Lua block). Filter the run's `tools` slice to those whose `name()` is in the scoped set, build schemas from that subset, and pass both the filtered schemas and the filtered dispatch targets into `run_tool_loop`. A scoped name not present in the run's tools is a hard error (extend `Error::UnknownTool` or add a focused variant), never silently dropped - so a typo or an undeclared tool fails loudly.
+- **Prompt update** ([research-person.md](runvil/prompts/research-person.md)): add a Lua block at the top of the `## Research` section, `tools.add("web_search", "web_fetch")`, so it keeps its tools under the opt-in rule. Other prompts (`hello.md`, `greet.md`, `echo.md`) declare no tools and are unaffected.
 
 ```mermaid
 flowchart TD
@@ -75,7 +75,7 @@ Read the diff for the commit. Apply each as yes-or-no; append failures to vibe-r
 
 ## Verification
 
-`cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo doc` green. Live: start the gateway with `BRAVE_API_KEY`, run `promptforge run prompts/research-person.md "Tell me about <person>"`, confirm a coherent summary (proves scoping advertises the two tools it named).
+`cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo doc` green. Live: start the gateway with `BRAVE_API_KEY`, run `runvil run prompts/research-person.md "Tell me about <person>"`, confirm a coherent summary (proves scoping advertises the two tools it named).
 
 ## Decisions and confidence
 

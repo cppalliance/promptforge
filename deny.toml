@@ -1,5 +1,5 @@
-# cargo-deny configuration for the PromptForge (BSL-1.0) workspace.
-# Run locally with `cargo deny check`; CI runs the same. See PF-ROOT-008.
+# cargo-deny configuration for the Runvil (BSL-1.0) workspace.
+# Run locally with `cargo deny check`; CI runs the same. See RV-ROOT-008.
 
 [graph]
 # Check the dependency graph with all features enabled, not just the defaults.

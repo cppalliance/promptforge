@@ -12,18 +12,18 @@ use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, 
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecorderError, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
-use promptforge::effect::{Round, ToolCallOrigin};
-use promptforge::model::{
+use runvil::effect::{Round, ToolCallOrigin};
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
-use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
-use promptforge::vfs::{
+use runvil::timestamp::Timestamp;
+use runvil::tools::{ToolCatalog, ToolDescriptor, ToolError, ToolId, ToolOutput};
+use runvil::vfs::{
     Access, AcquireContext, Entry, ExecId, MemoryBackend, Stat, Vfs, VfsAccess, VfsError, VfsPath,
     VfsRef,
 };
-use promptforge::{Prompt, Run, RunContext, RunSeed};
-use promptforge_plugin::Package;
+use runvil::{Prompt, Run, RunContext, RunSeed};
+use runvil_plugin::Package;
 use serde_json::{Value, json};
 
 /// The run's execution identifier.
@@ -62,7 +62,7 @@ fn catalog() -> ToolCatalog {
 /// A prompt whose one section runs `lua` as its only block.
 fn prompt(lua: &str) -> Arc<Prompt> {
     let source = format!(
-        "---\nname: runner-test\ndescription: a runner fixture\npromptforge: 0\n---\n\n\
+        "---\nname: runner-test\ndescription: a runner fixture\nrunvil: 0\n---\n\n\
          # Fixture\n\n## Only\n\n```lua\n{lua}\n```\n"
     );
     let (prompt, _parse_events) = Prompt::parse(&source, EXECUTION);
@@ -99,7 +99,7 @@ pub(crate) fn run_over(lua: &str, vfs: VfsRef) -> Run {
 /// `## Child` runs `child` when the main spawns it as a task.
 pub(crate) fn run_with_child(main: &str, child: &str) -> Run {
     let source = format!(
-        "---\nname: runner-test\ndescription: a runner fixture\npromptforge: 0\n---\n\n\
+        "---\nname: runner-test\ndescription: a runner fixture\nrunvil: 0\n---\n\n\
          # Fixture\n\n## Main\n\n```lua\n{main}\n```\n\n## Child\n\n```lua\n{child}\n```\n"
     );
     let (prompt, _parse_events) = Prompt::parse(&source, EXECUTION);

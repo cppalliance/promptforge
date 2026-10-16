@@ -1,13 +1,13 @@
 //! `cargo xtask site [--books-only]`: builds the documentation site into
 //! `target/site/`, in this order:
 //!
-//! 1. Checks that `PROMPTFORGE_DOCS` names a directory, the root of the
-//!    `promptforge-docs` checkout that holds the book chapters.
+//! 1. Checks that `RUNVIL_DOCS` names a directory, the root of the
+//!    `runvil-docs` checkout that holds the book chapters.
 //! 2. Clears `target/site/` and `target/site-books/`.
 //! 3. Stages one mdBook tree per book, and beside them each book's
 //!    single-file export, into `target/site-books/` by running
 //!    `cargo run -p build-user-guide -- stage` as a subprocess with
-//!    `PROMPTFORGE_DOCS` set to that root, so this crate still depends on
+//!    `RUNVIL_DOCS` set to that root, so this crate still depends on
 //!    no workspace crates.
 //! 4. Runs `$MDBOOK build` (`MDBOOK` defaults to `mdbook`) on every staged
 //!    folder, into `target/site/<book>/`. The folders are read from the
@@ -28,7 +28,7 @@
 //!    skipped.
 //!
 //! Every path passed to a child process is absolute, built from the
-//! workspace root or made absolute from `PROMPTFORGE_DOCS`.
+//! workspace root or made absolute from `RUNVIL_DOCS`.
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
@@ -42,17 +42,17 @@ mod landing;
 
 const USAGE: &str = "usage: cargo xtask site [--books-only]";
 
-/// The environment variable naming the root of the `promptforge-docs`
+/// The environment variable naming the root of the `runvil-docs`
 /// checkout.
-pub(crate) const DOCS_VAR: &str = "PROMPTFORGE_DOCS";
+pub(crate) const DOCS_VAR: &str = "RUNVIL_DOCS";
 
 /// The rustdoc sites: the folder under `target/site/`, the crate it
 /// documents, with default features, the facade as dependents read it, and
 /// the few broad words its landing row shows under Covers.
 const RUSTDOC_SITES: [(&str, &str, &str); 5] = [
     (
-        "promptforge",
-        "promptforge",
+        "runvil",
+        "runvil",
         "The Engine: parsing and running prompts",
     ),
     (
@@ -80,7 +80,7 @@ struct Options {
 }
 
 /// Runs `cargo xtask site` with the arguments after `site`, reading the
-/// chapters from `docs`, the value of `PROMPTFORGE_DOCS`.
+/// chapters from `docs`, the value of `RUNVIL_DOCS`.
 pub(crate) fn run(root: &Path, docs: Option<&OsStr>, args: &[String]) -> ExitCode {
     match site(root, docs, args) {
         Ok(site) => {
@@ -103,11 +103,11 @@ fn site(root: &Path, docs: Option<&OsStr>, args: &[String]) -> Result<PathBuf, S
     build(root, &docs, options)
 }
 
-/// The absolute form of `docs`, the value of `PROMPTFORGE_DOCS`, or an
+/// The absolute form of `docs`, the value of `RUNVIL_DOCS`, or an
 /// error naming the variable when it is unset, empty, or names no
 /// directory.
 fn docs_root(docs: Option<&OsStr>) -> Result<PathBuf, String> {
-    const HELP: &str = "set it to the root of a promptforge-docs checkout";
+    const HELP: &str = "set it to the root of a runvil-docs checkout";
     let Some(docs) = docs.filter(|docs| !docs.is_empty()) else {
         return Err(format!("site: {DOCS_VAR} is not set; {HELP}"));
     };

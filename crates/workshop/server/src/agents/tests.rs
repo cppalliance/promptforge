@@ -19,12 +19,12 @@ use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
 use harness_gateway_client::{CompletionError, CompletionErrorKind};
 use plugin_web::SEARCH_PROVIDER;
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
-use promptforge::tools::ToolId;
-use promptforge_plugin::{ServiceKey, TOKIO_RUNTIME};
+use runvil::tools::ToolId;
+use runvil_plugin::{ServiceKey, TOKIO_RUNTIME};
 use workshop_agents::{Conversations, SessionState, TokioTimer};
 use workshop_registry::Registry;
 
@@ -37,7 +37,7 @@ const RUNTIME: ServiceKey<tokio::runtime::Handle> = ServiceKey::new(TOKIO_RUNTIM
 /// A prompt that requires the Plugin `plugin` and returns a fixed text.
 fn requiring(plugin: &str) -> String {
     format!(
-        "---\nname: browses\ndescription: needs {plugin}\npromptforge: 0\n\
+        "---\nname: browses\ndescription: needs {plugin}\nrunvil: 0\n\
         plugins:\n  - {plugin}\n---\n\n\
         # Browses\n\n## Only\n\n```lua\nreturn 'browsed'\n```\n"
     )
@@ -164,7 +164,7 @@ async fn a_host_without_the_search_provider_refuses_a_prompt_requiring_web() {
     assert_eq!(kind, "RequirementsUnmet");
     assert!(
         message.contains(
-            "- web is unavailable: web needs promptforge/search-provider, and this host provides none"
+            "- web is unavailable: web needs runvil/search-provider, and this host provides none"
         ),
         "the refusal names the Plugin and the missing service: {message}"
     );

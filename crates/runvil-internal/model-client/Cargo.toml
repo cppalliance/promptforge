@@ -1,0 +1,22 @@
+[package]
+name = "runvil-model-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# The canonical metrics vocabulary a Completion holds and the model catalog
+# types the `model` module re-exports.
+runvil-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+build-ceiling.workspace = true
+
+[lints]
+workspace = true

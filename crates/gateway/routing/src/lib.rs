@@ -1,4 +1,4 @@
-//! Routing vocabulary for the PromptForge gateway: the [`Model`] and
+//! Routing vocabulary for the Runvil gateway: the [`Model`] and
 //! [`Endpoint`] table entries and the per-dominion admission control
 //! ([`queue`]) that both the gateway's routing table and the local inference
 //! crate build on.

@@ -1,4 +1,4 @@
-﻿//! PromptForge inference gateway.
+﻿//! Runvil inference gateway.
 //!
 //! A small always-on service that accepts OpenAI-compatible chat
 //! completions, holds the backend credential, resolves the request's model

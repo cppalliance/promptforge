@@ -44,7 +44,7 @@ const { window } = dom;
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-tool-line-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-tool-line-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { ToolLine, toolBlockText, webCardEntries, WEB_CARD_OPEN_DELAY_MS, toolKind, toolLabel } = await import(
   pathToFileURL(bundlePath).href

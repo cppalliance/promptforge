@@ -1,7 +1,7 @@
 ---
 name: analyst_example
 description: Demonstrate frontmatter model roles and models.use for careful model selection.
-promptforge: 0
+runvil: 0
 models:
   analyst:
     min_context: 40000

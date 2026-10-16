@@ -89,7 +89,7 @@ crates/gateway/app/src/
 
 ## What moves where
 
-From [lib.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\app\src\lib.rs) (the gateway family reorganization has landed; this is the current path). Line numbers verified 2026-09-17 against the 4,199-line file; if anything lands in lib.rs before this runs, locate items by name, not by line.
+From [lib.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\app\src\lib.rs) (the gateway family reorganization has landed; this is the current path). Line numbers verified 2026-09-17 against the 4,199-line file; if anything lands in lib.rs before this runs, locate items by name, not by line.
 
 - Lines 683-849 (`resolve_routed_model`, `chat_completions`, `relay_sse`) plus `embeddings` (849) and `rerank` (879) -> `relay.rs`
 - Lines 925-1208 (`audio_speech` through `audio_voices`, the relay helpers) -> `speech.rs`

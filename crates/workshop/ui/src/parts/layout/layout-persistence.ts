@@ -1,6 +1,6 @@
 // Layout persistence: the dock's serialized layout plus the zone
 // registry's placement memory, stored as one versioned envelope under
-// the workspace bucket's "layout" key (the open .pfwork file, through the
+// the workspace bucket's "layout" key (the open .rvwork file, through the
 // UI-state adapter). This module never touches storage itself: the
 // composition root hands restoreLayout the preloaded value and
 // startLayoutPersistence a writer, so the same code serves boot, the

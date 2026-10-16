@@ -1,6 +1,6 @@
 ---
 name: Workshop idiom refactor
-overview: "Total refactor of promptforge-ws and promptforge-ws-server (including the embedded TS UI) to adopt the human-codebase idioms from the comparison report: two phases, one green commit per step, fully autonomous execution with no operator questions."
+overview: "Total refactor of runvil-ws and runvil-ws-server (including the embedded TS UI) to adopt the human-codebase idioms from the comparison report: two phases, one green commit per step, fully autonomous execution with no operator questions."
 todos:
   - id: step-00-baseline
     content: "Baseline: commit in-repo idiom report, record Verify results and node version"
@@ -69,13 +69,13 @@ isProject: false
 
 ## What we are building (level 1)
 
-Restructure `crates/promptforge-ws-server` (Rust server + embedded TS UI) and `crates/promptforge-ws` (tao/wry shell) in the repo `c:\Users\Vinnie\cursor\promptforge` so they follow the idioms prescribed by the report "Human Code Organization vs PromptForge Workshop: What to Steal" (2026-08-26, in-repo at [design/compare-ui-stack-human-idioms.md](c:\Users\Vinnie\cursor\promptforge\design\compare-ui-stack-human-idioms.md); currently untracked - step 0 commits it). Phase 1 is pure structure: files move, code is extracted, wire behavior and rendered output stay identical, and every existing test passes. Phase 2 adds the report's behavior changes (Findings 7-9), each with new tests. The result is committed one green step at a time on `master`.
+Restructure `crates/runvil-ws-server` (Rust server + embedded TS UI) and `crates/runvil-ws` (tao/wry shell) in the repo `c:\Users\Vinnie\cursor\runvil` so they follow the idioms prescribed by the report "Human Code Organization vs Runvil Workshop: What to Steal" (2026-08-26, in-repo at [design/compare-ui-stack-human-idioms.md](c:\Users\Vinnie\cursor\runvil\design\compare-ui-stack-human-idioms.md); currently untracked - step 0 commits it). Phase 1 is pure structure: files move, code is extracted, wire behavior and rendered output stay identical, and every existing test passes. Phase 2 adds the report's behavior changes (Findings 7-9), each with new tests. The result is committed one green step at a time on `master`.
 
 ## Binding references
 
 The executor loads these before work and treats them as the spec, in this precedence order:
 
-1. This plan, then [promptforge/AGENTS.md](c:\Users\Vinnie\cursor\promptforge\AGENTS.md) ("do more with less" outranks tidiness; every public item gets `///` docs; update README when public surface changes; say in the commit which existing facility was considered when adding machinery).
+1. This plan, then [runvil/AGENTS.md](c:\Users\Vinnie\cursor\runvil\AGENTS.md) ("do more with less" outranks tidiness; every public item gets `///` docs; update README when public surface changes; say in the commit which existing facility was considered when adding machinery).
 2. The idiom report above (in-repo at `design/compare-ui-stack-human-idioms.md`) - its findings, refactor notes, and guardrails.
 3. [tools-public/rulebooks/vibe-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\vibe-rulebook.md) - governs the execution loop.
 4. [tools-public/rulebooks/rust-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md) - governs every Rust edit.
@@ -86,12 +86,12 @@ AGENTS.md forbids outside-repo references; the idiom report now lives in the rep
 
 ## Execution contract
 
-- Run the vibe-rulebook loop: per step, `TodoWrite` checklist (Code, Commit, Review, Amend, Verify), coder subagent, then review-and-fix subagent once, findings through `promptforge/vibe-review.md` (overwritten each cycle). Dispatch subagents by plan path + step number. Main context holds only step numbers, commit hashes, and one-line Verify results.
+- Run the vibe-rulebook loop: per step, `TodoWrite` checklist (Code, Commit, Review, Amend, Verify), coder subagent, then review-and-fix subagent once, findings through `runvil/vibe-review.md` (overwritten each cycle). Dispatch subagents by plan path + step number. Main context holds only step numbers, commit hashes, and one-line Verify results.
 - Plan-local override: Verify runs after EVERY step (idiom-report mandate), not every 3rd. Verify commands, mirroring CI (`.github/workflows/ci.yml` check-workshop) exactly:
   - `cargo fmt --all --check`
-  - `cargo clippy -p promptforge-ws -p promptforge-ws-server --all-targets -- -D warnings`
-  - `cargo test --locked -p promptforge-ws -p promptforge-ws-server`
-  - in `crates/promptforge-ws-server/ui`: `npm run typecheck` then `npm test`
+  - `cargo clippy -p runvil-ws -p runvil-ws-server --all-targets -- -D warnings`
+  - `cargo test --locked -p runvil-ws -p runvil-ws-server`
+  - in `crates/runvil-ws-server/ui`: `npm run typecheck` then `npm test`
 - Commit each green step on `master` with a message naming the step's intent. Never push.
 - NO OPERATOR QUESTIONS. This overrides vibe rule 2's ask-the-user branch: for any open choice, decide, record the decision and its falsifier in this plan file, and continue. Never emit AskQuestion or pause for confirmation.
 - Stop-and-re-plan condition: if a step's tests fail twice, do not push through - revise this plan autonomously (fix the step, reorder, or abandon it with a recorded reason), roll back to the last green commit if needed, and continue with the remaining independent steps. Halt entirely only when no forward path exists at all.
@@ -100,7 +100,7 @@ AGENTS.md forbids outside-repo references; the idiom report now lives in the rep
 ## Guardrails
 
 - Vendored boundary: `ui/src/chat/` (murm-ui 0.2.0 + nested highlighter) is opaque. No layer rule, CSS split, restructuring, or reformatting inside it. The murm plugin seam stays as is.
-- Do-not-touch: `crates/promptforge-ws/src/file_drop.rs` (dense working COM, documented; this is the report's `drop_target.rs` guardrail - the OLE target was replaced by the WebView2 bridge in commit `cf514dd`).
+- Do-not-touch: `crates/runvil-ws/src/file_drop.rs` (dense working COM, documented; this is the report's `drop_target.rs` guardrail - the OLE target was replaced by the WebView2 bridge in commit `cf514dd`).
 - Wire protocol semantics are frozen in phase 1: move and type the frames, do not redesign them. JSON shapes stay identical (same field names and values).
 - Phase 1 done-criterion for every step: all existing tests pass with their assertions unchanged. Sanctioned mechanical edits inside `ui/test/*.mjs`: retargeting file and import paths (e.g. `titlebar-style.mjs` reading a moved CSS file), and adjusting construction setup where a refactor changes a constructor signature (e.g. handing `AgentController` its `ModelService` in step 2, or Disposable wiring in step 4). Assertions and expected behaviors never change in phase 1; if a step seems to require an assertion change, the step is wrong - invoke the re-plan rule.
 - `smoke.mjs` stays green and intact until the final step, then gets carved (shrunk, not deleted).
@@ -155,7 +155,7 @@ Rust server steps (7-10) are independent of UI steps (1-6); if a UI step gets st
 
 **Step 6 - Runner swap** (Finding 6). Replace the 14-command `&&` chain in `ui/package.json` with glob discovery via the bare Node runner: `"test": "node --test test/"` (plus `"src/**/*.test.mjs"` glob once colocated tests exist, if local Node supports glob args per the step 0 record). Add `@types/node` devDependency and an `engines` field matching the baseline Node (CI uses Node 22). All 14 existing files in `ui/test/` are discovered as-is; none rewritten. Add `ui/test/helpers/leak-check.mjs`: a shared setup helper that fails a test leaking undisposed `DisposableStore`s (used by new tests from here on). Note the runner's `**/test/**` pattern discovers helper files too, so any file under `test/helpers/` must exit 0 when executed directly (export-only modules do). If parallel per-file execution flakes, pin `--test-concurrency=1` and record it.
 
-**Step 7 - Rust: extract `ws_session.rs`** (Finding 4). New `src/ws_session.rs` in promptforge-ws-server owning the literal duplication between `chat_ws.rs` (lines ~51-74) and `voice.rs` (~43-56, 387-394): the `NEXT_SESSION` AtomicU64 counter, the mpsc(32) outbox + writer task spawn, and the drop/abort close choreography, behind one small struct. Both call sites adopt it; `chat_ws` keeps its forwarder task, `voice` keeps its interim loop. Module `//!` doc, `///` on public items, unit tests in-file. Existing 12 + 9 socket tests unchanged.
+**Step 7 - Rust: extract `ws_session.rs`** (Finding 4). New `src/ws_session.rs` in runvil-ws-server owning the literal duplication between `chat_ws.rs` (lines ~51-74) and `voice.rs` (~43-56, 387-394): the `NEXT_SESSION` AtomicU64 counter, the mpsc(32) outbox + writer task spawn, and the drop/abort close choreography, behind one small struct. Both call sites adopt it; `chat_ws` keeps its forwarder task, `voice` keeps its interim loop. Module `//!` doc, `///` on public items, unit tests in-file. Existing 12 + 9 socket tests unchanged.
 
 **Step 8 - Rust: pure `protocol.rs`** (Finding 4, Weylus pattern). New `src/protocol.rs`, zero I/O, grouped by direction (inbound/outbound). Move: `StatusBarUpdate`, `Progress`, `Severity`, `Activity`, `StatusFrame` (from `status.rs`; the bus stays), `CatalogPush`, `CatalogFrame` (from `catalog.rs`), `ChatRequest` (from `gateway.rs`). Add typed serde structs for the frames currently built with `serde_json::json!`: chat outbound `delta`/`reasoning`/`done`/`error` (with optional echoed `id`), voice outbound `interim`/`final`, voice inbound `start`/`stop` text constants. JSON shapes byte-compatible - move types, do not redesign. Cross-cite `ui/src/services/protocol.ts` and `src/protocol.rs` in each other's header comments as the two halves of the contract. Serialization round-trip tests pin the exact shapes.
 
@@ -163,11 +163,11 @@ Rust server steps (7-10) are independent of UI steps (1-6); if a UI step gets st
 
 **Step 10 - Rust: split `app.rs` by role** (Finding 4). Extract from `app.rs` (1143 lines): `src/assets.rs` (the `UiAssets` rust-embed type + `ui_*` asset handlers) and `src/relay.rs` (gateway relay helpers `relay`, `bad_request`, `gateway_unreachable`, `tape_round_trip`, `value_from_bytes` + the `/chat` and `/v1/models` handlers). `app.rs` keeps `AppState`, `AppError`, router wiring, startup/degrade. Tests move with their code. `gateway.rs`, `provision.rs`, `workspace.rs` are not in scope (the report does not flag them).
 
-**Step 11 - STYLE.md + prologue pruning** (Findings 10, 9b, 9c). New `promptforge/STYLE.md`: SilverBullet's comment policy (comments only for non-obvious why, invisible constraint, external-bug workaround, subtle ordering), SiYuan's issue-URL convention for workarounds, the two-zone error policy (panic on construction, never in steady state), the UI layer import rule, the vendored boundary, and the UI test conventions. Add one pointer line in AGENTS.md. Sweep `window.rs` workarounds for upstream issue URLs. Prune narration-only file prologues in both crates (keep the domain-documenting module docs; this is a pruning rule, not a purge). Full Verify, then the phase 1 gate (step 12).
+**Step 11 - STYLE.md + prologue pruning** (Findings 10, 9b, 9c). New `runvil/STYLE.md`: SilverBullet's comment policy (comments only for non-obvious why, invisible constraint, external-bug workaround, subtle ordering), SiYuan's issue-URL convention for workarounds, the two-zone error policy (panic on construction, never in steady state), the UI layer import rule, the vendored boundary, and the UI test conventions. Add one pointer line in AGENTS.md. Sweep `window.rs` workarounds for upstream issue URLs. Prune narration-only file prologues in both crates (keep the domain-documenting module docs; this is a pruning rule, not a purge). Full Verify, then the phase 1 gate (step 12).
 
 ### Phase 1 gate
 
-**Step 12 - Full idiom sweep (phase 1)** (operator mandate). Dispatch one dedicated sweep subagent - it replaces the coder + review-and-fix pair for this step - that audits everything phase 1 governs: `crates/promptforge-ws-server/src/`, `crates/promptforge-ws/src/`, `ui/src/` (excluding `ui/src/chat/`), `ui/test/`, `ui/style.css` and the colocated CSS files, `ui/package.json`, `ui/index.html`, `STYLE.md`. Checklist:
+**Step 12 - Full idiom sweep (phase 1)** (operator mandate). Dispatch one dedicated sweep subagent - it replaces the coder + review-and-fix pair for this step - that audits everything phase 1 governs: `crates/runvil-ws-server/src/`, `crates/runvil-ws/src/`, `ui/src/` (excluding `ui/src/chat/`), `ui/test/`, `ui/style.css` and the colocated CSS files, `ui/package.json`, `ui/index.html`, `STYLE.md`. Checklist:
 
 - Finding 1: `check-layers.mjs` clean; every workshop file sits in its layer; no reverse imports; the rule is wired at all three points (esbuild plugin in `build.mjs`, spawned check in `build.rs`, `typecheck` script).
 - Finding 2: no module-level mutable shared state in workshop TS; shared state lives in services passed through constructors.
@@ -177,7 +177,7 @@ Rust server steps (7-10) are independent of UI steps (1-6); if a UI step gets st
 - Finding 6: no hand-ordered test chain anywhere; discovery by glob only; `smoke.mjs` still intact (carving is step 18).
 - Finding 10 / STYLE.md: comment policy holds on workshop-owned files; no narration-only prologues.
 - Rulebooks: apply the rust-rulebook "Detect in existing code" lists and the html-css-rulebook corrections across the workshop-owned phase 1 diff.
-- Guardrails intact: `git diff <baseline-hash>..HEAD` (hash from step 0's baseline.md) is empty for `ui/src/chat/` and `crates/promptforge-ws/src/file_drop.rs`; wire JSON shapes unchanged (protocol round-trip tests prove it).
+- Guardrails intact: `git diff <baseline-hash>..HEAD` (hash from step 0's baseline.md) is empty for `ui/src/chat/` and `crates/runvil-ws/src/file_drop.rs`; wire JSON shapes unchanged (protocol round-trip tests prove it).
 
 Deviation handling: fix every deviation that lacks a recorded exception. Recorded exceptions are exactly: this plan's guardrails, the decision log, per-step decisions recorded during execution, and inline documented suppressions with a stated reason (`#[expect(..., reason = "...")]` style). Exempted deviations are listed, not touched. The sweep subagent may fan out parallel read-only audit subagents (e.g. Rust surface and UI surface separately), but all fixes are applied by the one sweep subagent so the diff has a single author. It writes the full report (finding, location, fix or exemption) to `cabinet/_scratch/vibe-workshop-refactor/sweep-phase1.md` and returns only counts (found / fixed / exempted) plus files changed. Then full Verify; commit all fixes as one conformance commit (no commit when zero fixes), and record the end-of-phase-1 hash in baseline.md for step 19's diff range. The tests-fail-twice re-plan rule applies to sweep fixes too. Phase 2 does not start until this gate is clean.
 
@@ -191,7 +191,7 @@ Deviation handling: fix every deviation that lacks a recorded exception. Recorde
 
 **Step 16 - Editor idioms** (Finding 8). In `editor-surface.ts`/`editor-panel.ts`: CodeMirror compartments stored on the surface object for everything runtime-reconfigurable (the readOnly-during-take toggle first), and an `externalUpdate` `Annotation` tagging transactions that originate from the server (workspace file loads), so future autosave logic distinguishes remote edits from local typing. Tests.
 
-**Step 17 - Shell event routing** (Finding 9). In `crates/promptforge-ws/src/window.rs`: route deferred side effects through `ShellEvent` (e.g. the open-external navigation effect); the synchronous decision callbacks (navigation allow/deny, permission) cannot defer through the proxy - keep them inline with a comment saying exactly that. `file_drop.rs` untouched. Tests where observable.
+**Step 17 - Shell event routing** (Finding 9). In `crates/runvil-ws/src/window.rs`: route deferred side effects through `ShellEvent` (e.g. the open-external navigation effect); the synchronous decision callbacks (navigation allow/deny, permission) cannot defer through the proxy - keep them inline with a comment saying exactly that. `file_drop.rs` untouched. Tests where observable.
 
 **Step 18 - Carve `smoke.mjs`** (Finding 6, last build step). Extract per-feature slices of the 1040-line `smoke.mjs` into colocated, plain-English-named tests under the runner; shrink smoke to a minimal end-to-end core (boot, one chat round-trip, one voice take). Wire the disposable-leak check into shared setup. Done when every extracted behavior has a named test and the suite is green. Full Verify, then the phase 2 gate (step 19).
 
@@ -243,7 +243,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin and decisive intent
 
-The plan was commissioned in one sentence (creator chat, 2026-08-26, verbatim): "I want a total refactor of @promptforge/crates/promptforge-ws-server @promptforge/crates/promptforge-ws using @cabinet/_output/compare-ui-stack-human-idioms.md as the guidance... When the plan runs it must not stop to ask the operator anything just barrel through. Make sure the idioms in the idiom file are followed."
+The plan was commissioned in one sentence (creator chat, 2026-08-26, verbatim): "I want a total refactor of @runvil/crates/runvil-ws-server @runvil/crates/runvil-ws using @cabinet/_output/compare-ui-stack-human-idioms.md as the guidance... When the plan runs it must not stop to ask the operator anything just barrel through. Make sure the idioms in the idiom file are followed."
 
 The two phase gates (steps 12 and 19) exist because of a second verbatim instruction: "after phase 1 and after phase 2 I want a full sweep verification in a subagent, to check for adherance to idioms, fix any deviations which dont have required exceptions do you understand?" The gates were inserted into an already-drafted 18-step plan, which forced the renumbering to 20 steps.
 
@@ -267,4 +267,4 @@ The idiom report's in-repo location is also user-driven (verbatim): "I moved the
 
 - Phase-1 sweep tally (run chat c76dd3d2): 4 findings fixed, 14 exempted with recorded exceptions, 5 judged not deviations; Verify green (cargo 171/0, UI 20/20 files). The sweep fanned out two read-only audit subagents (Rust rulebook detect-lists; UI Disposable/comment-policy) while the sweep author ran the mechanical checks - the parallel-audit pattern the plan review had suggested.
 - One coder subagent committed directly (a718b51) instead of following the dispatch-then-review pattern; the commit matched its step and was kept rather than reverted (paraphrase).
-- Post-run footnote (run chat 59374b02): a stale `vibe-review.md` at the promptforge repo root (gitignored, predating the cabinet routing convention) surfaced three "open" findings against this plan's step 18 carve. They turned out already fixed - the reviewed commit 3d2b886 had been rewritten as ffb2506 containing all three fixes - so no commit was needed and the stale file was moved to cabinet/_trash/.
+- Post-run footnote (run chat 59374b02): a stale `vibe-review.md` at the runvil repo root (gitignored, predating the cabinet routing convention) surfaced three "open" findings against this plan's step 18 carve. They turned out already fixed - the reviewed commit 3d2b886 had been rewritten as ffb2506 containing all three fixes - so no commit was needed and the stale file was moved to cabinet/_trash/.

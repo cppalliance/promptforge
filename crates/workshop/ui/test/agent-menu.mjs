@@ -48,7 +48,7 @@ for (const key of ["document", "HTMLElement", "Node", "Element", "Event"]) {
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-menu-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-menu-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, Emitter, AgentMenu } = await import(pathToFileURL(bundlePath).href);
 

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use harness::RunControl;
 use harness::record::RunId;
-use promptforge::event::Event;
+use runvil::event::Event;
 use tokio::sync::{broadcast, watch};
 
 use crate::input::{WaitError, WaitFrame, WaitRegistry, complete_input_response};

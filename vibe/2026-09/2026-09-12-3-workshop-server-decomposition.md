@@ -56,7 +56,7 @@ Workshop is being positioned as a full IDE competing with Cursor. The server del
 - Goals: (1) Decompose the server into one-way layered crates with self-registering subsystems, enforced by Cargo. (2) Decompose the SPA into lazy-loaded feature directories with colocated CSS, design tokens, and pluggable registries. (3) Make every component independently comprehensible within a single context window. (4) Make the CSS layer designer-friendly: discoverable, scopable, theme-swappable.
 - Non-goals: No React/Vue/Angular adoption. No Shadow DOM migration (the field is split; `.ws-*` prefix provides 80% of the benefit at 10% of the cost). No LSP integration in this plan. No real extension API yet.
 - Success criteria: Every crate under 2k lines. Every file under 500 lines. No hand-wiring in composition roots - subsystems self-register. Initial SPA bundle contains only the shell, services, and chrome; heavy panels load on first activation. All design tokens in `--ws-*` custom properties. Zero raw `#hex` or `px` values in component CSS. (Corrected 2026-09-12: at close-out the crate ceiling, the file ceiling, and the no-hand-wiring criterion were unmet - four crates exceeded 2k lines, `workshop-server/tests/it/agents.rs` was 958 lines, and the shell wired every handle by name. The debt-removal plan (`vibe/2026-09-12-4-workshop-debt-removal.md`) corrected the hand-wiring and the file ceiling; the 2k-line crate ceiling remains unmet, with `workshop`, `workshop-server`, `workshop-gateway`, and `workshop-sessions` above it.)
-- Constraints: The wire format in `protocol.rs` + `protocol.ts` + their shared JSON fixtures must not change. Public APIs of `promptforge-*` / `shared-*` crates are untouched. The DisposableStore lifecycle tree is correct and stays. The `workshop` Tauri shell stays one thin crate (verified healthy: largest real file 688 lines, slated for deletion).
+- Constraints: The wire format in `protocol.rs` + `protocol.ts` + their shared JSON fixtures must not change. Public APIs of `runvil-*` / `shared-*` crates are untouched. The DisposableStore lifecycle tree is correct and stays. The `workshop` Tauri shell stays one thin crate (verified healthy: largest real file 688 lines, slated for deletion).
 - Open questions: None
 
 ## Functional Specification
@@ -243,7 +243,7 @@ SPA side (7 points):
 
 ### AGENTS.md guard rails
 
-Three structural rules plus two designer-facing rules at `promptforge/AGENTS.md`:
+Three structural rules plus two designer-facing rules at `runvil/AGENTS.md`:
 
 ```
 # Structural Rules
@@ -310,7 +310,7 @@ The test suites are the invariant. Every work item passes the full suite before 
   - esbuild supports `import()` splitting natively with `splitting: true` and `format: 'esm'`.
   - The `workshop` crate overrides `unsafe_code` from `forbid` to `deny` because `bridge.rs` uses raw WebView2 COM and cannot be written without unsafe; this is documented in the crate's `Cargo.toml`.
   - Risk: if the per-concern state split turns out artificial, a `workshop-common` crate could recreate the big interaction surface one level down. The registry's proxy-slot design mitigates this - subsystems meet through protocol types, not shared state.
-  - CI is currently red: `promptforge-core` scheduler determinism-violation test broken by the drain commit (`f566cc1`). Must be fixed before any decomposition work.
+  - CI is currently red: `runvil-core` scheduler determinism-violation test broken by the drain commit (`f566cc1`). Must be fixed before any decomposition work.
 
 ### Deferred and Out of Scope
 
@@ -340,7 +340,7 @@ The test suites are the invariant. Every work item passes the full suite before 
   - `crates/workshop-server/ui/src/` - SPA entry: `main.ts`, `base/` (lifecycle primitives), `services/` (DOM-free state), `ui/` (flat 23 TS + 13 CSS), `ui/workshop/` (flat 13 TS + 4 CSS)
   - `crates/workshop/` - Tauri desktop shell (thin, verified healthy)
   - `crates/gateway*/` - inference gateway product crates (gateway, gateway-config, gateway-config-ui, gateway-local, gateway-logging, gateway-protocol, gateway-routing, gateway-stt, gateway-stt-backend-whisper, gateway-stt-engine, gateway-web-search, gateway-whisper-ffi)
-  - `crates/promptforge*/` - runtime Engine crates (promptforge, promptforge-core, promptforge-core-support, promptforge-agent, promptforge-lua, promptforge-model-client, promptforge-parser, promptforge-store, promptforge-tool-picker, promptforge-tools, promptforge-vfs, promptforge-webfetch, promptforge-web-search)
+  - `crates/runvil*/` - runtime Engine crates (runvil, runvil-core, runvil-core-support, runvil-agent, runvil-lua, runvil-model-client, runvil-parser, runvil-store, runvil-tool-picker, runvil-tools, runvil-vfs, runvil-webfetch, runvil-web-search)
   - `crates/shared-*/` - cross-product crates (shared-loopback, shared-progress, shared-sidecar, shared-vfs, shared-ui)
   - `crates/build-*/` - build output crates (build-llama-cuda, build-ui, build-user-guide, build-workshop)
   - `crates/product-integration-tests/` - cross-product integration tests
@@ -350,9 +350,9 @@ The test suites are the invariant. Every work item passes the full suite before 
   - `tools/` - build and staging scripts (e.g. `stage-gateway-sidecar.mjs`)
   - `vibe/` - project context (`archdoc.md`)
 - Component boundaries:
-  - Workshop crates (`workshop-*`) depend on shared crates but not on gateway or promptforge crates
-  - Gateway crates (`gateway-*`) depend on shared crates but not on promptforge or workshop crates
-  - PromptForge crates (`promptforge-*`) depend on shared crates but not on gateway or workshop crates
+  - Workshop crates (`workshop-*`) depend on shared crates but not on gateway or runvil crates
+  - Gateway crates (`gateway-*`) depend on shared crates but not on runvil or workshop crates
+  - Runvil crates (`runvil-*`) depend on shared crates but not on gateway or workshop crates
   - Shared crates (`shared-*`) depend on no product crates
   - Default `cargo build` builds only gateway; workshop requires explicit `-p workshop`
   - Workshop-server and workshop are excluded from the Linux CI clippy/test/docs jobs and tested separately on Windows (and a dedicated Linux job)
@@ -378,9 +378,9 @@ The test suites are the invariant. Every work item passes the full suite before 
 
 - Component: Foundation
 
-Fix the scheduler determinism-violation test in `promptforge-core` (`scheduler.rs:2543`). The drain commit (`f566cc1`) lets both concurrent appends complete before the conflict detector fires. [Failing run](https://github.com/cppalliance/promptforge/actions/runs/34707753972). The fix must make the conflict detector fire deterministically regardless of append ordering during drain. CI must be fully green before any decomposition work begins.
+Fix the scheduler determinism-violation test in `runvil-core` (`scheduler.rs:2543`). The drain commit (`f566cc1`) lets both concurrent appends complete before the conflict detector fires. [Failing run](https://github.com/cppalliance/runvil/actions/runs/34707753972). The fix must make the conflict detector fire deterministically regardless of append ordering during drain. CI must be fully green before any decomposition work begins.
 
-Verification: `cargo nextest run --locked -p promptforge-core scheduler` passes locally. Push and confirm CI green on all jobs.
+Verification: `cargo nextest run --locked -p runvil-core scheduler` passes locally. Push and confirm CI green on all jobs.
 
 </step-1>
 
@@ -390,7 +390,7 @@ Verification: `cargo nextest run --locked -p promptforge-core scheduler` passes 
 
 - Component: Foundation
 
-Add `promptforge/AGENTS.md` with three structural rules (one-way deps: shell -> features -> services -> vocabulary; per-crate invariant docs in `lib.rs`; 500-line file ceiling) and two designer-facing rules (CSS colocation beside TypeScript; token-only `--ws-*` values in component CSS).
+Add `runvil/AGENTS.md` with three structural rules (one-way deps: shell -> features -> services -> vocabulary; per-crate invariant docs in `lib.rs`; 500-line file ceiling) and two designer-facing rules (CSS colocation beside TypeScript; token-only `--ws-*` values in component CSS).
 
 Add `crates/xtask/` with tidy-style `#[test]` architecture checks: allowed-dependency table per tier (vocabulary crates depend on no internal crates; service crates depend only on vocabulary; feature crates depend on vocabulary and services; shell depends on all), forbidden reverse edges, file-line ceiling scan (500 lines), `unreachable_pub` enforcement. Add a `new-crate` subcommand that scaffolds `crates/workshop-<name>/` with `Cargo.toml` (workspace-inherited edition/lints/version, `publish = false`), facade `lib.rs` with `//!` invariant docs, and `tests/it/main.rs`. rust-analyzer's tidy checks (Kladov 2019) and Zed's `script/new-crate` are the reference patterns.
 

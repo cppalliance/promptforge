@@ -119,12 +119,12 @@ export class PanelBridge {
   /** Attaches the message listener and announces the iframe is ready. */
   start(): void {
     this.win.addEventListener("message", this.onMessage);
-    this.post({ type: "pf-bridge-ready" });
+    this.post({ type: "rv-bridge-ready" });
   }
 
   /** Announces one desk action for the workshop's status bar. */
   notifyAction(action: PanelAction): void {
-    this.post({ type: "pf-action", action });
+    this.post({ type: "rv-action", action });
   }
 
   /** Detaches the listener and fails every in-flight call. */
@@ -171,7 +171,7 @@ export class PanelBridge {
       const removeAbort = (): void => signal?.removeEventListener("abort", onAbort);
       this.pending.set(id, { resolve, reject, timer, removeAbort });
       signal?.addEventListener("abort", onAbort, { once: true });
-      this.post({ type: "pf-api", id, method, path, body });
+      this.post({ type: "rv-api", id, method, path, body });
     });
   }
 
@@ -184,14 +184,14 @@ export class PanelBridge {
     if (data === null || typeof data !== "object") {
       return;
     }
-    if (data["type"] === "pf-context") {
+    if (data["type"] === "rv-context") {
       this.onContext?.({
         theme: typeof data["theme"] === "string" ? data["theme"] : "dark",
         route: typeof data["route"] === "string" ? data["route"] : "",
       });
       return;
     }
-    if (data["type"] === "pf-api-result") {
+    if (data["type"] === "rv-api-result") {
       const id = data["id"];
       if (typeof id !== "string") {
         return;

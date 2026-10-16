@@ -4,10 +4,10 @@
 // the @2x entry in srcset keeps the image crisp on high-DPI displays.
 
 /** Relative path of the 1x program icon, resolved under the SPA mount. */
-export const PROGRAM_ICON = "icons/promptforge-icon.png";
+export const PROGRAM_ICON = "icons/runvil-icon.png";
 
 /** Relative path of the 2x program icon, paired with {@link PROGRAM_ICON}. */
-export const PROGRAM_ICON_2X = "icons/promptforge-icon@2x.png";
+export const PROGRAM_ICON_2X = "icons/runvil-icon@2x.png";
 
 /** Builds an `<img>` of the program icon, `size` CSS pixels square. */
 export function programIcon(size: number, alt: string): HTMLImageElement {

@@ -1,0 +1,149 @@
+//! The loop trampoline's instruction cost. `models.loop` runs on the
+//! author's Lua instruction budget, but its rules run in Rust behind the
+//! loop shim's trampoline, so the every-Nth-instruction hook counts only
+//! the trampoline's own instructions: a handful per yield. This bounds
+//! that cost, so the trampoline stays a dispatcher that holds no rule and
+//! the loop's bookkeeping never taxes an author's block.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use mlua::{HookTriggers, MultiValue, Value, VmState};
+use serde_json::json;
+
+use runvil_lua::Error;
+use runvil_types::metrics::ToolCallEvent;
+
+use crate::execute::protocol::{Answer, ChatOutcome, ChatResult, Request};
+
+use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, test_tools};
+
+/// The most Lua instructions one model-tool round may spend in the loop
+/// shim's trampoline: from one `chat` yield to the next, through the
+/// `tool_calls` yield and the step call after each answer. The trampoline
+/// measured 20 per round when the ceiling was set, so a change that
+/// triples its cost, such as a loop rule moving back into Lua, trips this
+/// while ordinary edits do not.
+const ROUND_INSTRUCTION_CEILING: u64 = 60;
+
+/// The fewest Lua instructions a round can spend in the trampoline: one
+/// per yield in the measured span (the `tool_calls` and the next `chat`).
+/// A round under this floor means the hook is not firing on the loop
+/// thread, and the test would otherwise pass while showing nothing about
+/// the quota.
+const ROUND_INSTRUCTION_FLOOR: u64 = 2;
+
+/// Rounds measured after the first, so the assertion reads steady-state
+/// cost rather than the one-time argument decode.
+const MEASURED_ROUNDS: i64 = 3;
+
+/// A completed round that requested one `tools_echo` call.
+fn tool_call_round() -> Answer<Error> {
+    Answer::Chat(Ok(Box::new(ChatResult {
+        outcome: ChatOutcome::ToolCalls(vec![ToolCallEvent::new(
+            "call_1",
+            "tools_echo",
+            json!({ "value": "hi" }),
+        )]),
+        finish_reason: Some("tool_calls".to_owned()),
+        turn: 1,
+    })))
+}
+
+/// A completed round that produced the terminal reply.
+fn reply_round(text: &str) -> Answer<Error> {
+    Answer::Chat(Ok(Box::new(ChatResult {
+        outcome: ChatOutcome::Reply(text.to_owned()),
+        finish_reason: Some("stop".to_owned()),
+        turn: 2,
+    })))
+}
+
+#[test]
+fn a_models_loop_round_costs_the_trampoline_a_few_lua_instructions_per_yield() {
+    // The block is the bench prompt's shape: one user message, one loop
+    // call. The coroutine runs a per-instruction counting hook in
+    // place of the VM's cancel hook, so the counter reads exactly the Lua
+    // instructions the trampoline executes between two `chat` yields.
+    // Every round is answered with one tool call so the measured span is
+    // the full model-tool round, not the terminal exit.
+    let vm = scheduler_vm_with_tools(&test_models(), &test_tools(), None);
+    let function = vm
+        .lua()
+        .load("local msgs = messages.new()\nmsgs:user('hi')\nmodels.loop(msgs)\nreturn #msgs")
+        .into_function()
+        .expect("the loop block compiles");
+    let thread = vm
+        .lua()
+        .create_thread(function)
+        .expect("the loop thread creates");
+    let executed = Arc::new(AtomicU64::new(0));
+    thread
+        .set_hook(HookTriggers::new().every_nth_instruction(1), {
+            let executed = Arc::clone(&executed);
+            move |_lua, _debug| {
+                executed.fetch_add(1, Ordering::Relaxed);
+                Ok(VmState::Continue)
+            }
+        })
+        .expect("the counting hook installs on the loop thread");
+
+    let yielded = thread
+        .resume::<MultiValue>(())
+        .expect("the block yields its first chat");
+    assert!(
+        matches!(parse_request(&vm, yielded), Request::Chat { .. }),
+        "the loop's first yield is its first chat"
+    );
+
+    // One mark per chat yield: the difference between consecutive marks
+    // is one round's trampoline cost.
+    let mut marks = vec![executed.load(Ordering::Relaxed)];
+    for _ in 0..=MEASURED_ROUNDS {
+        let yielded = resume_with(&vm, &thread, tool_call_round());
+        match parse_request(&vm, yielded) {
+            Request::ToolCalls { calls, .. } => {
+                let names: Vec<(&str, &str)> = calls
+                    .iter()
+                    .map(|call| (call.name.as_str(), call.id.as_str()))
+                    .collect();
+                assert_eq!(names, [("tools_echo", "call_1")]);
+            }
+            other => panic!("the loop yields the model's tool call, got {other:?}"),
+        }
+        let yielded = resume_with(
+            &vm,
+            &thread,
+            Answer::ToolCallsResult(Ok(vec!["echoed".to_owned()])),
+        );
+        assert!(
+            matches!(parse_request(&vm, yielded), Request::Chat { .. }),
+            "after the tool result the loop yields the next chat"
+        );
+        marks.push(executed.load(Ordering::Relaxed));
+    }
+
+    let returned = resume_with(&vm, &thread, reply_round("done"));
+    // user + (assistant tool-call record + tool record) per round + terminal.
+    let expected_len = 1 + 2 * (MEASURED_ROUNDS + 1) + 1;
+    assert_eq!(
+        returned.into_iter().next(),
+        Some(Value::Integer(expected_len)),
+        "the loop appended every round's records and the terminal reply"
+    );
+
+    let costs: Vec<u64> = marks.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    for (round, cost) in costs.iter().enumerate().skip(1) {
+        assert!(
+            *cost >= ROUND_INSTRUCTION_FLOOR,
+            "round {round} spent {cost} Lua instructions in the loop trampoline, under \
+             the {ROUND_INSTRUCTION_FLOOR} floor: the hook is not counting the loop \
+             thread; per-round costs: {costs:?}"
+        );
+        assert!(
+            *cost <= ROUND_INSTRUCTION_CEILING,
+            "round {round} spent {cost} Lua instructions in the loop trampoline, over \
+             the {ROUND_INSTRUCTION_CEILING} ceiling; per-round costs: {costs:?}"
+        );
+    }
+}

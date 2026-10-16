@@ -72,7 +72,7 @@ Add this section directly after the opening paragraph, before `## Principles`:
 
 Three words have exactly one meaning each, everywhere in this repository: code comments, docs, rulebooks, and plans. Write them capitalized.
 
-- **Engine**: the `promptforge` crates, `crates/promptforge/` and everything under `crates/promptforge-internal/`; the Structure rules below call this product PromptForge. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for the Harness to answer it.
+- **Engine**: the `runvil` crates, `crates/runvil/` and everything under `crates/runvil-internal/`; the Structure rules below call this product Runvil. The Engine parses a prompt and steps a run. Whenever a run needs a model reply, a tool result, a timer, or a file, the Engine emits an effect and waits for the Harness to answer it.
 - **Harness**: the `harness` crates, `crates/harness/` and everything under `crates/harness-internal/`. The Harness steps the Engine, performs every effect, returns each answer, and keeps the run log. Production code runs prompts only through the Harness. In Engine tests and examples, the code that steps the Engine plays the Harness's part and is called the Harness too.
 - **Host**: an application that runs prompts through the Harness, such as Workshop or Papergate. The Host makes every policy decision. It runs prompts only through the Harness; it may also use the Engine's parser and types to read prompts and show events.
 
@@ -86,14 +86,14 @@ Three words have exactly one meaning each, everywhere in this repository: code c
   - "run", "serve", "embed", or "hold" for the verb
 - "Engine" and "Harness" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness. Inside `crates/gateway/stt/`, a bare "engine" means the speech engine. This repository's own checks and test scaffolding are "structural checks", "test support", or "fixtures".
 - Names defined outside this repository are used exactly as defined: the HTTP `Host` header and URL host names, the gateway config key `max_per_host`, Cargo's host triple and `harness = false`, GitHub's self-hosted runners, cargo-dist's `host` step and `host-jobs`, CSS `:host`, and the DOM's `ShadowRoot.host`.
-- Crate names are written as they are, such as `harness-runner` and `promptforge-engine`. Identifiers that use "host" in another sense, such as `HostBackend`, `RunHost`, and `inject_host`, keep their old names until a rename lands.
+- Crate names are written as they are, such as `harness-runner` and `runvil-engine`. Identifiers that use "host" in another sense, such as `HostBackend`, `RunHost`, and `inject_host`, keep their old names until a rename lands.
 - Quotations of people stay verbatim.
 ```
 
 Same file, other edits:
 
-- `## Roles`: delete the PromptForge and Harness bullets, which the Definitions replace. The Workshop bullet becomes "Workshop is a Host: a user-facing agentic development environment, a Tauri desktop application with an HTML/CSS/TypeScript UI". The Gateway bullet stays.
-- Line 3: "for the PromptForge pipeline engine, the harness that hosts it, the inference gateway, and the Workshop desktop product" becomes "for the Engine, the Harness that runs it, the Gateway, and Workshop, a Host".
+- `## Roles`: delete the Runvil and Harness bullets, which the Definitions replace. The Workshop bullet becomes "Workshop is a Host: a user-facing agentic development environment, a Tauri desktop application with an HTML/CSS/TypeScript UI". The Gateway bullet stays.
+- Line 3: "for the Runvil pipeline engine, the harness that hosts it, the inference gateway, and the Workshop desktop product" becomes "for the Engine, the Harness that runs it, the Gateway, and Workshop, a Host".
 - Line 37 (chip): "The host owns its kind and payload" becomes "The part that embeds the chat box owns its kind and payload".
 - Line 54: "host-support code" becomes "run-support code". Line 56: "the facade paths hosts see" becomes "the facade paths other crates see". Line 79: "Boundary and structural harness" becomes "Boundary and structural checks".
 - The new text avoids the phrases `docs-claims.mjs` already bans in this file ("TOML config", "three named buckets", "three homes").
@@ -110,14 +110,14 @@ Removed outright, because they define the Engine, Harness and Host relationship 
 - `crates/harness-internal/runner/src/lib.rs` Invariants: delete the `cancel::CancelHandle` "a host bridges" bullet. In the description, "drawing the host inputs the engine refuses to draw itself" becomes "drawing the inputs the Engine refuses to draw itself".
 - `crates/gateway/progress/AGENTS.md`: "The Workshop and the harness consume" becomes "The Workshop consumes" (no Harness crate depends on a gateway crate); "Hosts own forwarding tasks" becomes "Callers own forwarding tasks".
 - `crates/harness-internal/models/AGENTS.md` and its `src/lib.rs` description: cut "a host resolves model selections against" and the Workshop dropdown clause; cut "so no host ever sees it", since the sentence already says the vendor credential sits in the gateway; in `AGENTS.md`, "checks the endpoint's host" becomes "checks the endpoint's address".
-- `crates/promptforge-internal/model-client/src/lib.rs`: cut "the engine's production host"; "a host resolves and freezes model selections through" becomes "model selections resolve and freeze through".
+- `crates/runvil-internal/model-client/src/lib.rs`: cut "the engine's production host"; "a host resolves and freezes model selections through" becomes "model selections resolve and freeze through".
 - `.cursor/rules/workshop-architecture.mdc`: "The sessions subsystem has no crate of its own" becomes "The `agents` subsystem has no crate of its own".
 
 Reworded only, since they are otherwise sound rules:
 
-- `crates/promptforge-internal/engine/AGENTS.md`: "hosts reach it only through the `promptforge` facade" becomes "outside crates reach it only through"; "a host performing a `Store` effect" becomes "the Harness, performing a `Store` effect,"; "host-support vocabulary" becomes "run-support vocabulary".
-- `crates/promptforge-internal/types/AGENTS.md`: "host-support primitives" becomes "run-support primitives"; "answered by the host" becomes "answered by the Harness".
-- `crates/promptforge-internal/lua/AGENTS.md`: line 7 "the host performs it" becomes "the Harness performs it"; "public for `promptforge-engine`, not host API" becomes "public only for `promptforge-engine`"; "host-visible type" becomes "facade-visible type"; the Lua-surface uses become "Engine globals" and "Engine functions"; "Host code never calls" becomes "Engine code never calls"; "Lua host capabilities are namespace functions" becomes "Engine globals are namespace functions".
+- `crates/runvil-internal/engine/AGENTS.md`: "hosts reach it only through the `runvil` facade" becomes "outside crates reach it only through"; "a host performing a `Store` effect" becomes "the Harness, performing a `Store` effect,"; "host-support vocabulary" becomes "run-support vocabulary".
+- `crates/runvil-internal/types/AGENTS.md`: "host-support primitives" becomes "run-support primitives"; "answered by the host" becomes "answered by the Harness".
+- `crates/runvil-internal/lua/AGENTS.md`: line 7 "the host performs it" becomes "the Harness performs it"; "public for `runvil-engine`, not host API" becomes "public only for `runvil-engine`"; "host-visible type" becomes "facade-visible type"; the Lua-surface uses become "Engine globals" and "Engine functions"; "Host code never calls" becomes "Engine code never calls"; "Lua host capabilities are namespace functions" becomes "Engine globals are namespace functions".
 - `parser/AGENTS.md`: "they are not host API and must not gain facade status without a design change" becomes "they join the facade only through a design change"; "Lua host surface" becomes "Engine globals". `model-client/AGENTS.md`: "host-visible type" becomes "facade-visible type".
 - Verb and other senses: `workshop/desktop/AGENTS.md` ("never hosts" becomes "never runs"), `workshop/ui/AGENTS.md` ("hosts indicator slots" becomes "holds"), `gateway/app/AGENTS.md` ("Gateway-hosted" becomes "The gateway's"), `gateway/stt/engine/AGENTS.md` ("host" becomes "caller"), `shared-loopback/AGENTS.md` (network wording written as the `Host` check and `Host`-authority checks so the guard passes).
 
@@ -138,27 +138,27 @@ Sense key for each "host":
 
 Rules every worker follows:
 
-- Work only inside `c:\Users\Vinnie\cursor\promptforge`. Two more checkouts, `promptforge2/` and `promptforge3/`, sit beside it in the workspace and are out of scope.
+- Work only inside `c:\Users\Vinnie\cursor\runvil`. Two more checkouts, `runvil2/` and `runvil3/`, sit beside it in the workspace and are out of scope.
 - Every sentence a worker writes or rewrites says what a thing is or does. For example, write "the Engine emits an effect whenever a run needs something from outside", in place of "the Engine does no I/O".
 - Sections 1.1 and 1.2 are already applied when workers start; leave those lines as they are.
 - Prose only: markdown outside code, comment text in `.rs`, `.ts`, `.mjs`, `.css` and `.lua`, and `.toml` and `.yml` comments and package `description` strings.
 - Capitalization belongs to commit 2. In a line you rewrite, write every term in its final form; do not touch other lines only to capitalize them.
-- Where "engine" or "harness" means one specific crate rather than the whole Engine or Harness, write the crate name in backticks (`promptforge-engine`, the `harness` facade).
+- Where "engine" or "harness" means one specific crate rather than the whole Engine or Harness, write the crate name in backticks (`runvil-engine`, the `harness` facade).
 - In code files, reword in place: never add or remove a line (file-length ceilings, Lua stack-trace line numbers).
 - Keep doc-comment list indentation (clippy doc lints run with `-D warnings`).
-- Facade pages (`crates/promptforge/src/*.md`, `crates/harness/src/*.md`) never say "the Engine" in any case (cicerone's banned-phrase check); they say "this crate" or "the run". They never name a `promptforge-*` crate.
+- Facade pages (`crates/runvil/src/*.md`, `crates/harness/src/*.md`) never say "the Engine" in any case (cicerone's banned-phrase check); they say "this crate" or "the run". They never name a `runvil-*` crate.
 - Fix every other-sense "harness" and "engine" listed in the worker's Appendix A entry, and do the other-sense renames first where the entry says so.
 - Skip `node_modules/`, `target/`, `dist/`, lock files, the generated guide exports, the cargo-dist workflow, `vibe/scratch/*.diff` and `vibe/scratch/*.log`.
 - Report any hit that fits none of Appendix B instead of guessing.
 
 ### 1.4 Specific rewrites (done by the owning worker)
 
-- `crates/promptforge/src/lib.md` line 9: the program that does the outside work is the Harness; "In production that is the `harness` crate; in these examples your own program plays the Harness's part."
+- `crates/runvil/src/lib.md` line 9: the program that does the outside work is the Harness; "In production that is the `harness` crate; in these examples your own program plays the Harness's part."
 - `guide/src/language/01-what-a-prompt-is.md` section "The prompt and its host": open with one paragraph naming the three layers (the Engine parses the prompt, steps the run, and emits an effect whenever the run needs something from outside; the Harness performs each effect and keeps the run log; the Host launches runs, chooses policy such as the selected model and whether someone can answer `input.ask()`, and can cancel), then keep the contract-key content with Harness and Host in place of host.
 - `guide/src/introduction.md` lines 11 to 21: put the Harness between the Host (Workshop, a library user) and the Engine, and have the Harness talk to the gateway.
 - `vibe/archdoc.md` lines 5, 9 to 12, 15 and 28: the Engine (executor) exchanges every effect and event with the Harness as a value through its stepping API, `Run::new`, `step`, `resume` and `cancel`; the Harness steps the Engine and performs its effects; a Host line is added; "host capabilities" becomes "Engine globals".
-- `tools/cicerone/plans/promptforge.md`: its plan term `host:` is rewritten to the Harness role, so regenerating the facade pages cannot bring the drift back; `tools/cicerone.md` style examples ("small host", "every host writes", "A `Session` is one running prompt", which becomes "A `Session` owns a sequence of runs", and the persona "a test harness", which becomes "a test suite").
-- Statements that call the Harness a host: `harness-internal/runner/src/prepare.rs:4`, `effect_loop.rs:1`, `sessions/src/runtime.rs:122`, `workshop/server/src/app/compose.rs:200`, `promptforge-internal/engine/src/lib.md:3`, `test_support/tokio_driver.rs:35-37`, `test_support/mock-gateway-client.rs:3`, `execute/scheduler.rs:4`, and the "only production host" sentence repeated in about eleven `vibe/` plans: each says what the Harness does instead.
+- `tools/cicerone/plans/runvil.md`: its plan term `host:` is rewritten to the Harness role, so regenerating the facade pages cannot bring the drift back; `tools/cicerone.md` style examples ("small host", "every host writes", "A `Session` is one running prompt", which becomes "A `Session` owns a sequence of runs", and the persona "a test harness", which becomes "a test suite").
+- Statements that call the Harness a host: `harness-internal/runner/src/prepare.rs:4`, `effect_loop.rs:1`, `sessions/src/runtime.rs:122`, `workshop/server/src/app/compose.rs:200`, `runvil-internal/engine/src/lib.md:3`, `test_support/tokio_driver.rs:35-37`, `test_support/mock-gateway-client.rs:3`, `execute/scheduler.rs:4`, and the "only production host" sentence repeated in about eleven `vibe/` plans: each says what the Harness does instead.
 
 ### 1.5 Guide headings and anchors
 
@@ -217,16 +217,16 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 
 ### A1. Engine facade and small Engine crates (80 files, about 227 lines)
 
-- Facade pages in `crates/promptforge/src/`: `lib.md` (20; mostly Harness; line 9 per 1.4), `capabilities.md` (3), `event.md` (5), `ids.md` (1 prose; lines 54 and 219 are doctest code), `metrics.md` (3; the link text `[host](crate)`), `model.md` (7; Harness 4, Host 3), `prompt.md` (1; Engine global), `transport.md` (1), `vfs.md` (about 12; real filesystem; the `## HostBackend` heading stays), `cancel.md` (1; see Appendix B, cancel).
-- `crates/promptforge/Cargo.toml` description; `tests/suite/{main,prepare,support}.rs` comments, where "Shared harness" and "shared harness code" become "shared test support" first.
-- `crates/promptforge-internal/README.md` (5); `engine/{README.md, AGENTS.md, Cargo.toml}` and `engine/src/lib.md` (8; "the harness is its production host").
+- Facade pages in `crates/runvil/src/`: `lib.md` (20; mostly Harness; line 9 per 1.4), `capabilities.md` (3), `event.md` (5), `ids.md` (1 prose; lines 54 and 219 are doctest code), `metrics.md` (3; the link text `[host](crate)`), `model.md` (7; Harness 4, Host 3), `prompt.md` (1; Engine global), `transport.md` (1), `vfs.md` (about 12; real filesystem; the `## HostBackend` heading stays), `cancel.md` (1; see Appendix B, cancel).
+- `crates/runvil/Cargo.toml` description; `tests/suite/{main,prepare,support}.rs` comments, where "Shared harness" and "shared harness code" become "shared test support" first.
+- `crates/runvil-internal/README.md` (5); `engine/{README.md, AGENTS.md, Cargo.toml}` and `engine/src/lib.md` (8; "the harness is its production host").
 - `types/`: `AGENTS.md`, `README.md`, `Cargo.toml`, and `src/{lib, cancel, plugins, detail, emitter, event, event-lifecycle, ids, models, timestamp, tools, tools/descriptor, tools/registry, untrusted, untrusted/tests, wire}.rs`. Nearly all Harness ("host-support" becomes "run-support", "host-drawn" becomes "Harness-drawn").
 - `parser/`: `AGENTS.md`, `Cargo.toml`, `src/{contract, contract/models, contract/tests, contract/tests-plugins, detail, error, prompt}.rs`. Harness and Engine-global senses; the string "a host global" is code.
 - `model-client/`: `AGENTS.md`, `Cargo.toml`, `src/{lib, client, client/read, client/stream, client/wire, client/wire-canned, detail, error, model, model/error, model/options}.rs`.
 - `vfs/`: `README.md` and `src/{detail, detail-tests, handle, handle/access, handle/scope, handle/store_view, handle/tests/claims, handle/tests/happens_before, handle/tests/sink, host, host/files, host/resolve, host/tests, host/tests/links, memory, memory-tests, observe, path, traits}.rs`. Real-filesystem sense; `path.rs` "Windows hosts" becomes "Windows machines".
 - No edits: `src/effect.md` (a text diagram), `src/lib.rs`, `public-api.txt`, `vfs/src/lib.rs`, `vfs/src/host/tests/semantics.rs`.
 
-### A2. Engine Lua crate (48 files, about 199 lines), all under `crates/promptforge-internal/lua/`
+### A2. Engine Lua crate (48 files, about 199 lines), all under `crates/runvil-internal/lua/`
 
 - Mostly the Lua sense ("host global", "host injection", "host APIs" become "Engine global", "Engine injection", "Engine globals"). Harness sense in `AGENTS.md:7`, `coro.rs`, `dispatch.rs`, `protocol/*.rs`, `handles.rs`, `error.rs`, `error-value.rs`, `lib.rs`.
 - Files: `AGENTS.md`, `README.md`, `Cargo.toml` (description; `harness = false` stays), `benches/surface.rs`, and `src/{alias, argv, compactors, coro, detail, dispatch, error, error-value, globals, globals-tests, handles, hardening, host, host-store, lib, messages, models, models-tests, prelude, prelude-tests, program, prose, protocol, protocol/answer, protocol/render, protocol/request, sys, tests, tests/argv, tests/logging, tests/section_vm, tests/shared_replay, tools, tools/decode, vm, vm/install, vm/run, vm/state}.rs`.
@@ -235,14 +235,14 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 - `host.rs`: mixed; the Lua surface becomes Engine globals, the `ui()` snapshot lines are the Host.
 - No edits: `tests/{cancellation, sandbox, budgets, store, store_errors, store_reports, tool_scoping}.rs`, `tools/tests.rs`, `messages-tests.rs`.
 
-### A3. Engine executor (49 files, about 249 lines), `crates/promptforge-internal/engine/src/` outside `execute/tests/`
+### A3. Engine executor (49 files, about 249 lines), `crates/runvil-internal/engine/src/` outside `execute/tests/`
 
 - Heaviest: `execute/config.rs` (36; Harness 28, Host 5, real filesystem 3), `test_support/host.rs` (26), `execute/requirements.rs` (18; Host 9), `test_support.rs` (18), `execute/run/effect.rs` (16), `execute.rs` (15), `run.rs`, `environment.rs`, `section_vm.rs` and `test_support/tokio_driver.rs` (13 each), `execute/scheduler.rs` (12).
 - Others: `error.rs`, `error/tests.rs`, `error/value.rs`, `execute/{bindings, context, context-bound, error, fill, protocol, requirements-tests, run/tests, section_context, section_context-construct, support, tests}.rs`, `execute/scheduler/{apply, builtins, chain, dispatch, drive, pending, task_end, task_events, timer, tool_call, waits}.rs`, `lua.rs`, `lua/tests.rs`, `lua/tests/{errors,globals}.rs`, `model.rs`, `model/tests.rs`, `subst.rs`, `test_support/{mock-gateway-client, recording, recording/forward, tokio_driver-performers}.rs`, `tools.rs`.
 - Wrong claims to fix: `subst.rs:3` "the harness resolves `{{ path }}` placeholders" becomes "the Engine resolves"; `section_context.rs:68` "The frame's engine" becomes "The frame's VM".
 - No edits: `benches/models_loop.rs`, `execute/context-tests.rs`, `model/tests-always.rs`, `model/tests-integration.rs`, `test_support/tools.rs`.
 
-### A4. Engine tests (29 files, about 85 lines), `crates/promptforge-internal/engine/src/execute/tests/`
+### A4. Engine tests (29 files, about 85 lines), `crates/runvil-internal/engine/src/execute/tests/`
 
 - First, rename the other-sense harness: `suite/exec_flow.rs:1,5,6` "offline harness", `suite.rs:6`, `suite/support.rs:1` "Shared harness", `suite/support.rs:159`, `gateway.rs:28` become "fixture support" or "fixtures".
 - Then the comments in `context.rs`, `context-tools.rs`, `effects.rs`, `exec_flow.rs`, `fanout_acceptance.rs`, `full_id_calls.rs`, `happens_before.rs`, `happens_before-concurrency.rs`, `live_infer.rs`, `model_tasks.rs`, `models_loop.rs`, `observations.rs`, `preludes.rs`, `provenance.rs`, `run_inputs.rs`, `run_termination.rs`, `scheduler.rs`, `scheduler/{concurrency, failures, failures-script-tools, fanout, live_h1}.rs`, `serial_driver.rs`, `suite/exec_flow/{run_setup, store_failures}.rs`, `suite/{prepare, support, vfs}.rs`, `tool_call_arm.rs`.
@@ -273,8 +273,8 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 ### A7. Gateway, shared, build, root, tools, CI (55 files, about 180 lines)
 
 - Root: `README.md` ("hosts its own server" becomes "runs"), `crates/README.md` ("effects a host performs" becomes "effects the Harness performs"; "the structural harness" becomes "the structural checks"), root `Cargo.toml` ("Host metrics" becomes "Machine metrics"; "Benchmark harness" becomes "Benchmark framework"), `gateway.local.example.toml`, `dist-workspace.toml` (comment only; the `hosting` and `host-jobs` keys stay), `guide/landing/index.html` (3; "hosting a run", "hosts the Harness", "the host's control").
-- CI: `.github/workflows/ci.yml:143`, `whisper-lib.yml` ("PromptForge hosts need no compiler" becomes "machines"). The cargo-dist workflow `promptforge-gateway-v-release.yml` is generated; leave it.
-- tools: `tools/cicerone.md` (10), `tools/cicerone/plans/promptforge.md` (22, the plan term `host:`), `tools/cicerone/plans/harness.md` (8), per 1.4.
+- CI: `.github/workflows/ci.yml:143`, `whisper-lib.yml` ("Runvil hosts need no compiler" becomes "machines"). The cargo-dist workflow `runvil-gateway-v-release.yml` is generated; leave it.
+- tools: `tools/cicerone.md` (10), `tools/cicerone/plans/runvil.md` (22, the plan term `host:`), `tools/cicerone/plans/harness.md` (8), per 1.4.
 - build-xtask: `src/{site, api/doc_text, api/items, api/load, api/listing, api/listing/compact}.rs` ("hosts" there means crates that depend on the facade: "dependents"). build-llama-cuda: `src/{lib, deps, manifest, bundle}.rs` ("the host" becomes "the machine"; "host triple" stays).
 - Shared and API: `gateway-api-types/src/metadata.rs` (Host), `shared-ui/{modal.ts, modal.css}` (container element).
 - gateway: `app/{AGENTS.md, README.md, Cargo.toml, build.rs}`, `app/src/{lib, boot, runner, models, speech, tray/logic}.rs`, `app/src/admin/walled/{system, system-tests, reveal, reveal-tests}.rs`, `app/tests/it/cuda.rs`; `progress/{AGENTS.md, src/lib.rs}`; `stt/engine/{AGENTS.md, src/policy.rs, src/worker.rs}`; `stt/api/src/service.rs`; `config/src/{config.rs, config/workshop.rs, config/accessors.rs}`; `local/src/{error, artifacts, artifacts/assets, testsupport}.rs`; `cloud-providers/{src/providers/foundry.rs, tests/sheet_binary.rs}`; `routing/src/queue.rs`; `config-ui/ui/src/{services/gateway-api.ts, pages/cloud-models-page.ts, components/review-diff.ts, components/apply-overlay.ts, components/confirm-modal.ts}`. Mostly the machine and verb senses.
@@ -288,11 +288,11 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 - `introduction.md`: no "host", but its architecture paragraph is rewritten per 1.4.
 - Quoted exact messages are copied exactly. "and this host provides none" and "User input is unavailable in this host; continue without it." already mean the Host and stay. "host {host} has no allowed address" is the network sense and stays. "a host global" changes only in the follow-up PR, together with the code that produces it.
 - No edits: `language/06-arguments.md` (inline code), `gateway/03-remote-models.md` (URL host).
-- The exports `guide/promptforge-*-guide.md` are regenerated, never hand-edited.
+- The exports `guide/runvil-*-guide.md` are regenerated, never hand-edited.
 
 ### A9. `vibe/` top level (32 files, about 372 lines)
 
-- Heaviest: `2026-09-28-2-capability-harness-redesign.md` (184; mostly the Host already, so capitalize; lines 106 to 113 and 325 move effect work from the Host to the Harness), `2026-09-23-1-promptforge-api-firewall.md` (79), `2026-09-28-5-internal-crates-fix-batch.md` (71), `2026-09-26-4-store-into-vfs.md` (70), `2026-09-28-4-internal-crates-critical-fixes.md` (44), `2026-09-27-1-store-vfs-debt.md` (31), `2026-09-22-4-api-runtime-debt.md` (26), plus 24 lighter files.
+- Heaviest: `2026-09-28-2-capability-harness-redesign.md` (184; mostly the Host already, so capitalize; lines 106 to 113 and 325 move effect work from the Host to the Harness), `2026-09-23-1-runvil-api-firewall.md` (79), `2026-09-28-5-internal-crates-fix-batch.md` (71), `2026-09-26-4-store-into-vfs.md` (70), `2026-09-28-4-internal-crates-critical-fixes.md` (44), `2026-09-27-1-store-vfs-debt.md` (31), `2026-09-22-4-api-runtime-debt.md` (26), plus 24 lighter files.
 - `archdoc.md` per 1.4; the live notes `papergate-harness-migration.md` (line 5: "Its only production host is the harness"), `dependency-surface.md`, `agent-runtime-field-comparison-and-adoption.md`.
 - Boilerplate: "the harness is the engine's (executor's) only production host" in about eleven plans' context sections gets the same rewrite; "structural harness" and "boundary and structural harness" in about 30 plans become "structural checks".
 - Headings: `2026-09-22-4:315` ("test-only host" becomes "test-only `RunHost`"), `2026-09-28-4:254` and `2026-09-28-5:669` (host backend becomes real-filesystem backend), `2026-09-28-5:589` ("host-built completions" becomes "Harness-built completions", since the Harness side builds them).
@@ -300,7 +300,7 @@ Counts are from the read-only sweep on 2026-09-30. "Senses" names the dominant r
 
 ### A10. `vibe/2026-09/` (25 files, about 248 lines)
 
-- Heaviest: `2026-09-13-1-capabilities-global-naming.md` (110; its glossary line 819 defines "A host: whatever embeds the executor"), `2026-09-11-3-vfs-foundation.md` (50), `2026-09-10-1-unified-prompt-model.md` (48), `2026-09-19-1-chatbox-extraction.md` (40; the chat box's parent part), `2026-09-18-4-sans-io-engine-harness.md` (38; the origin of "only production host" at lines 54, 96, 115, 163, 323, 403), `2026-09-03-3-gateway-sidecar-decomposition.md` (17; heading "The shell hosts workshop-server" becomes "The shell runs workshop-server"), `2026-09-12-5-one-door-promptforge-api.md` (17), `2026-09-05-2-generic-realtime-stt.md` (13), `2026-09-12-2-dependency-rules-vfs-hook.md` (13), plus 16 lighter files. Heading `2026-09-11-3:621` "host backend" becomes "real-filesystem backend".
+- Heaviest: `2026-09-13-1-capabilities-global-naming.md` (110; its glossary line 819 defines "A host: whatever embeds the executor"), `2026-09-11-3-vfs-foundation.md` (50), `2026-09-10-1-unified-prompt-model.md` (48), `2026-09-19-1-chatbox-extraction.md` (40; the chat box's parent part), `2026-09-18-4-sans-io-engine-harness.md` (38; the origin of "only production host" at lines 54, 96, 115, 163, 323, 403), `2026-09-03-3-gateway-sidecar-decomposition.md` (17; heading "The shell hosts workshop-server" becomes "The shell runs workshop-server"), `2026-09-12-5-one-door-runvil-api.md` (17), `2026-09-05-2-generic-realtime-stt.md` (13), `2026-09-12-2-dependency-rules-vfs-hook.md` (13), plus 16 lighter files. Heading `2026-09-11-3:621` "host backend" becomes "real-filesystem backend".
 - Other senses: "structural harness" boilerplate in about 20 plans; "test harness" meaning this repository's test scaffolding becomes "test support"; the "Agent Harness" product idea in `2026-09-14-2` becomes "a future agent Host"; the frontier "harness tool file" in `2026-09-02-6` becomes "agent tool file".
 - No edits: 7 files whose hits are only GitHub runners or network names.
 
@@ -335,13 +335,13 @@ Who does what today: the Harness prepares runs, draws each run's seed, start ins
 
 ## Appendix C: inventory for the follow-up rename PR
 
-Already correct under the definitions (keep): `HostSnapshot`, `set_host`, the `host` field and getter on the Harness bindings, Workshop's `host_snapshot`, and the tests named after them. The messages "User input is unavailable in this host; continue without it." (`harness-internal/plugins/src/user_input.rs`, sent to models), "..., and this host provides none" (`promptforge-internal/engine/src/execute/requirements.rs`), and the test string "the host withdrew the wait" also keep their wording, because each means the application. The capitalization rule covers prose, not message text, so they stay as written, and prose that quotes them quotes them exactly.
+Already correct under the definitions (keep): `HostSnapshot`, `set_host`, the `host` field and getter on the Harness bindings, Workshop's `host_snapshot`, and the tests named after them. The messages "User input is unavailable in this host; continue without it." (`harness-internal/plugins/src/user_input.rs`, sent to models), "..., and this host provides none" (`runvil-internal/engine/src/execute/requirements.rs`), and the test string "the host withdrew the wait" also keep their wording, because each means the application. The capitalization rule covers prose, not message text, so they stay as written, and prose that quotes them quotes them exactly.
 
 Rename (not the Host sense):
 
 - Real filesystem: `HostBackend` (public; update `public-api.txt` and run cicerone in update mode) to `RealBackend`, plus `HostAccess`, `HostRoot`, `identity_to_host`, the `vfs::host` module and files, and the matching test names.
 - Harness role in Engine test support: `RunHost`, `run_with_host`, `run_host`, `test_support/host.rs`, the `fn host(self)` method, `host` locals, and 19 Engine test names such as `a_chat_round_streams_its_deltas_to_the_host`.
-- Lua surface: `inject_host`, `inject_host_with_var`, `install_host_apis`, `host_injected`, `Reserved::HostGlobal`, the `lua/src/host.rs` and `host-store.rs` files, the Lua helper `host_type`, the registry key `promptforge.host.store_phase`, and the Lua test names.
+- Lua surface: `inject_host`, `inject_host_with_var`, `install_host_apis`, `host_injected`, `Reserved::HostGlobal`, the `lua/src/host.rs` and `host-store.rs` files, the Lua helper `host_type`, the registry key `runvil.host.store_phase`, and the Lua test names.
 - Harness runner: `performers-host.rs` and `mod host`.
 - Workshop UI: `LazyPanelHost`, `emptyHost`, `editHost`, DOM `host` parameters, the `host-toolbar` class, the local test helper `harness()` in `ui/test/agent-stt.mjs`, and the `reboot-the-host` action id.
 - Other: `SyntheticHost` in build-llama-cuda, `HOSTED_OFFER` in the Foundry provider, and the Engine module named `engine` in `execute.rs:15`.

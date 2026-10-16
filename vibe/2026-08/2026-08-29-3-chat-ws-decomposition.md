@@ -3,7 +3,7 @@ name: Workshop session decomposition
 overview: Correct the Workshop server house rules, then replace the obsolete chat_ws module with a session module that owns permanent WebSocket transport and multiplexing while isolating direct gateway chat as an explicitly temporary adapter.
 todos:
   - id: house-rules
-    content: "Step 1: reconcile Workshop server AGENTS.md with embedding, delivery, module ownership, ratchet, and future PromptForge chat boundaries"
+    content: "Step 1: reconcile Workshop server AGENTS.md with embedding, delivery, module ownership, ratchet, and future Runvil chat boundaries"
     status: completed
   - id: session-module
     content: "Step 2: replace chat_ws.rs with session/, isolate legacy gateway chat, move tests mechanically, and record all new ceilings"
@@ -17,12 +17,12 @@ isProject: false
 
 Both steps ran on 2026-08-29 and are complete. Step 1 landed as `eb8341a` (house rules). Step 2 landed as `add98be` (session module split, amended once for a message-only fix). The final full-workspace Verify was stopped before completing because a concurrent run from a separate chat advanced HEAD and dirtied the tree; `cargo build --workspace` had passed, and Step 2's focused verification (44 integration tests, 229 lib tests, clippy, doc) was green twice. Outstanding: rerun the full-workspace Verify once the tree is clean. Open findings: zero. The plan file name (`chat_ws_decomposition_521dd939.plan.md`) is a legacy name; the target module is `session`, not `chat_ws`.
 
-At the latest reconciliation (2026-08-29 13:53), promptforge `HEAD` was `e622185`, `master` matched `origin/master`, and the tree was clean. The CUDA llama provisioning run that previously blocked this plan is complete with all findings closed. Recheck `git status --short` before executing; if another run has dirtied the tree, stop rather than absorb, stash, restore, or commit its work. Record the actual starting `HEAD` in `cabinet/_scratch/vibe-workshop-session/vibe-ledger.md`.
+At the latest reconciliation (2026-08-29 13:53), runvil `HEAD` was `e622185`, `master` matched `origin/master`, and the tree was clean. The CUDA llama provisioning run that previously blocked this plan is complete with all findings closed. Recheck `git status --short` before executing; if another run has dirtied the tree, stop rather than absorb, stash, restore, or commit its work. Record the actual starting `HEAD` in `cabinet/_scratch/vibe-workshop-session/vibe-ledger.md`.
 
 Both todos are completed; do not resume execution. Step 1 was a documentation-only house-rule commit. Step 2 was the module split; its final full-workspace Verify remains the only outstanding item. Run scratch lives at `C:\Users\Vinnie\cursor\cabinet\_scratch\vibe-workshop-session\`; main appends `vibe-ledger.md` and review writes `vibe-review.md` there. Every coder/reviewer dispatch receives these governing files by path:
 
-- `promptforge/AGENTS.md`
-- `promptforge/crates/promptforge-workshop-server/AGENTS.md`
+- `runvil/AGENTS.md`
+- `runvil/crates/runvil-workshop-server/AGENTS.md`
 
 The current module facts below were measured at `e622185`: `chat_ws.rs` is 2,965 lines / 121,585 bytes, with ceiling 2,963 plus the ratchet's fixed 30-line slack.
 
@@ -34,7 +34,7 @@ The server hardening survey's immediate fixes are also complete: cross-site and 
 
 The current socket already multiplexes concurrent chats, cancellation, status and catalog pushes, workbench snapshots, model selection, and profile switching. The split preserves those contracts exactly.
 
-Since the first draft, the crates were renamed from `promptforge-ws-*` to `promptforge-workshop-*`; all paths and commands below use the new names. `ChatRequest` is now the shared wire type through `promptforge-gateway-protocol`, and the Workshop uses the extracted `promptforge-gateway-client`; preserve those boundaries rather than recreating Workshop-owned copies.
+Since the first draft, the crates were renamed from `runvil-ws-*` to `runvil-workshop-*`; all paths and commands below use the new names. `ChatRequest` is now the shared wire type through `runvil-gateway-protocol`, and the Workshop uses the extracted `runvil-gateway-client`; preserve those boundaries rather than recreating Workshop-owned copies.
 
 ## Rulebooks
 
@@ -46,7 +46,7 @@ This run applies, as binding rules:
 - [html-css-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\html-css-rulebook.md) governs any markup or CSS touched. No HTML/CSS change is planned; touching it is a plan deviation and must preserve semantic controls, accessibility, focus behavior, and the existing visual contract.
 - [prompts-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\prompts-rulebook.md) governs subagent prompts.
 
-The nested AGENTS.md files in promptforge bind their subtrees; the rules manifest from vibe rule 3 carries them into each dispatch. Commit messages follow vibe-rulebook's Message Subagent and `<commit-message>` contract.
+The nested AGENTS.md files in runvil bind their subtrees; the rules manifest from vibe rule 3 carries them into each dispatch. Commit messages follow vibe-rulebook's Message Subagent and `<commit-message>` contract.
 
 The plan contains every implementation-relevant fact extracted from the comparison research. Coders work from this plan and the governing AGENTS.md files; they do not read the external clones or reports.
 
@@ -67,7 +67,7 @@ Step 1 is documentation-only and has no scheduled Verify. Step 2 is the final st
 
 ## Current state
 
-`chat_ws.rs` is 2,965 lines / 121,585 bytes (ceiling recorded in [module-ceilings.toml](c:\Users\Vinnie\cursor\promptforge\crates\promptforge-workshop-server\module-ceilings.toml), enforced by `tests/it/ratchet.rs`). Its name is obsolete: the module began as a chat relay, but now owns the Workshop's persistent WebSocket session, including chat multiplexing, status and catalog pushes, workbench snapshots, model selection, and profile switching. Chat is one protocol concern carried by the session, not the transport itself. Its internal seams, from a fresh read of the module:
+`chat_ws.rs` is 2,965 lines / 121,585 bytes (ceiling recorded in [module-ceilings.toml](c:\Users\Vinnie\cursor\runvil\crates\runvil-workshop-server\module-ceilings.toml), enforced by `tests/it/ratchet.rs`). Its name is obsolete: the module began as a chat relay, but now owns the Workshop's persistent WebSocket session, including chat multiplexing, status and catalog pushes, workbench snapshots, model selection, and profile switching. Chat is one protocol concern carried by the session, not the transport itself. Its internal seams, from a fresh read of the module:
 
 - Session loop and socket ownership: `run_session` (131), `send_frame` (1041), `send_error` (1053)
 - Chat multiplexing: `ActiveChat` (271), `ChatWork` (283), `ChatKey` (297), `Chats` (331), `ChatEvent` (373), `next_event` (390), `advance_chat` (418)
@@ -85,11 +85,11 @@ The module already matches the Rustpad one-task-owns-the-socket shape (single `s
 
 The replacement module is `session`, not `chat_ws`. The public route remains `/ws`; the Rust module name describes the server-side responsibility rather than the current upstream used for one message type. Temporary direct-gateway chat code lives in `session/gateway_chat.rs` and its children.
 
-Today the session's chat concern relays directly through `GatewayClient`; later, chat will run through PromptForge instead. That later routing change is not part of this refactor. Keep the chat execution dependency behind the chat concern's boundary so replacing direct gateway execution does not disturb socket ownership, menu events, status pushes, cancellation, or tape lifecycle.
+Today the session's chat concern relays directly through `GatewayClient`; later, chat will run through Runvil instead. That later routing change is not part of this refactor. Keep the chat execution dependency behind the chat concern's boundary so replacing direct gateway execution does not disturb socket ownership, menu events, status pushes, cancellation, or tape lifecycle.
 
 ## Target shape
 
-The permanent session transport is separated from the temporary direct-gateway chat adapter. No generic relay abstraction is introduced for hypothetical reuse: the long-term harness moves streaming into `promptforge-gateway-client`, policy into the Lua harness, and content delivery into a collecting Observer.
+The permanent session transport is separated from the temporary direct-gateway chat adapter. No generic relay abstraction is introduced for hypothetical reuse: the long-term harness moves streaming into `runvil-gateway-client`, policy into the Lua harness, and content delivery into a collecting Observer.
 
 ```mermaid
 flowchart LR
@@ -111,7 +111,7 @@ flowchart LR
 
 ## Step 1: reconcile the Workshop server house rules
 
-Update `crates/promptforge-workshop-server/AGENTS.md` in one documentation-only commit:
+Update `crates/runvil-workshop-server/AGENTS.md` in one documentation-only commit:
 
 - Zone one returns rich errors to the embedding binary; an embeddable crate never panics for configuration, binding, asset, or initialization failures. Binary entry points may convert returned errors to a failing exit status.
 - Each WebSocket endpoint owns its socket, task, channels, protocol policy, and cleanup. Protocol-neutral helpers may be extracted inside an endpoint when they reduce current code; promote one across endpoints only after a second production consumer exists. Never share hypothetical reuse.
@@ -145,8 +145,8 @@ Step 1 must land first because it defines the ownership and naming constraints S
 
 - Step 1 changes documentation only; review verifies that the six rules are mutually consistent with root AGENTS.md.
 - The existing session WebSocket test suite (currently `chat_ws`'s `mod tests` at line 1062) stays green through Step 2. Move tests mechanically; do not rewrite assertions to make the split pass.
-- `cargo test -p promptforge-workshop-server --test it` proves both behavior and ratchet coverage after Step 2.
-- `cargo build -p promptforge-workshop-server` and `--features cuda` both compile (`cuda` is the compatibility alias for `voice-cuda`).
+- `cargo test -p runvil-workshop-server --test it` proves both behavior and ratchet coverage after Step 2.
+- `cargo build -p runvil-workshop-server` and `--features cuda` both compile (`cuda` is the compatibility alias for `voice-cuda`).
 - Run the final full-workspace Verify after Step 2.
 - Report the final open-findings count before declaring the run complete; zero is the target, and any non-Critical carryover must name its owner or delegated step.
 
@@ -154,13 +154,13 @@ Step 1 must land first because it defines the ownership and naming constraints S
 
 ### Deferred to the agentic-harness plan
 
-These items belong to `C:\Users\Vinnie\.cursor\plans\interactive_webhook_tool_9ab3c21f.plan.md`, which is the planned consumer of the session boundary. That plan still contains pre-rename `promptforge-ws-server` paths and must be reconciled before it runs:
+These items belong to `C:\Users\Vinnie\.cursor\plans\interactive_webhook_tool_9ab3c21f.plan.md`, which is the planned consumer of the session boundary. That plan still contains pre-rename `runvil-ws-server` paths and must be reconciled before it runs:
 
-- Replacing `session/gateway_chat.rs` and its children with a PromptForge Lua harness.
+- Replacing `session/gateway_chat.rs` and its children with a Runvil Lua harness.
 - `user_input` wait-registry frames.
 - Collecting-Observer event forwarding over the existing session.
 - Rust-to-TypeScript protocol generation, because the harness expands the protocol with Observer and user-input frames.
-- Generic streaming and terminal-state machinery, because the harness moves streaming into `promptforge-gateway-client` and policy into Lua.
+- Generic streaming and terminal-state machinery, because the harness moves streaming into `runvil-gateway-client` and policy into Lua.
 
 ### Deferred as independent follow-ups
 
@@ -208,9 +208,9 @@ The creator chat made the structural point explicit (paraphrase): per-diff revie
 
 The first draft (Aug 28, 17:42) kept the `chat_ws/` name. The user then asked: "why is this called chat?" Answer (paraphrase): the name is a fossil from the single-chat era; the module is really the session multiplexor - the one socket carrying everything the UI needs - so the honest move is naming it `session/` during the split.
 
-The user's decisive sentence: "Yes definitely, especially because we are going to go through promptforge to chat, not the gateway directly. but thats for another day."
+The user's decisive sentence: "Yes definitely, especially because we are going to go through runvil to chat, not the gateway directly. but thats for another day."
 
-That sentence produced the plan's central boundary: session transport is permanent, the direct-gateway chat relay is a temporary adapter, and the chat execution dependency stays behind the chat concern's boundary so the later PromptForge routing swap disturbs nothing else. The route stays `/ws` because the Rust module name should state the server-side responsibility, not today's upstream of one message type.
+That sentence produced the plan's central boundary: session transport is permanent, the direct-gateway chat relay is a temporary adapter, and the chat execution dependency stays behind the chat concern's boundary so the later Runvil routing swap disturbs nothing else. The route stays `/ws` because the Rust module name should state the server-side responsibility, not today's upstream of one message type.
 
 ## Discarded alternatives
 
@@ -221,7 +221,7 @@ The Aug 29 review killed most of it on two Critical findings (paraphrase):
 1. The generic shared stream core conflicts with the crate's AGENTS.md. `Chats`, `next_event`, `advance_chat`, and `StreamTape::Drop` already form the state machine; a generic `DoneState` adds a second state layer, and "voice may reuse it later" is speculative reuse, which the rules prohibit (never share hypothetical reuse; shared WebSocket scaffolding must be deleted, not relocated).
 2. The three-state `StreamEnd` taxonomy was incomplete: real termination paths are completed, explicitly canceled, gateway declined, open failed before any exchange, stream failed, client disconnected, and tape settled but the terminal `done` frame failed to send.
 
-The decisive cut came when the user pointed at the long-term harness plan (`interactive_webhook_tool_9ab3c21f`) and asked whether it changed the proposal. It did: nearly every concern the generic core would polish - `ChatWork::Opening`, direct `GatewayClient` opening, `SsePayloadStream` polling, `forward_payload`, `delta_fields`, the gateway-specific `StreamTape` - is scheduled for deletion or radical change once chat executes through the PromptForge Lua harness. The assistant's formulation (paraphrase): investing in a polished generic abstraction around these would create infrastructure specifically for code scheduled for deletion.
+The decisive cut came when the user pointed at the long-term harness plan (`interactive_webhook_tool_9ab3c21f`) and asked whether it changed the proposal. It did: nearly every concern the generic core would polish - `ChatWork::Opening`, direct `GatewayClient` opening, `SsePayloadStream` polling, `forward_payload`, `delta_fields`, the gateway-specific `StreamTape` - is scheduled for deletion or radical change once chat executes through the Runvil Lua harness. The assistant's formulation (paraphrase): investing in a polished generic abstraction around these would create infrastructure specifically for code scheduled for deletion.
 
 Result: trimmed to two commits - house rules, then a pure structural split. Removed: generic stream core, `DoneState`, terminal taxonomy, progress sampling, listener gating, liveness enum, mock framework, error shrink, immediate TS codegen. Codegen moved to the harness plan specifically because that is when the protocol expands (Observer and `user_input` frames), so types move once. The user then had the deferrals grouped by destination: harness-plan items, independent follow-ups, recorded-but-not-scheduled survey ideas.
 

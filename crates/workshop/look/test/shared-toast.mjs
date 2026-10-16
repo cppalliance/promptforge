@@ -70,15 +70,15 @@ const hover = (toast, type) => toast.dispatchEvent(new window.MouseEvent(type, {
   check("the stack is a polite live region", stack.element.getAttribute("aria-live") === "polite");
   check("the stack announces as status", stack.element.getAttribute("role") === "status");
 
-  stack.show("PromptForge 1.2.3 is available", "info");
+  stack.show("Runvil 1.2.3 is available", "info");
   const [toast] = toasts();
   check("show appends one toast per call", toasts().length === 1);
   check("the toast has its kind class", toast?.classList.contains("toast-info") === true);
   check(
     "the toast renders its message in its own element",
-    toast?.querySelector(".toast__message")?.textContent === "PromptForge 1.2.3 is available",
+    toast?.querySelector(".toast__message")?.textContent === "Runvil 1.2.3 is available",
   );
-  check("the toast's text is only its message", toast?.textContent === "PromptForge 1.2.3 is available");
+  check("the toast's text is only its message", toast?.textContent === "Runvil 1.2.3 is available");
   check("the toast has a close button", toast?.querySelector("button.toast__close")?.type === "button");
   check(
     "the close button is named for assistive tech",

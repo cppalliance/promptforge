@@ -36,7 +36,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
   loader: { ".css": "empty" },
 });
-const bundlePath = path.join(os.tmpdir(), "promptforge-drop-position-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-drop-position-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { dropPositionResolver, resolveDropPosition, dockTheme, themeDark } = await import(
   pathToFileURL(bundlePath).href

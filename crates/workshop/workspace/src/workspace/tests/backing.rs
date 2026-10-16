@@ -54,7 +54,7 @@ fn names_in(dir: &Path) -> Vec<String> {
 #[tokio::test]
 async fn grant_then_revoke_on_a_file_backed_workspace_persist_and_reopen_reflects_both() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let kept = tempfile::TempDir::new().expect("tempdir");
     let dropped = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
@@ -137,7 +137,7 @@ async fn grants_on_an_ephemeral_workspace_leave_no_file() {
 #[tokio::test]
 async fn open_replaces_every_prior_grant_with_the_files() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("theirs.pfwork");
+    let file_path = home.path().join("theirs.rvwork");
     let theirs = tempfile::TempDir::new().expect("tempdir");
     let mine = tempfile::TempDir::new().expect("tempdir");
     // Author a file holding one grant, then let go of it.
@@ -166,7 +166,7 @@ async fn open_replaces_every_prior_grant_with_the_files() {
 #[tokio::test]
 async fn a_vanished_root_stays_granted_and_lists_as_missing() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("vanished.pfwork");
+    let file_path = home.path().join("vanished.rvwork");
     let doomed = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     let doomed_root = workspace
@@ -211,7 +211,7 @@ async fn a_vanished_root_stays_granted_and_lists_as_missing() {
 #[tokio::test]
 async fn a_persist_failure_keeps_the_in_memory_grant_and_returns_success() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("closed.pfwork");
+    let file_path = home.path().join("closed.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     workspace
@@ -258,8 +258,8 @@ async fn a_persist_failure_keeps_the_in_memory_grant_and_returns_success() {
 #[tokio::test]
 async fn save_as_copies_the_current_grants_and_the_previous_window_state() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let first_path = home.path().join("first.pfwork");
-    let second_path = home.path().join("second.pfwork");
+    let first_path = home.path().join("first.rvwork");
+    let second_path = home.path().join("second.rvwork");
     let a = tempfile::TempDir::new().expect("tempdir");
     let b = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
@@ -308,7 +308,7 @@ async fn save_as_copies_the_current_grants_and_the_previous_window_state() {
     );
     assert_eq!(
         names_in(home.path()),
-        ["first.pfwork", "second.pfwork"],
+        ["first.rvwork", "second.rvwork"],
         "save as creates exactly one more file and closes the first cleanly"
     );
 }
@@ -316,8 +316,8 @@ async fn save_as_copies_the_current_grants_and_the_previous_window_state() {
 #[tokio::test]
 async fn duplicate_switches_to_the_copy_and_leaves_the_original_independent() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let original_path = home.path().join("original.pfwork");
-    let copy_path = home.path().join("copy.pfwork");
+    let original_path = home.path().join("original.rvwork");
+    let copy_path = home.path().join("copy.rvwork");
     let a = tempfile::TempDir::new().expect("tempdir");
     let b = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
@@ -364,7 +364,7 @@ async fn duplicate_switches_to_the_copy_and_leaves_the_original_independent() {
 #[tokio::test]
 async fn an_ephemeral_duplicate_is_a_save_as() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("from-nothing.pfwork");
+    let path = home.path().join("from-nothing.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     let root = workspace.grant(dir.path()).expect("grant");
@@ -383,8 +383,8 @@ async fn an_ephemeral_duplicate_is_a_save_as() {
 #[tokio::test]
 async fn an_alien_file_is_refused_and_the_workspace_is_unchanged() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
-    let alien_path = home.path().join("alien.pfwork");
+    let file_path = home.path().join("mine.rvwork");
+    let alien_path = home.path().join("alien.rvwork");
     let mine = tempfile::TempDir::new().expect("tempdir");
     {
         let conn = open_database(&alien_path)
@@ -424,7 +424,7 @@ async fn opening_a_missing_path_is_not_found() {
     let workspace = Workspace::new();
 
     let error = workspace
-        .open_file(&home.path().join("nowhere.pfwork"))
+        .open_file(&home.path().join("nowhere.rvwork"))
         .await
         .expect_err("a missing file cannot open");
 
@@ -438,7 +438,7 @@ async fn opening_a_missing_path_is_not_found() {
 #[tokio::test]
 async fn save_as_onto_an_existing_path_is_refused_as_taken() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let taken = home.path().join("taken.pfwork");
+    let taken = home.path().join("taken.rvwork");
     fs::write(&taken, b"already here").expect("placeholder writes");
     let workspace = Workspace::new();
 

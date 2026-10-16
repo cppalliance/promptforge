@@ -1,5 +1,5 @@
 //! Native Realtime capture: streams the 16 kHz mono 16-bit clip that
-//! `PROMPTFORGE_WHISPER_AUDIO` names, or `jfk.wav`, through the mounted
+//! `RUNVIL_WHISPER_AUDIO` names, or `jfk.wav`, through the mounted
 //! `/v1/realtime` route at real-time pace and records every server event it
 //! receives, for measuring what a dictation shows and when.
 //!
@@ -9,7 +9,7 @@
 //! is appended in 100 ms chunks on a wall-clock schedule, and the commit
 //! follows the last chunk.
 //!
-//! With `PROMPTFORGE_REALTIME_CAPTURE` naming a JSON file outside every
+//! With `RUNVIL_REALTIME_CAPTURE` naming a JSON file outside every
 //! `fixtures` directory in the repository, the capture writes there each
 //! event with its receive time in milliseconds since the first append, the
 //! commit's send time, and the completed transcript. The test checks only
@@ -28,7 +28,7 @@ use tokio_tungstenite::tungstenite::Message;
 use super::native::{native_clip_24khz, native_speech_service_with};
 use super::{Socket, audio_samples, connect, server};
 
-const CAPTURE_VARIABLE: &str = "PROMPTFORGE_REALTIME_CAPTURE";
+const CAPTURE_VARIABLE: &str = "RUNVIL_REALTIME_CAPTURE";
 const HYPOTHESIS_INCLUDE: &str = "item.input_audio_transcription.hypothesis";
 const RANGES_INCLUDE: &str = "item.input_audio_transcription.hypothesis.ranges";
 const HYPOTHESIS: &str = "conversation.item.input_audio_transcription.hypothesis";

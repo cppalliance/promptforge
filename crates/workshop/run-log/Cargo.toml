@@ -18,7 +18,7 @@ turso.workspace = true
 
 [dev-dependencies]
 # The fidelity suite round-trips the Engine's events through the log.
-promptforge.workspace = true
+runvil.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

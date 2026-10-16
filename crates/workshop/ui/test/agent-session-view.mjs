@@ -110,7 +110,7 @@ Object.defineProperty(window.Element.prototype, "scrollHeight", {
   },
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-session-view-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-session-view-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   lifecycle,

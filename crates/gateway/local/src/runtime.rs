@@ -299,7 +299,7 @@ impl LocalRuntime {
     ///
     /// Dropping the runtime does not guarantee child termination, because the
     /// routing table holds `Arc<dyn Upstream>` clones of these same models, so
-    /// the runtime is not the sole owner (PFGL-MOD-001). This drives an explicit
+    /// the runtime is not the sole owner (RVGL-MOD-001). This drives an explicit
     /// teardown through the [`Upstream`](gateway_protocol::upstream::Upstream) seam so a
     /// profile switch frees the old children's VRAM deterministically before the
     /// replacement profile's children start. Every child is torn down even if an
@@ -322,7 +322,7 @@ impl LocalRuntime {
 }
 
 /// Resolves the operator cache root from the configured `[local].cache_dir`,
-/// defaulting to `~/.promptforge` (ART-009).
+/// defaulting to `~/.runvil` (ART-009).
 ///
 /// # Errors
 /// Returns [`LocalError::MissingHome`] when no cache dir is configured and the
@@ -330,9 +330,9 @@ impl LocalRuntime {
 pub fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
     match configured {
         Some(path) if !path.is_empty() => artifacts::expand_tilde(path),
-        // An unset cache_dir defaults to `~/.promptforge`; a missing home is a
+        // An unset cache_dir defaults to `~/.runvil`; a missing home is a
         // typed error rather than a silent working-directory fallback (ART-009).
-        _ => artifacts::default_promptforge_root_checked(),
+        _ => artifacts::default_runvil_root_checked(),
     }
 }
 

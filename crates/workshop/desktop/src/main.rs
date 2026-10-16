@@ -1,10 +1,10 @@
-//! The `promptforge-workshop` binary: the PromptForge Workshop desktop app.
+//! The `runvil-workshop` binary: the Runvil Workshop desktop app.
 //!
 //! Runs the workshop server in-process on a loopback listener with an
 //! OS-assigned port and opens a Tauri window pointed at the in-process
 //! listener's URL. Boot first connects the gateway: attach to a running
 //! gateway through its gateway discovery file, or launch the sibling
-//! `promptforge-gateway` detached when none is running - a Workshop-only
+//! `runvil-gateway` detached when none is running - a Workshop-only
 //! install falls back to the explicit `workshop.toml` `[gateway]` config,
 //! and with neither boot fails loud naming both remedies. The in-process
 //! server then resolves the same endpoint itself. Closing the window
@@ -98,12 +98,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// `promptforge-workshop --version`: print the version and exit, without
+/// `runvil-workshop --version`: print the version and exit, without
 /// booting the server or opening a window. The release workflows smoke-test
 /// the installed package with it. The release build is GUI-subsystem on
 /// Windows, but a piped or inherited stdout still receives the line.
 fn print_version() -> ExitCode {
-    println!("promptforge-workshop {}", env!("CARGO_PKG_VERSION"));
+    println!("runvil-workshop {}", env!("CARGO_PKG_VERSION"));
     ExitCode::SUCCESS
 }
 
@@ -141,7 +141,7 @@ fn run() -> anyhow::Result<()> {
         .on_menu_event(menu::handle_event)
         .setup(boot_and_open);
     // Off Windows, OS file drops arrive as Tauri's own drag-drop event and
-    // are dispatched into the same promptforge:file-drop grant flow. On
+    // are dispatched into the same runvil:file-drop grant flow. On
     // Windows the drag-drop handler is disabled (see open_window) and drops
     // arrive over the WebView2 web-message bridge instead.
     #[cfg(not(target_os = "windows"))]
@@ -235,7 +235,7 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             )]
             app.dialog()
                 .message(format!("{error:?}"))
-                .title("PromptForge could not start")
+                .title("Runvil could not start")
                 .kind(MessageDialogKind::Error)
                 .show(|_| std::process::exit(1));
             Ok(())
@@ -244,7 +244,7 @@ fn boot_and_open(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
 }
 
 /// Connects the gateway (attach to a live gateway discovery file, or
-/// launch the sibling `promptforge-gateway` detached), then spawns the
+/// launch the sibling `runvil-gateway` detached), then spawns the
 /// in-process workshop server - which resolves the same endpoint itself,
 /// gateway discovery file first, explicit `workshop.toml` config
 /// second - and waits out its
@@ -315,7 +315,7 @@ fn open_window(app: &mut tauri::App, url: &url::Url) -> Result<(), Box<dyn std::
     let server_origin = url.origin();
     let opener = app.handle().clone();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
-        .title("PromptForge")
+        .title("Runvil")
         .inner_size(1024.0, 768.0)
         .visible(false)
         .on_navigation(move |target| {
@@ -397,7 +397,7 @@ mod tests {
         assert!(!update_supported("linux", Some(OsStr::new(""))));
         assert!(update_supported(
             "linux",
-            Some(OsStr::new("/tmp/PromptForge.AppImage"))
+            Some(OsStr::new("/tmp/Runvil.AppImage"))
         ));
         assert!(update_supported("windows", None));
         assert!(update_supported("macos", None));

@@ -17,7 +17,7 @@
 //! The Host provides two Host-wide services beside the Plugin. Its
 //! [`SearchProvider`] goes under the key [`SEARCH_PROVIDER`], and the
 //! tokio runtime handle that every fetch is spawned onto goes under the
-//! Plugin contract's [`promptforge_plugin::TOKIO_RUNTIME`] service.
+//! Plugin contract's [`runvil_plugin::TOKIO_RUNTIME`] service.
 //! Install reads both; when either is missing, the Plugin is installed as
 //! unavailable, no run receives its tools, and a prompt that declares it
 //! is refused naming the missing service.
@@ -45,7 +45,7 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//! - May depend on: `runvil-plugin`, `shared-*` crates, and outside
 //!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
 //!   allow-list.
 //! - Every URL selected by the model or a tool, and every resolved

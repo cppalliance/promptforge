@@ -61,8 +61,8 @@ fn scan(label: &str, docs: &str, names: &[String]) -> Vec<Finding> {
 }
 
 /// Whether `text` holds `name` as a whole crate name: not inside a longer
-/// identifier or hyphenated name (`promptforge-lua` is not in
-/// `promptforge-luau`).
+/// identifier or hyphenated name (`runvil-lua` is not in
+/// `runvil-luau`).
 fn contains_name(text: &str, name: &str) -> bool {
     let part_of_name = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
     text.match_indices(name).any(|(start, _)| {

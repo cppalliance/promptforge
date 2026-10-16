@@ -41,16 +41,13 @@ fn capture_reader_reports_clean_eof_as_ok() {
 
 #[test]
 fn readiness_lists_model_matches_alias_and_tolerates_junk() {
-    let body = br#"{"object":"list","data":[{"id":"promptforge-local-abc"}]}"#;
-    assert!(readiness_lists_model(body, "promptforge-local-abc"));
+    let body = br#"{"object":"list","data":[{"id":"runvil-local-abc"}]}"#;
+    assert!(readiness_lists_model(body, "runvil-local-abc"));
     assert!(!readiness_lists_model(body, "some-other-alias"));
     // Missing `data`, empty body, and truncated JSON all read as not-ready.
     assert!(!readiness_lists_model(br#"{"object":"list"}"#, "x"));
     assert!(!readiness_lists_model(b"", "x"));
-    assert!(!readiness_lists_model(
-        br#"{"data":[{"id":"promptforge"#,
-        "x"
-    ));
+    assert!(!readiness_lists_model(br#"{"data":[{"id":"runvil"#, "x"));
 }
 
 #[test]

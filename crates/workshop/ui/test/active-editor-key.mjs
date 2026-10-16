@@ -131,7 +131,7 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-active-editor-key-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-active-editor-key-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,

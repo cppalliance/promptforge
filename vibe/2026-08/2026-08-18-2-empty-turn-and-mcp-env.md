@@ -1,6 +1,6 @@
 ---
 name: Empty-turn policy and MCP env loading
-overview: "Two fixes from the papergate debugging session: (1) accept an empty final tool-loop turn as a clean exit when finish_reason is \"stop\" and at least one tool call succeeded, and (2) make promptforge-mcp-server load its name-matched .env file before interpolation, matching the gateway."
+overview: "Two fixes from the papergate debugging session: (1) accept an empty final tool-loop turn as a clean exit when finish_reason is \"stop\" and at least one tool call succeeded, and (2) make runvil-mcp-server load its name-matched .env file before interpolation, matching the gateway."
 todos:
   - id: core-error-field
     content: Add finish_reason to Error::EmptyModelReply and thread it through normalize.rs, the gemma dialect, and the CompletionError conversion
@@ -9,7 +9,7 @@ todos:
     content: "tool_loop.rs: track successful tool calls, accept empty stop-turn as clean exit with empty reply"
     status: completed
   - id: core-tests
-    content: Update and add promptforge-core tests for the new exit policy
+    content: Update and add runvil-core tests for the new exit policy
     status: completed
   - id: core-docs
     content: Update design-core.md and guide docs for the refined invariant (folded into the code commits, not a standalone commit)
@@ -41,7 +41,7 @@ User decisions: empty-turn acceptance is **default behavior** (no opt-in flag); 
 
 Policy: in the prose tool loop, a turn with no tool calls and empty text is a clean loop exit (reply = `""`) when `finish_reason == "stop"` AND at least one tool call was successfully dispatched earlier in the loop. All other empty turns (no prior tool calls, or `finish_reason` missing/`"length"`/other) remain `EmptyModelReply` errors. Tool handler failures already abort the loop, so any completed dispatch counts as a success.
 
-### Changes in `crates/promptforge-core`
+### Changes in `crates/runvil-core`
 
 1. **`src/error.rs`** - add `finish_reason: Option<String>` field to `Error::EmptyModelReply` (currently only `detail: &'static str`, ~line 170; the variant is `#[non_exhaustive]`, so this is not breaking). Update constructor usages.
 
@@ -70,14 +70,14 @@ Policy: in the prose tool loop, a turn with no tool calls and empty text is a cl
 
 ### Docs
 
-- `crates/promptforge-core/design-core.md` - revise item 25 (line 84), step 6 (line 111), and the observation paragraph (line 122) to state the stop-exit exception.
+- `crates/runvil-core/design-core.md` - revise item 25 (line 84), step 6 (line 111), and the observation paragraph (line 122) to state the stop-exit exception.
 - `guide/src/prompt-files.md` / `guide/src/lua.md` - document that a tool loop may end silently and `reply` is then `""`.
 
 ## Part 2: MCP server loads name-matched .env file
 
-Mirror the gateway (`crates/promptforge-gateway/src/profile.rs:119-162`: `config_path.with_extension("env")`, missing file silently skipped) but **without** dotenvy's process-env mutation - `design-mcp-server.md:70-72` forbids `unsafe`, and `std::env::set_var` is unsafe under edition 2024. Instead, parse the env file into an in-memory map and thread it into interpolation. Precedence matches gateway behavior: process environment wins, env file supplies defaults (gateway gets this from dotenvy's no-override semantics).
+Mirror the gateway (`crates/runvil-gateway/src/profile.rs:119-162`: `config_path.with_extension("env")`, missing file silently skipped) but **without** dotenvy's process-env mutation - `design-mcp-server.md:70-72` forbids `unsafe`, and `std::env::set_var` is unsafe under edition 2024. Instead, parse the env file into an in-memory map and thread it into interpolation. Precedence matches gateway behavior: process environment wins, env file supplies defaults (gateway gets this from dotenvy's no-override semantics).
 
-### Changes in `crates/promptforge-mcp-server`
+### Changes in `crates/runvil-mcp-server`
 
 1. **`src/config.rs`**:
    - `Config::load(path)` (lines 339-397): after reading the TOML, check `path.with_extension("env")`; if it exists, parse it into a `BTreeMap<String, String>` (reuse `dotenvy::from_path_iter` - iterator-only, no `set_var`, no unsafe; add `dotenvy.workspace = true` to the crate's Cargo.toml). A missing env file is silently skipped, and a malformed one is ignored with a `tracing::warn` - parity with the gateway's `let _ = dotenvy::from_path(...)`, which never fails the load over the env file.
@@ -98,21 +98,21 @@ Mirror the gateway (`crates/promptforge-gateway/src/profile.rs:119-162`: `config
 
 ### Docs
 
-- `crates/promptforge-mcp-server/design-mcp-server.md` - add a section documenting name-matched env-file loading and why it uses an in-memory map (no unsafe env mutation).
+- `crates/runvil-mcp-server/design-mcp-server.md` - add a section documenting name-matched env-file loading and why it uses an in-memory map (no unsafe env mutation).
 - `guide/src/mcp-server.md:25` already claims one name-matched `.env` file - verify wording matches implemented precedence.
-- `promptforge.md` quickref - no change needed (already describes the intended behavior); optionally note the manual `set -a; . file.env` workaround is gone.
+- `runvil.md` quickref - no change needed (already describes the intended behavior); optionally note the manual `set -a; . file.env` workaround is gone.
 
 ## Verification
 
-1. `cargo test -p promptforge-core -p promptforge-mcp-server`
-2. End-to-end: revert `local/prompts/papergate.md` line 44 to "Do not output any text.", restart both servers (no env sourcing), run `promptforge papergate` on the P4222R1 inbox file - should succeed and produce the section list.
+1. `cargo test -p runvil-core -p runvil-mcp-server`
+2. End-to-end: revert `local/prompts/papergate.md` line 44 to "Do not output any text.", restart both servers (no env sourcing), run `runvil papergate` on the P4222R1 inbox file - should succeed and produce the section list.
 3. Kill servers, unset any exported vars, start MCP server bare - should come up resolving keys from `local/mcp-service.env`.
 
 ## Execution rules
 
 This plan runs under the vibe-rulebook (c:\Users\Vinnie\src\cursor\tools-public\rulebooks\vibe-rulebook.md) and the rust-rulebook (c:\Users\Vinnie\src\cursor\tools-public\rulebooks\rust-rulebook.md). Dispatch subagents with these paths so they can load the rules themselves.
 
-- Work the todos as testable commits. Part 1 (`promptforge-core`) and Part 2 (`promptforge-mcp-server`) touch disjoint crates and may run as two parallel workstreams; within each part, keep step order. Each step is one commit carrying its code, its test, and its documentation. Per step: dispatch the coder subagent, commit, dispatch the review-and-fix subagent against the diff (applying `<code-review>` below, overwriting `vibe-review.md`), amend if review dirtied the tree. Run Verify (build + tests) on every 3rd step, at the end of each crate's work, and on the final step.
+- Work the todos as testable commits. Part 1 (`runvil-core`) and Part 2 (`runvil-mcp-server`) touch disjoint crates and may run as two parallel workstreams; within each part, keep step order. Each step is one commit carrying its code, its test, and its documentation. Per step: dispatch the coder subagent, commit, dispatch the review-and-fix subagent against the diff (applying `<code-review>` below, overwriting `vibe-review.md`), amend if review dirtied the tree. Run Verify (build + tests) on every 3rd step, at the end of each crate's work, and on the final step.
 - Do all search, read, edit, review, and test work in subagents; keep this session's context clean. Pass results through scratch files.
 - Rust conventions per the rust-rulebook: `Result` for expected failures, `#[non_exhaustive]` on public error variants carrying data, doc every public item with `# Errors` where it applies, test in the same change as the code, and `cargo fmt --all --check` plus `cargo clippy --all-targets --all-features -- -D warnings` before every commit.
 - Decision record: where an implementation step contradicts, extends, or resolves a decision this plan records, that step revises the plan in the same commit, naming what forced the change.

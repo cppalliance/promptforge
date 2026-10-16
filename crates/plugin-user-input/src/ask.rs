@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use promptforge_plugin::{
+use runvil_plugin::{
     HostServices, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
     ToolErrorKind, ToolId, ToolOutput,
 };

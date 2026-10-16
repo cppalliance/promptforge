@@ -96,7 +96,7 @@ fn a_dead_pid_is_stale_and_cleaned() {
 #[test]
 fn an_alive_pid_with_a_foreign_image_is_stale() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    // The test binary is never named promptforge-gateway, so the real
+    // The test binary is never named runvil-gateway, so the real
     // image name must reject the test process's own pid.
     live_file(1, "key").write_to(dir.path()).expect("write");
 

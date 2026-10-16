@@ -37,7 +37,7 @@ Do not introduce a disk-backed `FileStore` type. Leave the Lua global `store`, l
 
 Guidance: [tools-public/rulebooks/rust-rulebook.md](tools-public/rulebooks/rust-rulebook.md).
 
-### Rename order in [store.rs](promptforge/crates/promptforge-core/src/store.rs)
+### Rename order in [store.rs](runvil/crates/runvil-core/src/store.rs)
 
 1. Handle `Store` -> `StoreRef`
 2. Trait `FileStore` -> `Store`
@@ -47,9 +47,9 @@ Guidance: [tools-public/rulebooks/rust-rulebook.md](tools-public/rulebooks/rust-
 
 Replace handle type uses with `StoreRef` in production and test code:
 
-- [store.rs](promptforge/crates/promptforge-core/src/store.rs) unit tests and doctests (`Store::memory` -> `StoreRef::memory`, `MemVfs` -> `MemStore`, trait name in examples)
-- [lua.rs](promptforge/crates/promptforge-core/src/lua.rs) including `impl Store for FailingStore` and every `Store::memory()` in tests/doctests
-- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs) + [execute/tests.rs](promptforge/crates/promptforge-core/src/execute/tests.rs)
+- [store.rs](runvil/crates/runvil-core/src/store.rs) unit tests and doctests (`Store::memory` -> `StoreRef::memory`, `MemVfs` -> `MemStore`, trait name in examples)
+- [lua.rs](runvil/crates/runvil-core/src/lua.rs) including `impl Store for FailingStore` and every `Store::memory()` in tests/doctests
+- [execute.rs](runvil/crates/runvil-core/src/execute.rs) + [execute/tests.rs](runvil/crates/runvil-core/src/execute/tests.rs)
 - core-tests: dump.rs, dev.rs, suite.rs, scenarios.rs
 - cli main.rs, mcp runner.rs + progress.rs tests
 
@@ -63,7 +63,7 @@ Skip prompt titles like "Store Fall-through".
 
 ### Verify commit 1
 
-`cargo fmt --all`, `clippy -D warnings`, `cargo test -p promptforge-core` and compile/test any other packages that import the renamed types. One rename-only commit.
+`cargo fmt --all`, `clippy -D warnings`, `cargo test -p runvil-core` and compile/test any other packages that import the renamed types. One rename-only commit.
 
 ---
 
@@ -71,8 +71,8 @@ Skip prompt titles like "Store Fall-through".
 
 ### Current behavior
 
-- Prose `{{ sys.bogus }}` already errors in [subst.rs](promptforge/crates/promptforge-core/src/subst.rs) (`missing {{ path }}`).
-- Lua `sys` is injected as a plain table in [`inject_host`](promptforge/crates/promptforge-core/src/lua.rs); missing keys return `nil`.
+- Prose `{{ sys.bogus }}` already errors in [subst.rs](runvil/crates/runvil-core/src/subst.rs) (`missing {{ path }}`).
+- Lua `sys` is injected as a plain table in [`inject_host`](runvil/crates/runvil-core/src/lua.rs); missing keys return `nil`.
 
 ### Change
 

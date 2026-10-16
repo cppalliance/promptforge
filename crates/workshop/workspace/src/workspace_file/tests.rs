@@ -31,7 +31,7 @@ fn the_database_variant_reaches_the_database_error_through_the_shared_wrapper() 
 #[tokio::test]
 async fn turso_opens_a_tempdir_database_and_round_trips_user_version() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("spike.pfwork");
+    let path = dir.path().join("spike.rvwork");
 
     let conn = open_database(&path)
         .await
@@ -67,7 +67,7 @@ async fn turso_opens_a_tempdir_database_and_round_trips_user_version() {
 #[tokio::test]
 async fn open_database_refuses_a_path_whose_parent_is_missing() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("missing").join("spike.pfwork");
+    let path = dir.path().join("missing").join("spike.rvwork");
 
     let error = open_database(&path)
         .await
@@ -129,7 +129,7 @@ async fn seed_schema_with_meta(path: &Path, meta: &[(&str, &str)]) {
 #[tokio::test]
 async fn create_then_open_round_trips_name_grants_and_window_state() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("round-trip.pfwork");
+    let path = dir.path().join("round-trip.rvwork");
     let expected = sample_contents();
 
     let created = WorkspaceFile::create(&path, &expected)
@@ -165,7 +165,7 @@ async fn create_then_open_round_trips_name_grants_and_window_state() {
 #[tokio::test]
 async fn name_defaults_to_the_file_stem_when_meta_name_is_absent() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("Quarterly Report.pfwork");
+    let path = dir.path().join("Quarterly Report.rvwork");
     seed_schema_with_meta(
         &path,
         &[
@@ -189,7 +189,7 @@ async fn name_defaults_to_the_file_stem_when_meta_name_is_absent() {
 #[tokio::test]
 async fn a_database_without_a_meta_table_is_refused_and_left_byte_identical() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("foreign.pfwork");
+    let path = dir.path().join("foreign.rvwork");
     {
         let conn = open_database(&path).await.expect("foreign database opens");
         conn.execute_batch("CREATE TABLE notes (body TEXT NOT NULL);")
@@ -213,7 +213,7 @@ async fn a_database_without_a_meta_table_is_refused_and_left_byte_identical() {
 #[tokio::test]
 async fn a_random_bytes_file_is_refused() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("noise.pfwork");
+    let path = dir.path().join("noise.rvwork");
     // A deterministic byte soup that is neither empty nor a SQLite header.
     let noise: Vec<u8> = (0..4096u32)
         .map(|i| u8::try_from((i.wrapping_mul(2_654_435_761) >> 13) & 0xff).unwrap_or(0))
@@ -238,7 +238,7 @@ async fn a_random_bytes_file_is_refused() {
 #[tokio::test]
 async fn meta_version_two_is_refused_as_unsupported_version() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("future.pfwork");
+    let path = dir.path().join("future.rvwork");
     seed_schema_with_meta(&path, &[(META_FORMAT, FORMAT_NAME), (META_VERSION, "2")]).await;
 
     let error = WorkspaceFile::open(&path)
@@ -258,7 +258,7 @@ async fn meta_version_two_is_refused_as_unsupported_version() {
 #[tokio::test]
 async fn create_leaves_only_the_file_in_the_directory() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("solo.pfwork");
+    let path = dir.path().join("solo.rvwork");
 
     let created = WorkspaceFile::create(&path, &sample_contents())
         .await
@@ -277,13 +277,13 @@ async fn create_leaves_only_the_file_in_the_directory() {
         );
         names.push(entry.file_name().to_string_lossy().into_owned());
     }
-    assert_eq!(names, vec!["solo.pfwork".to_string()]);
+    assert_eq!(names, vec!["solo.rvwork".to_string()]);
 }
 
 #[tokio::test]
 async fn a_failed_create_removes_the_half_written_file_so_a_retry_succeeds() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("retry.pfwork");
+    let path = dir.path().join("retry.rvwork");
     // Two grants under one canonical path collide on the grants primary
     // key, so the write fails after the file and schema already exist.
     let mut colliding = sample_contents();
@@ -315,7 +315,7 @@ async fn a_failed_create_removes_the_half_written_file_so_a_retry_succeeds() {
 #[tokio::test]
 async fn create_refuses_an_existing_path() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("taken.pfwork");
+    let path = dir.path().join("taken.rvwork");
     fs::write(&path, b"already here").expect("placeholder writes");
 
     let error = WorkspaceFile::create(&path, &sample_contents())

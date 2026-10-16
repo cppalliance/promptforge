@@ -1,6 +1,6 @@
 //! Pinned native runtimes and GGUF cache for gateway-owned local inference.
 //!
-//! Downloads land under the operator cache (`~/.promptforge` by default). The
+//! Downloads land under the operator cache (`~/.runvil` by default). The
 //! `llama-server` build is pinned to b10082,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
 //! Speech-to-text uses a separately pinned whisper.cpp shared-library bundle.
@@ -55,7 +55,7 @@ pub use digest::parse_expected_digest;
 pub use download::{DownloadProgress, PercentText};
 pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};
 
-const INSTALL_MARKER: &str = ".promptforge-install";
+const INSTALL_MARKER: &str = ".runvil-install";
 /// Connect timeout for artifact downloads (bounds a stalled connect).
 const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Whole-request timeout for an artifact download (ART-003).
@@ -111,7 +111,7 @@ fn whisper_install_asset<'a>(
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ServerSelection<'a> {
     /// `llama_server_path`: an explicit executable path that wins over the
-    /// `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed
+    /// `RUNVIL_LLAMA_SERVER` environment variable and the managed
     /// download.
     pub(crate) server_path: Option<&'a str>,
     /// `llama_backend`: which build to download on Windows x86-64.
@@ -403,9 +403,9 @@ fn home_or_missing(var: &'static str, value: Option<std::ffi::OsString>) -> Resu
     }
 }
 
-/// Default artifact root (`~/.promptforge`), erroring when home is unset (ART-009).
-pub(crate) fn default_promptforge_root_checked() -> Result<PathBuf> {
-    Ok(default_home_checked()?.join(".promptforge"))
+/// Default artifact root (`~/.runvil`), erroring when home is unset (ART-009).
+pub(crate) fn default_runvil_root_checked() -> Result<PathBuf> {
+    Ok(default_home_checked()?.join(".runvil"))
 }
 
 #[cfg(test)]

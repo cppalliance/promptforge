@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use futures_util::task::AtomicWaker;
-use promptforge::cancel::CancelHandle;
+use runvil::cancel::CancelHandle;
 
 /// A handle that drops a run's in-flight round or cancels the run, from
 /// outside the future that drives it.

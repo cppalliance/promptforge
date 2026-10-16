@@ -9,7 +9,7 @@
 //! - Tier: feature; may depend on: `workshop-protocol`,
 //!   `workshop-registry`, `workshop-support`. Never on
 //!   `workshop-workspace`, `workshop-server`, or any `gateway-*` or
-//!   `promptforge-*` crate. `cargo test -p build-xtask` enforces the product
+//!   `runvil-*` crate. `cargo test -p build-xtask` enforces the product
 //!   and container boundaries.
 //! - The SPA owns every value's schema.
 //! - One writer: every put updates the in-memory map under one mutex and

@@ -1,0 +1,449 @@
+//! The crate's internal error type.
+//!
+//! [`Error`] is a `pub(crate)` internal error type, never part of the public API.
+//! Every public boundary returns its own typed error ([`crate::RunError`],
+//! [`ParseError`](runvil_parser::ParseError), [`CompletionError`](runvil_model_client::model::CompletionError),
+//! [`runvil_types::tools::ToolError`]); those wrappers
+//! classify this internal type and keep its cause. See the module wrappers for
+//! the `From` bridges that let internal `?` keep flowing through the error type.
+//!
+//! A variant that keeps an originating error renders that error's text in
+//! its own `Display` and holds the error as a plain `cause` field behind
+//! [`Error::cause`], never as a `#[source]`, so a printer that walks the
+//! source chain shows the cause's text once.
+
+use runvil_types::ids::TaskId;
+
+mod convert;
+#[cfg(test)]
+mod tests;
+mod value;
+
+/// A type-erased owned error cause used by the internal error type.
+type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+
+/// Renders task ids as a comma-separated list: the [`Error::TasksLive`]
+/// message and its `tasks` field.
+fn join_task_ids(tasks: &[TaskId]) -> String {
+    tasks
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The text an optional cause appends to a message: `: ` and the cause's
+/// own text, or nothing when there is no cause.
+fn cause_suffix(cause: Option<&BoxedSource>) -> String {
+    cause.map(|cause| format!(": {cause}")).unwrap_or_default()
+}
+
+/// The author-facing call whose nesting passed the call-depth cap, which
+/// [`Error::CallDepthExceeded`] is named after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DepthVia {
+    /// A `call`, or a `tasks.spawn`, which shares `call`'s cap.
+    Call,
+    /// One arm of a `tasks.fanout`.
+    Fanout,
+}
+
+impl std::fmt::Display for DepthVia {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            DepthVia::Call => "call",
+            DepthVia::Fanout => "tasks.fanout",
+        })
+    }
+}
+
+/// The crate's internal error type, spanning parsing, model, and execution
+/// failures.
+///
+/// This type is `pub(crate)` and never appears in the public API; the public
+/// boundary errors wrap and classify it. Marked `#[non_exhaustive]` so future
+/// variants are not a breaking change. The model variant holds the broker's
+/// closed error whole, so no HTTP client's error type leaks through the
+/// wrappers' `source()`.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub(crate) enum Error {
+    /// The prompt frontmatter was not valid YAML, keeping the parser cause.
+    ///
+    /// The originating YAML decode failure (a `serde_yaml_ng::Error`) stays
+    /// as the cause beside the location surfaced from it, rather than being
+    /// flattened away; `message` already holds its text.
+    #[error("invalid frontmatter: {message}")]
+    #[non_exhaustive]
+    ParseFrontmatter {
+        /// The human-readable diagnostic (no raw source dump).
+        message: String,
+        /// The originating YAML parse failure, whose text `message` holds.
+        cause: BoxedSource,
+        /// The 1-based file line of the YAML failure, surfaced from the
+        /// retained cause's location when it has one.
+        line: Option<u32>,
+        /// The 1-based file column of the YAML failure, when known.
+        column: Option<u32>,
+    },
+
+    /// A structurally-classified parse failure with a stable kind and an
+    /// optional source byte span, so [`ParseError`](runvil_parser::ParseError) can expose the
+    /// classification and location from stored fields instead of inferring them
+    /// from message text.
+    #[error("{message}")]
+    #[non_exhaustive]
+    ParseStructured {
+        /// The stable classification of this parse failure.
+        kind: crate::parser::ParseErrorKind,
+        /// The byte span of the offending region, when known, relative to the
+        /// document body after the frontmatter and a leading BOM, with CRLF
+        /// normalized to LF.
+        span: Option<(usize, usize)>,
+        /// The human-readable diagnostic.
+        message: String,
+        /// The prompt's frontmatter name, when the failure postdates the
+        /// frontmatter (a frontmatter failure predates the name).
+        name: Option<String>,
+        /// The 1-based file line of the span's start, when a span is known.
+        line: Option<u32>,
+        /// The 1-based byte column of the span's start, when a span is known.
+        column: Option<u32>,
+    },
+
+    /// A model round or a catalog fetch failed, as the broker that performed
+    /// it reported.
+    ///
+    /// Holds the broker's [`CompletionError`](runvil_model_client::model::CompletionError)
+    /// whole, so the closed kind, the fixed message, the opt-in detail, and
+    /// the cause chain survive the public wrappers. The Engine branches on
+    /// its kind only: a context overflow takes the provider overflow path
+    /// and an empty reply takes the empty-answer path.
+    #[error(transparent)]
+    Completion(crate::model::CompletionError),
+
+    /// The run was cancelled, or the caller dropped a call the run was
+    /// waiting on.
+    #[error("interrupted: the run was cancelled or this call was stopped")]
+    Interrupted,
+
+    /// A section's Lua phase failed an Engine contract or hit a poisoned lock: a
+    /// runtime-internal condition with no originating `mlua` error to preserve
+    /// (for example "Engine values have not been injected" or a poisoned mutex).
+    ///
+    /// Failures that *do* have an `mlua` cause use [`Error::LuaRuntime`], which
+    /// keeps that cause. The message is the specific
+    /// failure as a noun phrase; the public wrapper classifies this as a Lua
+    /// failure, so no redundant `lua error:` type label is prepended.
+    #[error("{0}")]
+    Lua(String),
+
+    /// A section's Lua phase failed at runtime or while bridging Engine values:
+    /// the mapped prompt-location message, beside the originating `mlua`
+    /// error kept as the cause.
+    ///
+    /// This is the cause-bearing counterpart to [`Error::Lua`]: the Lua
+    /// crate builds it from a concrete `mlua::Error` (see the runtime-error
+    /// mapping on [`runvil_lua::LuaProgram`]) and the conversion from
+    /// that crate's error keeps it intact, so the typed failure survives
+    /// through the public wrappers' `cause()` instead of being flattened to
+    /// a string.
+    #[error("{message}")]
+    #[non_exhaustive]
+    LuaRuntime {
+        /// The mapped, location-tagged diagnostic (no redundant type label).
+        message: String,
+        /// The originating Lua error, whose text `message` already holds.
+        cause: BoxedSource,
+    },
+
+    /// Lua source was not syntactically valid at its prompt location.
+    ///
+    /// Keeps the originating `mlua` compile error as the cause beside the
+    /// location metadata, so the typed compiler diagnostic survives through
+    /// the public wrappers' `cause()` instead of being flattened into
+    /// `message` alone.
+    #[error("lua compilation error at {location} (line {source_line}): {message}")]
+    #[non_exhaustive]
+    LuaCompile {
+        /// The prompt region supplied by the parser, such as a section prologue.
+        location: String,
+        /// 1-based line number in the prompt source where this Lua region starts.
+        source_line: u32,
+        /// The retained source that failed to compile.
+        lua_source: String,
+        /// The Lua 5.5 compiler diagnostic.
+        message: String,
+        /// The originating `mlua` compile error, whose text `message` holds.
+        cause: BoxedSource,
+    },
+
+    /// Building a model-facing tool schema for a bound alias failed, retaining
+    /// the schema validation error as the private `#[source]` cause rather
+    /// than flattening it into `detail`.
+    ///
+    /// Constructed only by the tool-scope preparation.
+    #[error("model-facing schema build failure for tool alias {alias:?}")]
+    #[non_exhaustive]
+    BindSchema {
+        /// The prompt-local alias whose schema could not be built.
+        alias: String,
+        /// The originating schema validation failure, kept as the cause.
+        #[source]
+        source: BoxedSource,
+    },
+
+    /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
+    ///
+    /// Holds a typed [`crate::subst::SubstitutionError`] with a stable kind,
+    /// the byte offset of the offending placeholder, a bounded preview, and any
+    /// preserved serialization source, rather than a flattened string. The
+    /// substitution error is the whole message and its cause chain, so the
+    /// variant is transparent over it.
+    #[error(transparent)]
+    Substitution(Box<crate::subst::SubstitutionError>),
+
+    /// The tool-call loop ran its iteration cap without a final text reply.
+    #[error("tool-call loop did not converge")]
+    ToolLoopExhausted,
+
+    /// A chain ended while author-origin tasks it owned were still live.
+    ///
+    /// A spawned task ends with its owner, so a task the author neither
+    /// waited on nor cancelled is the author's bug: the chain's outcome
+    /// becomes this error (the run's for the root walk, the call's answer
+    /// for a `call` chain) and the leaked tasks are abandoned. The message
+    /// names the ids in spawn order; the Lua table lists them as `tasks`.
+    #[error(
+        "chain ended with author tasks still live: {}; wait on or cancel every task a chain spawns before it ends",
+        join_task_ids(.tasks)
+    )]
+    TasksLive {
+        /// The live author tasks, in spawn order.
+        tasks: Vec<TaskId>,
+    },
+
+    /// A task operation named a task the caller does not own.
+    ///
+    /// Only the spawning chain may wait on, inspect, or cancel a task; a
+    /// chain may additionally read the status of, and annotate, the task
+    /// it runs inside. An id that names no task at all is refused the same
+    /// way, so a caller learns nothing about tasks it never started.
+    #[error("task `{task}` is not a task this chain owns")]
+    TaskNotOwned {
+        /// The task the caller reached for.
+        task: TaskId,
+    },
+
+    /// A wait named a task whose result was already delivered once.
+    #[error("task `{task}` was already delivered: a task's result is taken by one wait")]
+    TaskConsumed {
+        /// The task whose result was taken.
+        task: TaskId,
+    },
+
+    /// The failure a wait delivers for a task its owner cancelled instead
+    /// of letting it end on its own: the member's `ok = false` error value,
+    /// kind `cancelled`, with a `task` field. An abandoned task is never
+    /// delivered - it lost its owner, and only the owner may wait - so
+    /// this is the one non-`Done` delivery.
+    #[error("task `{task}` was cancelled")]
+    TaskCancelled {
+        /// The task that was cancelled.
+        task: TaskId,
+    },
+
+    /// The model referenced a tool outside the section's advertised scope.
+    ///
+    /// This is the model tool loop's error alone: a script `tools.call`
+    /// resolves against the run's whole catalog and fails with
+    /// [`Error::UnboundToolCall`] instead.
+    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (a catalog tool that was not offered in this section)" } else { "" })]
+    #[non_exhaustive]
+    OutOfScopeToolCall {
+        /// The alias or identifier the model tried to use.
+        name: String,
+        /// Whether the name is the wire name of a tool the run offers.
+        global_exists: bool,
+        /// The aliases that are in scope for this VM.
+        in_scope: Vec<String>,
+    },
+
+    /// A `tools.call` named no local tool and no tool in the run's catalog.
+    ///
+    /// Script-initiated dispatch resolves a canonical id against the run's
+    /// whole catalog, not the section's advertised scope - the scope shapes
+    /// what the model is offered, and the author's own code is not the
+    /// model - so this error means the name is no catalog tool's id at
+    /// all; a wire name is the model's, never a script's.
+    #[error("tool {name:?} is not a tool in this run; catalog tools: {ids:?}")]
+    #[non_exhaustive]
+    UnboundToolCall {
+        /// The name the call tried to dispatch.
+        name: String,
+        /// The id of every tool the run offers.
+        ids: Vec<String>,
+    },
+
+    /// A model-facing section has non-empty prose but no `models.use` or
+    /// prompt-wide `models.default` binding.
+    #[error("model binding required for section {section}")]
+    #[non_exhaustive]
+    ModelRequired {
+        /// The H2 section heading that reached a model turn without a binding.
+        section: String,
+    },
+
+    /// The prompt declares a `runvil:` major this build does not support,
+    /// so it is refused rather than run under mismatched rules.
+    #[error("unsupported runvil version: {0} (this build supports major 0)")]
+    UnsupportedVersion(u32),
+
+    /// The environment cannot satisfy the prompt: a required Plugin is
+    /// missing, unavailable, or needs a service the run lacks, the filled
+    /// model fails a declared requirement (a context minimum or a hard
+    /// keyword), or an H1 block failed the prompt's hard gate.
+    ///
+    /// The notice, followed by the cause's text when there is one, is the
+    /// whole message, written to be read by a model.
+    #[error("{notice}{}", cause_suffix(.cause.as_ref()))]
+    #[non_exhaustive]
+    RequirementsUnmet {
+        /// The model-readable refusal notice, one line per gap.
+        notice: String,
+        /// The failure the refusal stands in for, when one raised it.
+        cause: Option<BoxedSource>,
+    },
+
+    /// A dispatched tool returned a model-safe failure.
+    ///
+    /// The tool's own [`runvil_types::tools::ToolError`] is kept as the
+    /// cause, so the typed failure (and any transport/parse error the tool
+    /// wrapped) survives instead of being flattened to a string.
+    #[error("tool call failure: {message}")]
+    Tool {
+        /// The tool's model-safe failure message.
+        message: String,
+        /// The originating tool error, whose text `message` holds.
+        cause: BoxedSource,
+    },
+
+    /// An internal runtime invariant was violated (a state the surrounding code
+    /// has already guaranteed cannot occur). Surfaced as a concrete error rather
+    /// than silently skipping work, so an impossible state cannot masquerade as a
+    /// successful fall-through.
+    ///
+    /// The Rust source position of the construction site is captured (via
+    /// [`Error::internal`] or [`Error::internal_with_cause`], both
+    /// `#[track_caller]`) so [`crate::RunError::location`] can point at the
+    /// broken invariant.
+    #[error("internal invariant violated: {message}{}", cause_suffix(.cause.as_ref()))]
+    #[non_exhaustive]
+    Internal {
+        /// The violated invariant, as a noun phrase; owned when it names a
+        /// value, as a Lua internal message passed through whole may.
+        message: std::borrow::Cow<'static, str>,
+        /// The Rust source file of the construction site (from `file!()`).
+        file: &'static str,
+        /// The 1-based line of the construction site (from `line!()`).
+        line: u32,
+        /// The failure that broke the invariant, when one did.
+        cause: Option<BoxedSource>,
+    },
+
+    /// A Lua resource quota (log events, log bytes, or instructions) was
+    /// exhausted. This stable typed variant lets the caller tell quota
+    /// exhaustion apart from an authoring error.
+    #[error("lua {resource} quota exceeded")]
+    #[non_exhaustive]
+    LuaQuota {
+        /// The exhausted resource.
+        resource: crate::lua::QuotaResource,
+    },
+
+    /// A `call`, `tasks.spawn`, or `tasks.fanout` arm would run deeper
+    /// than the call-depth cap allows. The dispatch's answer, so an
+    /// author `pcall` catches it, and a quota when it ends the run.
+    #[error("{via} recursion exceeded cap of {cap}")]
+    CallDepthExceeded {
+        /// The deepest nesting a chain may run at.
+        cap: usize,
+        /// The call that tripped the cap.
+        via: DepthVia,
+    },
+
+    /// The selected compactor exhausted the model's context window: the
+    /// request overflowed on the pre-dispatch precheck or at the provider,
+    /// and the policy (`compactors.fail`, the only shipped one) does not
+    /// compact.
+    #[error("context exhausted: {reason}")]
+    #[non_exhaustive]
+    ContextExhausted {
+        /// Which overflow check fired.
+        reason: crate::lua::OverflowReason,
+    },
+
+    /// A run-scoped store operation failed at the virtual filesystem layer,
+    /// keeping the concrete [`runvil_vfs::VfsError`] as the cause so a
+    /// backend failure survives the public wrappers instead of being
+    /// flattened to a string. The message is the model-facing rendering for
+    /// the operation (or the probe text, which says when the run declares no
+    /// store), kept beside the error because the error alone does not name
+    /// the operation.
+    #[error("{message}")]
+    Store {
+        /// The rendered store failure message, from the Lua crate's
+        /// `store_error_message` or `store_probe_message`.
+        message: String,
+        /// The structured failure the message renders.
+        cause: runvil_vfs::VfsError,
+    },
+
+    /// Two execution identities claimed one store path: the claims
+    /// model's conflict, mapped from the store's write-race vocabulary at
+    /// the yield-answer boundary. Fatal to the run on the spot and never
+    /// resumed into Lua, so no author `pcall` can catch it; the message is
+    /// the claims model's whole diagnosis, naming the canonical path, both
+    /// identities, and both claim kinds.
+    #[error("store determinism violation: {0}")]
+    Determinism(String),
+}
+
+impl Error {
+    /// Returns the originating error a cause-bearing variant keeps, whose
+    /// text its `Display` already holds; `None` for every other variant.
+    pub(crate) fn cause(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
+        match self {
+            Error::ParseFrontmatter { cause, .. }
+            | Error::LuaRuntime { cause, .. }
+            | Error::LuaCompile { cause, .. }
+            | Error::Tool { cause, .. } => Some(cause.as_ref()),
+            Error::RequirementsUnmet { cause, .. } | Error::Internal { cause, .. } => {
+                cause.as_deref()
+            }
+            Error::Store { cause, .. } => Some(cause),
+            Error::ParseStructured { .. }
+            | Error::Completion(_)
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::BindSchema { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::TasksLive { .. }
+            | Error::TaskNotOwned { .. }
+            | Error::TaskConsumed { .. }
+            | Error::TaskCancelled { .. }
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnboundToolCall { .. }
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::LuaQuota { .. }
+            | Error::CallDepthExceeded { .. }
+            | Error::ContextExhausted { .. }
+            | Error::Determinism(_) => None,
+        }
+    }
+}
+
+/// Crate-internal result alias over [`Error`].
+pub(crate) type Result<T> = std::result::Result<T, Error>;

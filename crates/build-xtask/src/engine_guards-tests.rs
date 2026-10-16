@@ -58,15 +58,10 @@ fn engine_crates_declare_no_forbidden_dependencies() {
 #[test]
 fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
     let root = clean_engine_root();
+    write_crate(root.path(), "runvil-internal/lua", "", "pub struct Vm;\n");
     write_crate(
         root.path(),
-        "promptforge-internal/lua",
-        "",
-        "pub struct Vm;\n",
-    );
-    write_crate(
-        root.path(),
-        "promptforge-internal/store",
+        "runvil-internal/store",
         "",
         "pub struct Store;\n",
     );
@@ -85,10 +80,10 @@ fn the_engine_crate_set_is_the_root_crates_plus_every_container_member() {
     assert_eq!(
         names,
         [
-            "promptforge",
-            "promptforge-internal/lua",
-            "promptforge-internal/store",
-            "promptforge-plugin",
+            "runvil",
+            "runvil-internal/lua",
+            "runvil-internal/store",
+            "runvil-plugin",
         ],
         "harness and gateway crates are outside the engine"
     );
@@ -99,14 +94,14 @@ fn a_forbidden_dependency_in_the_plugin_contract_fails_the_guard() {
     let root = clean_engine_root();
     write_crate(
         root.path(),
-        "promptforge-plugin",
+        "runvil-plugin",
         "[dependencies]\nasync-trait = \"0.1\"\n",
         "pub trait Plugin {}\n",
     );
     let violations = engine_guard_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("async-trait") && violations[0].contains("promptforge-plugin"),
+        violations[0].contains("async-trait") && violations[0].contains("runvil-plugin"),
         "the Plugin contract is an engine root crate, so the manifest guard binds it: {violations:?}"
     );
 }
@@ -117,24 +112,19 @@ fn the_facade_forwarding_the_engine_test_support_feature_passes_every_engine_gua
     test_support::write_engine_clippy_tomls(root.path());
     test_support::write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
+        "runvil-internal/engine",
+        "runvil-engine",
         "[features]\ntest-support = []\n",
     );
+    test_support::write_crate(root.path(), "runvil-internal/types", "runvil-types", "");
     test_support::write_crate(
         root.path(),
-        "promptforge-internal/types",
-        "promptforge-types",
-        "",
+        "runvil",
+        "runvil",
+        "[dependencies]\nrunvil-engine = { path = \"../runvil-internal/engine\" }\n\
+         [features]\ntest-support = [\"runvil-engine/test-support\"]\n",
     );
-    test_support::write_crate(
-        root.path(),
-        "promptforge",
-        "promptforge",
-        "[dependencies]\npromptforge-engine = { path = \"../promptforge-internal/engine\" }\n\
-         [features]\ntest-support = [\"promptforge-engine/test-support\"]\n",
-    );
-    test_support::write_crate(root.path(), "promptforge-plugin", "promptforge-plugin", "");
+    test_support::write_crate(root.path(), "runvil-plugin", "runvil-plugin", "");
     let violations = engine_guard_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -147,7 +137,7 @@ fn a_forbidden_dependency_in_a_container_crate_fails_the_guard() {
     let root = clean_engine_root();
     write_crate(
         root.path(),
-        "promptforge-internal/store",
+        "runvil-internal/store",
         "[dependencies]\ntokio = { version = \"1\", features = [\"rt\"] }\n",
         "pub struct Store;\n",
     );
@@ -165,21 +155,17 @@ fn a_missing_root_engine_crate_is_reported_not_skipped() {
     test_support::write_engine_clippy_tomls(root.path());
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
+        "runvil-internal/engine",
         "[dependencies]\nserde = \"1\"\n",
         "pub struct Live;\n",
     );
     write_crate(
         root.path(),
-        "promptforge-plugin",
+        "runvil-plugin",
         "[dependencies]\nserde = \"1\"\n",
         "pub struct Live;\n",
     );
-    let facade_manifest = root
-        .path()
-        .join("crates")
-        .join("promptforge")
-        .join("Cargo.toml");
+    let facade_manifest = root.path().join("crates").join("runvil").join("Cargo.toml");
     let violations = engine_guard_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(

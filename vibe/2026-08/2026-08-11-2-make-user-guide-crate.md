@@ -1,6 +1,6 @@
 ---
 name: make-user-guide crate
-overview: Create a new `make-user-guide` binary crate that reads the per-crate user guides and assembles them into a single `promptforge-user-guide.md` at the repo root.
+overview: Create a new `make-user-guide` binary crate that reads the per-crate user guides and assembles them into a single `runvil-user-guide.md` at the repo root.
 todos:
   - id: create-crate
     content: Create crates/make-user-guide/ with Cargo.toml and src/main.rs
@@ -13,7 +13,7 @@ isProject: false
 
 # make-user-guide Crate
 
-Create `crates/make-user-guide/` - a private, zero-dependency binary crate that reads the 7 per-crate user guides and assembles `promptforge-user-guide.md` at the workspace root.
+Create `crates/make-user-guide/` - a private, zero-dependency binary crate that reads the 7 per-crate user guides and assembles `runvil-user-guide.md` at the workspace root.
 
 ## Crate structure
 
@@ -48,19 +48,19 @@ The program:
 
 1. Locates the workspace root by walking up from `env!("CARGO_MANIFEST_DIR")` to find the directory containing `Cargo.toml` with `[workspace]`
 2. Defines an ordered list of `(crate_name, guide_filename)` pairs, in user-journey order (what you touch first, then deeper):
-   - `promptforge-cli` / `user-guide-promptforge-cli.md`
-   - `promptforge-gateway` / `user-guide-promptforge-gateway.md`
-   - `promptforge-core` / `user-guide-promptforge-core.md`
-   - `promptforge-mcp-server` / `user-guide-promptforge-mcp-server.md`
-   - `promptforge-tool-picker` / `user-guide-promptforge-tool-picker.md`
-   - `promptforge-webfetch` / `user-guide-promptforge-webfetch.md`
-   - `promptforge-dev` / `user-guide-promptforge-dev.md`
+   - `runvil-cli` / `user-guide-runvil-cli.md`
+   - `runvil-gateway` / `user-guide-runvil-gateway.md`
+   - `runvil-core` / `user-guide-runvil-core.md`
+   - `runvil-mcp-server` / `user-guide-runvil-mcp-server.md`
+   - `runvil-tool-picker` / `user-guide-runvil-tool-picker.md`
+   - `runvil-webfetch` / `user-guide-runvil-webfetch.md`
+   - `runvil-dev` / `user-guide-runvil-dev.md`
 3. For each guide file, reads the content and **demotes all markdown headings by one level** (H1 becomes H2, H2 becomes H3, etc.) so the combined document has one top-level H1
 4. Assembles the output in this order:
    - `crates/make-user-guide/user-guide-1.md` (verbatim, no heading demotion)
    - Each crate's guide (heading-demoted), separated by `---`
    - `crates/make-user-guide/user-guide-2.md` (verbatim, no heading demotion)
-5. Writes the result to `{workspace_root}/promptforge-user-guide.md`
+5. Writes the result to `{workspace_root}/runvil-user-guide.md`
 6. Prints the output path and exits 0. On any missing file, prints the path and exits 1.
 
 Both `user-guide-1.md` and `user-guide-2.md` ship with small placeholders. The human edits them later.
@@ -71,4 +71,4 @@ Simple line-by-line processing: any line starting with `#` gets one `#` prepende
 
 ## Workspace integration
 
-The workspace [Cargo.toml](promptforge/Cargo.toml) already uses `members = ["crates/*"]`, so the new crate is auto-discovered. No edit to the workspace file needed.
+The workspace [Cargo.toml](runvil/Cargo.toml) already uses `members = ["crates/*"]`, so the new crate is auto-discovered. No edit to the workspace file needed.

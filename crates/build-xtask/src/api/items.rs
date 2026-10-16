@@ -1,6 +1,6 @@
 //! Matches items across crates. Rustdoc ids are only meaningful inside the
 //! JSON that assigned them, and the facade's JSON names a re-exported item
-//! by its defining crate and its definition path (`promptforge_engine::
+//! by its defining crate and its definition path (`runvil_engine::
 //! execute::run::Run`, private modules included), so every cross-crate
 //! match here goes by crate name and path, never by id.
 
@@ -62,7 +62,7 @@ pub(super) fn target(krate: &Crate, id: Id) -> Option<Target<'_>> {
 /// One facade re-export, resolved to its defining item.
 #[derive(Debug)]
 pub(super) struct Entry {
-    /// The facade path dependents name it by (`promptforge::model::Message`).
+    /// The facade path dependents name it by (`runvil::model::Message`).
     pub(super) label: String,
     /// The defining internal crate's name.
     pub(super) krate: String,

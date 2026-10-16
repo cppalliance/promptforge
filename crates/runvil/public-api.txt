@@ -1,0 +1,1557 @@
+#[non_exhaustive] pub enum runvil::ParseErrorKind
+#[non_exhaustive] pub enum runvil::RequirementCheck
+#[non_exhaustive] pub enum runvil::RunErrorKind
+#[non_exhaustive] pub enum runvil::RunResult
+#[non_exhaustive] pub enum runvil::effect::AnswerRecord
+#[non_exhaustive] pub enum runvil::effect::EffectRecord
+#[non_exhaustive] pub enum runvil::effect::ToolCaller
+#[non_exhaustive] pub enum runvil::event::DebugMode
+#[non_exhaustive] pub enum runvil::event::Event
+#[non_exhaustive] pub enum runvil::event::ReplyOrigin
+#[non_exhaustive] pub enum runvil::ids::AbandonReason
+#[non_exhaustive] pub enum runvil::ids::TaskOrigin
+#[non_exhaustive] pub enum runvil::model::CompletionErrorKind
+#[non_exhaustive] pub enum runvil::model::CompletionResult
+#[non_exhaustive] pub enum runvil::model::ModelCatalogError
+#[non_exhaustive] pub enum runvil::model::Role
+#[non_exhaustive] pub enum runvil::model::TemperatureError
+#[non_exhaustive] pub enum runvil::model::ThinkingMode
+#[non_exhaustive] pub enum runvil::plugins::GlobalNameErrorKind
+#[non_exhaustive] pub enum runvil::plugins::PluginIdErrorKind
+#[non_exhaustive] pub enum runvil::prompt::ArgType
+#[non_exhaustive] pub enum runvil::prompt::ModelKeyword
+#[non_exhaustive] pub enum runvil::tools::OutputTrust
+#[non_exhaustive] pub enum runvil::tools::ToolCatalogError
+#[non_exhaustive] pub enum runvil::tools::ToolCatalogErrorKind
+#[non_exhaustive] pub enum runvil::tools::ToolErrorKind
+#[non_exhaustive] pub enum runvil::tools::ToolIdErrorKind
+#[non_exhaustive] pub enum runvil::vfs::Depth
+#[non_exhaustive] pub enum runvil::vfs::FileType
+#[non_exhaustive] pub enum runvil::vfs::GlobKind
+#[non_exhaustive] pub enum runvil::vfs::Mode
+#[non_exhaustive] pub enum runvil::vfs::Op
+#[non_exhaustive] pub enum runvil::vfs::PathReason
+#[non_exhaustive] pub enum runvil::vfs::Verdict
+#[non_exhaustive] pub enum runvil::vfs::VfsError
+#[non_exhaustive] pub enum runvil::vfs::VfsOp
+#[non_exhaustive] pub enum runvil::vfs::VfsOutcome
+#[non_exhaustive] pub enum runvil::vfs::Writability
+#[non_exhaustive] pub runvil::model::ModelCatalogError::DuplicateId { .. }
+#[non_exhaustive] pub runvil::model::TemperatureError::OutOfRange { .. }
+#[non_exhaustive] pub runvil::tools::ToolCatalogError::DuplicateId { .. }
+#[non_exhaustive] pub struct runvil::MissingService { .. }
+#[non_exhaustive] pub struct runvil::ParseError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::Prompt { /* private fields */ }
+#[non_exhaustive] pub struct runvil::Requirements { .. }
+#[non_exhaustive] pub struct runvil::RunContext { /* private fields */ }
+#[non_exhaustive] pub struct runvil::RunError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::RunLimits { /* private fields */ }
+#[non_exhaustive] pub struct runvil::SourceLocation { .. }
+#[non_exhaustive] pub struct runvil::UnavailablePlugin { .. }
+#[non_exhaustive] pub struct runvil::UnmetRequirement { .. }
+#[non_exhaustive] pub struct runvil::effect::ChatAnswerRecord { .. }
+#[non_exhaustive] pub struct runvil::effect::FailureRecord { .. }
+#[non_exhaustive] pub struct runvil::effect::Round { .. }
+#[non_exhaustive] pub struct runvil::effect::ToolAnswerRecord { .. }
+#[non_exhaustive] pub struct runvil::effect::ToolCallOrigin { .. }
+#[non_exhaustive] pub struct runvil::ids::Provenance { .. }
+#[non_exhaustive] pub struct runvil::metrics::CallMetrics { .. }
+#[non_exhaustive] pub struct runvil::metrics::ClientTiming { .. }
+#[non_exhaustive] pub struct runvil::metrics::LlamaTimings { .. }
+#[non_exhaustive] pub struct runvil::metrics::ToolCallEvent { .. }
+#[non_exhaustive] pub struct runvil::metrics::Usage { .. }
+#[non_exhaustive] pub struct runvil::metrics::VllmMetrics { .. }
+#[non_exhaustive] pub struct runvil::model::Completion { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::CompletionError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::CompletionOptions { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::Message { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelBindings { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelCatalog { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelDescriptor { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelId { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelIdError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ModelInvocation { .. }
+#[non_exhaustive] pub struct runvil::model::RawExchange { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ToolArguments<'a> { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ToolCall { /* private fields */ }
+#[non_exhaustive] pub struct runvil::model::ToolSchema { /* private fields */ }
+#[non_exhaustive] pub struct runvil::plugins::GlobalNameError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::plugins::PluginId(/* private fields */)
+#[non_exhaustive] pub struct runvil::plugins::PluginIdError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::ArgDecl { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::ArgsDecl { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::FileDecl { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::Frontmatter { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::ModelRole { /* private fields */ }
+#[non_exhaustive] pub struct runvil::prompt::ModelRoles { /* private fields */ }
+#[non_exhaustive] pub struct runvil::tools::ToolCatalog { /* private fields */ }
+#[non_exhaustive] pub struct runvil::tools::ToolDescriptor { .. }
+#[non_exhaustive] pub struct runvil::tools::ToolError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::tools::ToolId(/* private fields */)
+#[non_exhaustive] pub struct runvil::tools::ToolIdError { /* private fields */ }
+#[non_exhaustive] pub struct runvil::tools::ToolOutput { /* private fields */ }
+#[non_exhaustive] pub struct runvil::vfs::Entry { .. }
+#[non_exhaustive] pub struct runvil::vfs::MemoryBackend { /* private fields */ }
+#[non_exhaustive] pub struct runvil::vfs::Origin { .. }
+#[non_exhaustive] pub struct runvil::vfs::RealBackend { /* private fields */ }
+#[non_exhaustive] pub struct runvil::vfs::Stat { .. }
+auto runvil::MissingService: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ParseError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::ParseErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::Prompt: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::RequirementCheck: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::Requirements: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::Run: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::RunContext: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::RunError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::RunErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::RunLimits: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::RunResult: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::RunSeed: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::RunUid: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::SourceLocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::Step: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::UnavailablePlugin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::UnmetRequirement: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::cancel::CancelHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::cancel::Cancelled: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::AnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::ChatAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::Effect: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::effect::EffectAnswer: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::effect::EffectId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::EffectRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::FailureRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::Round: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::ToolAnswerRecord: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::ToolCallOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::effect::ToolCaller: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::event::DebugMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::event::Event: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::event::ReplyOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::AbandonReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::ChainId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::ParseIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::ParseTaskOriginError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::Provenance: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::RoundId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::TaskId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::ids::TaskOrigin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::CallMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::ClientTiming: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::LlamaTimings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::ToolCallEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::Usage: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::metrics::VllmMetrics: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ArgumentNames: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::Completion: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::CompletionError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::model::CompletionErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::CompletionOptions: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::CompletionResult: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::Message: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelBinding: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelBindings: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelCatalog: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelCatalogError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelDescriptor: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ModelInvocation: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ParseRoleError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::RawExchange: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::Role: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::Temperature: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::TemperatureError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ThinkingMode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ToolArguments: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ToolCall: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::model::ToolSchema: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::GlobalName: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::GlobalNameError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::GlobalNameErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::PluginId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::PluginIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::PluginIdErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::plugins::Prelude: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ArgDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ArgType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ArgsDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ArgsDeclIter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::FileDecl: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::Frontmatter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ModelKeyword: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ModelRole: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ModelRoles: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::prompt::ModelRolesIter: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::replay::Flags: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::timestamp::Timestamp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::OutputTrust: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolCatalog: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolCatalogError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolCatalogErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolDescriptor: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolError: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::tools::ToolErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolIdError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolIdErrorKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::tools::ToolOutput: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Access: !Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::vfs::AcquireContext: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Depth: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Entry: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::ExecId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::FileType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::GlobKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::MemoryBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Mode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::ModeHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::ModePolicy: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Op: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::OpEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Origin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::ParsePathReasonError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::PathReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::RealBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Stat: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::Verdict: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsOp: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsOutcome: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsPath: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsPathBuf: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto runvil::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::vfs::VfsRefBuilder: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto runvil::vfs::Writability: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+derives runvil::MissingService: Clone, Debug, Eq, PartialEq
+derives runvil::ParseError: Debug
+derives runvil::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::Prompt: Clone, Debug, Eq, PartialEq
+derives runvil::RequirementCheck: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::Requirements: Clone, Debug, Default, Eq, PartialEq
+derives runvil::Run: Debug
+derives runvil::RunContext: Debug
+derives runvil::RunError: Debug
+derives runvil::RunErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::RunLimits: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+derives runvil::RunResult: Debug
+derives runvil::RunSeed: Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::RunUid: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::SourceLocation: Clone, Debug, Eq, PartialEq
+derives runvil::Step: Debug
+derives runvil::UnavailablePlugin: Clone, Debug, Eq, PartialEq
+derives runvil::UnmetRequirement: Clone, Debug, Eq, PartialEq
+derives runvil::cancel::CancelHandle: Clone, Debug, Default
+derives runvil::cancel::Cancelled: Debug
+derives runvil::effect::AnswerRecord: Clone, Debug, Deserialize, PartialEq, Serialize
+derives runvil::effect::ChatAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::effect::Effect: Debug
+derives runvil::effect::EffectAnswer: Debug
+derives runvil::effect::EffectId: Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives runvil::effect::EffectRecord: Clone, Debug, Deserialize, PartialEq, Serialize
+derives runvil::effect::FailureRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::effect::Round: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::effect::ToolAnswerRecord: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::effect::ToolCallOrigin: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::effect::ToolCaller: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives runvil::event::DebugMode: Clone, Copy, Debug, Default, Eq, PartialEq
+derives runvil::event::Event: Clone, Debug, Deserialize, PartialEq, Serialize
+derives runvil::event::ReplyOrigin: Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize
+derives runvil::ids::AbandonReason: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives runvil::ids::ChainId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::ids::ParseIdError: Clone, Debug, Eq, PartialEq
+derives runvil::ids::ParseTaskOriginError: Clone, Debug, Eq, PartialEq
+derives runvil::ids::Provenance: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::ids::RoundId: Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::ids::TaskId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::ids::TaskOrigin: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives runvil::metrics::CallMetrics: Clone, Debug, Default, Deserialize, PartialEq, Serialize
+derives runvil::metrics::ClientTiming: Clone, Debug, Deserialize, PartialEq, Serialize
+derives runvil::metrics::LlamaTimings: Clone, Debug, Deserialize, PartialEq, Serialize
+derives runvil::metrics::ToolCallEvent: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::metrics::Usage: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::metrics::VllmMetrics: Clone, Debug, Default, Deserialize, PartialEq, Serialize
+derives runvil::model::ArgumentNames: Clone, Debug
+derives runvil::model::Completion: Debug
+derives runvil::model::CompletionError: Debug
+derives runvil::model::CompletionErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::model::CompletionOptions: Clone, Debug, Eq, PartialEq
+derives runvil::model::CompletionResult: Clone, Debug, Eq, PartialEq
+derives runvil::model::Message: Clone, Debug, Eq, PartialEq, Serialize
+derives runvil::model::ModelBinding: Clone, Debug, Eq, PartialEq
+derives runvil::model::ModelBindings: Clone, Debug, Default, Eq, PartialEq
+derives runvil::model::ModelCatalog: Clone, Debug, Default, Eq, PartialEq
+derives runvil::model::ModelCatalogError: Clone, Debug, Eq, PartialEq
+derives runvil::model::ModelDescriptor: Clone, Debug, Eq, PartialEq
+derives runvil::model::ModelId: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives runvil::model::ModelIdError: Clone, Debug, Eq, PartialEq
+derives runvil::model::ModelInvocation: Clone, Debug, Default, Eq, PartialEq
+derives runvil::model::ParseRoleError: Clone, Debug, Eq, PartialEq
+derives runvil::model::RawExchange: Clone, Debug, Eq, PartialEq
+derives runvil::model::Role: Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize
+derives runvil::model::Temperature: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::model::TemperatureError: Clone, Debug, PartialEq
+derives runvil::model::ThinkingMode: Clone, Copy, Debug, Deserialize, Eq, PartialEq
+derives runvil::model::ToolArguments: Clone, Copy, Debug
+derives runvil::model::ToolCall: Clone, Debug, Eq, PartialEq
+derives runvil::model::ToolSchema: Clone, Debug, Eq, PartialEq, Serialize
+derives runvil::plugins::GlobalName: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives runvil::plugins::GlobalNameError: Clone, Debug, Eq, PartialEq
+derives runvil::plugins::GlobalNameErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::plugins::PluginId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::plugins::PluginIdError: Clone, Debug, Eq, PartialEq
+derives runvil::plugins::PluginIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::plugins::Prelude: Clone, Debug, Eq, PartialEq
+derives runvil::prompt::ArgDecl: Clone, Debug, Deserialize, Eq, PartialEq
+derives runvil::prompt::ArgType: Clone, Copy, Debug, Deserialize, Eq, PartialEq
+derives runvil::prompt::ArgsDecl: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives runvil::prompt::ArgsDeclIter: Clone, Debug
+derives runvil::prompt::FileDecl: Clone, Debug, Deserialize, Eq, PartialEq
+derives runvil::prompt::Frontmatter: Clone, Debug, Deserialize, Eq, PartialEq
+derives runvil::prompt::ModelKeyword: Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd
+derives runvil::prompt::ModelRole: Clone, Debug, Deserialize, Eq, PartialEq
+derives runvil::prompt::ModelRoles: Clone, Debug, Default, Deserialize, Eq, PartialEq
+derives runvil::prompt::ModelRolesIter: Clone, Debug
+derives runvil::replay::Flags: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize
+derives runvil::timestamp::Timestamp: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::tools::OutputTrust: Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::tools::ToolCatalog: Clone, Debug, Default
+derives runvil::tools::ToolCatalogError: Clone, Debug, Eq, PartialEq
+derives runvil::tools::ToolCatalogErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::tools::ToolDescriptor: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::tools::ToolError: Debug
+derives runvil::tools::ToolErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::tools::ToolId: Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize
+derives runvil::tools::ToolIdError: Clone, Debug, Eq, PartialEq
+derives runvil::tools::ToolIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::tools::ToolOutput: Clone, Debug, Eq, PartialEq
+derives runvil::vfs::Access: Debug
+derives runvil::vfs::AcquireContext: Clone, Debug
+derives runvil::vfs::AllowAll: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+derives runvil::vfs::Depth: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::Entry: Clone, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::ExecId: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::FileType: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::GlobKind: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::MemoryBackend: Clone, Debug, Default
+derives runvil::vfs::Mode: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::vfs::ModeHandle: Clone, Debug
+derives runvil::vfs::ModePolicy: Debug
+derives runvil::vfs::Op: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::OpEvent: Debug
+derives runvil::vfs::Origin: Clone, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::ParsePathReasonError: Clone, Debug, Eq, PartialEq
+derives runvil::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
+derives runvil::vfs::RealBackend: Clone, Debug
+derives runvil::vfs::Stat: Clone, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::Verdict: Clone, Debug, Eq, PartialEq
+derives runvil::vfs::VfsError: Clone, Debug, Eq, PartialEq
+derives runvil::vfs::VfsOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::vfs::VfsOutcome: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
+derives runvil::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
+derives runvil::vfs::VfsPathBuf: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+derives runvil::vfs::VfsRef: Clone, Debug, Default
+derives runvil::vfs::VfsRefBuilder: Debug
+derives runvil::vfs::Writability: Clone, Copy, Debug, Eq, Hash, PartialEq
+impl core::convert::From<&runvil::model::Completion> for runvil::effect::ChatAnswerRecord
+impl core::convert::From<runvil::ids::ChainId> for runvil::ids::TaskId
+impl core::convert::From<runvil::vfs::VfsPath> for runvil::vfs::VfsPathBuf
+impl core::convert::TryFrom<f64> for runvil::model::Temperature
+impl core::convert::TryFrom<f64> for runvil::model::Temperature { type Error = runvil::model::TemperatureError }
+impl core::error::Error for runvil::ParseError
+impl core::error::Error for runvil::RunError
+impl core::error::Error for runvil::ids::ParseIdError
+impl core::error::Error for runvil::ids::ParseTaskOriginError
+impl core::error::Error for runvil::model::CompletionError
+impl core::error::Error for runvil::model::ModelCatalogError
+impl core::error::Error for runvil::model::ModelIdError
+impl core::error::Error for runvil::model::ParseRoleError
+impl core::error::Error for runvil::model::TemperatureError
+impl core::error::Error for runvil::plugins::GlobalNameError
+impl core::error::Error for runvil::plugins::PluginIdError
+impl core::error::Error for runvil::tools::ToolCatalogError
+impl core::error::Error for runvil::tools::ToolError
+impl core::error::Error for runvil::tools::ToolIdError
+impl core::error::Error for runvil::vfs::ParsePathReasonError
+impl core::error::Error for runvil::vfs::VfsError
+impl core::fmt::Display for runvil::ParseError
+impl core::fmt::Display for runvil::RunError
+impl core::fmt::Display for runvil::RunSeed
+impl core::fmt::Display for runvil::RunUid
+impl core::fmt::Display for runvil::effect::EffectId
+impl core::fmt::Display for runvil::ids::ChainId
+impl core::fmt::Display for runvil::ids::ParseIdError
+impl core::fmt::Display for runvil::ids::ParseTaskOriginError
+impl core::fmt::Display for runvil::ids::TaskId
+impl core::fmt::Display for runvil::model::CompletionError
+impl core::fmt::Display for runvil::model::ModelCatalogError
+impl core::fmt::Display for runvil::model::ModelIdError
+impl core::fmt::Display for runvil::model::ParseRoleError
+impl core::fmt::Display for runvil::model::Role
+impl core::fmt::Display for runvil::model::TemperatureError
+impl core::fmt::Display for runvil::plugins::GlobalName
+impl core::fmt::Display for runvil::plugins::GlobalNameError
+impl core::fmt::Display for runvil::plugins::PluginId
+impl core::fmt::Display for runvil::plugins::PluginIdError
+impl core::fmt::Display for runvil::prompt::ArgType
+impl core::fmt::Display for runvil::timestamp::Timestamp
+impl core::fmt::Display for runvil::tools::ToolCatalogError
+impl core::fmt::Display for runvil::tools::ToolError
+impl core::fmt::Display for runvil::tools::ToolId
+impl core::fmt::Display for runvil::tools::ToolIdError
+impl core::fmt::Display for runvil::vfs::ParsePathReasonError
+impl core::fmt::Display for runvil::vfs::PathReason
+impl core::fmt::Display for runvil::vfs::VfsError
+impl core::fmt::Display for runvil::vfs::VfsPath
+impl core::fmt::Display for runvil::vfs::VfsPathBuf
+impl core::future::future::Future for runvil::cancel::Cancelled
+impl core::future::future::Future for runvil::cancel::Cancelled { type Output = () }
+impl core::iter::traits::exact_size::ExactSizeIterator for runvil::prompt::ArgsDeclIter<'_>
+impl core::iter::traits::exact_size::ExactSizeIterator for runvil::prompt::ModelRolesIter<'_>
+impl core::ops::bit::BitOr for runvil::replay::Flags
+impl core::ops::bit::BitOr for runvil::replay::Flags { type Output = runvil::replay::Flags }
+impl core::ops::bit::BitOrAssign for runvil::replay::Flags
+impl core::ops::drop::Drop for runvil::vfs::Access
+impl core::str::traits::FromStr for runvil::ids::ChainId
+impl core::str::traits::FromStr for runvil::ids::ChainId { type Err = runvil::ids::ParseIdError }
+impl core::str::traits::FromStr for runvil::ids::TaskId
+impl core::str::traits::FromStr for runvil::ids::TaskId { type Err = runvil::ids::ParseIdError }
+impl core::str::traits::FromStr for runvil::ids::TaskOrigin
+impl core::str::traits::FromStr for runvil::ids::TaskOrigin { type Err = runvil::ids::ParseTaskOriginError }
+impl core::str::traits::FromStr for runvil::model::Role
+impl core::str::traits::FromStr for runvil::model::Role { type Err = runvil::model::ParseRoleError }
+impl core::str::traits::FromStr for runvil::plugins::GlobalName
+impl core::str::traits::FromStr for runvil::plugins::GlobalName { type Err = runvil::plugins::GlobalNameError }
+impl core::str::traits::FromStr for runvil::plugins::PluginId
+impl core::str::traits::FromStr for runvil::plugins::PluginId { type Err = runvil::plugins::PluginIdError }
+impl core::str::traits::FromStr for runvil::tools::ToolId
+impl core::str::traits::FromStr for runvil::tools::ToolId { type Err = runvil::tools::ToolIdError }
+impl core::str::traits::FromStr for runvil::vfs::PathReason
+impl core::str::traits::FromStr for runvil::vfs::PathReason { type Err = runvil::vfs::ParsePathReasonError }
+impl runvil::vfs::Policy for runvil::vfs::AllowAll
+impl runvil::vfs::Policy for runvil::vfs::ModePolicy
+impl runvil::vfs::Vfs for runvil::vfs::MemoryBackend
+impl runvil::vfs::Vfs for runvil::vfs::RealBackend
+impl runvil::vfs::Vfs for runvil::vfs::VfsRef
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ArgsDecl
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ArgsDecl { type IntoIter = runvil::prompt::ArgsDeclIter<'a> }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ArgsDecl { type Item = (&'a str, &'a runvil::prompt::ArgDecl) }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ModelRoles
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ModelRoles { type IntoIter = runvil::prompt::ModelRolesIter<'a> }
+impl<'a> core::iter::traits::collect::IntoIterator for &'a runvil::prompt::ModelRoles { type Item = (&'a str, &'a runvil::prompt::ModelRole) }
+impl<'a> core::iter::traits::iterator::Iterator for runvil::model::ArgumentNames<'a>
+impl<'a> core::iter::traits::iterator::Iterator for runvil::model::ArgumentNames<'a> { type Item = &'a str }
+impl<'a> core::iter::traits::iterator::Iterator for runvil::prompt::ArgsDeclIter<'a>
+impl<'a> core::iter::traits::iterator::Iterator for runvil::prompt::ArgsDeclIter<'a> { type Item = (&'a str, &'a runvil::prompt::ArgDecl) }
+impl<'a> core::iter::traits::iterator::Iterator for runvil::prompt::ModelRolesIter<'a>
+impl<'a> core::iter::traits::iterator::Iterator for runvil::prompt::ModelRolesIter<'a> { type Item = (&'a str, &'a runvil::prompt::ModelRole) }
+impl<'a> runvil::vfs::OpEvent<'a>
+pub const fn runvil::RunSeed::as_bytes(&self) -> &[u8; 32]
+pub const fn runvil::RunSeed::from_bytes(bytes: [u8; 32]) -> runvil::RunSeed
+pub const fn runvil::effect::EffectId::get(self) -> u64
+pub const fn runvil::ids::RoundId::get(self) -> u64
+pub const fn runvil::ids::RoundId::new(id: u64) -> Self
+pub const fn runvil::replay::Flags::bits(self) -> u32
+pub const fn runvil::replay::Flags::contains(self, other: runvil::replay::Flags) -> bool
+pub const fn runvil::replay::Flags::from_bits(bits: u32) -> Self
+pub const fn runvil::replay::Flags::is_empty(self) -> bool
+pub const fn runvil::timestamp::Timestamp::from_unix_millis(millis: i64) -> Self
+pub const fn runvil::timestamp::Timestamp::unix_millis(self) -> i64
+pub const runvil::model::ModelId::GATEWAY: &'static str
+pub const runvil::model::Role::ALL: &'static [runvil::model::Role]
+pub const runvil::replay::Flags::EMPTY: runvil::replay::Flags
+pub const runvil::timestamp::Timestamp::UNIX_EPOCH: runvil::timestamp::Timestamp
+pub enum runvil::Step
+pub enum runvil::effect::Effect
+pub enum runvil::effect::EffectAnswer
+pub fn runvil::MissingService::new(plugin: runvil::plugins::PluginId, service: impl core::convert::Into<alloc::string::String>) -> runvil::MissingService
+pub fn runvil::ParseError::cause(&self) -> core::option::Option<&dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static>
+pub fn runvil::ParseError::column(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn runvil::ParseError::kind(&self) -> runvil::ParseErrorKind
+pub fn runvil::ParseError::line(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn runvil::ParseError::name(&self) -> core::option::Option<&str>
+pub fn runvil::ParseError::span(&self) -> core::option::Option<core::ops::range::Range<usize>>
+pub fn runvil::Prompt::frontmatter(&self) -> &runvil::prompt::Frontmatter
+pub fn runvil::Prompt::parse(input: &str, execution: &str) -> (core::result::Result<runvil::Prompt, runvil::ParseError>, alloc::vec::Vec<runvil::event::Event>)
+pub fn runvil::Prompt::strip_h1_prose(&mut self)
+pub fn runvil::Prompt::title(&self) -> &str
+pub fn runvil::Requirements::is_satisfied(&self) -> bool
+pub fn runvil::Requirements::merge(&mut self, other: runvil::Requirements)
+pub fn runvil::Requirements::notice(&self) -> alloc::string::String
+pub fn runvil::Requirements::refusal(&self) -> core::option::Option<runvil::RunError>
+pub fn runvil::Run::cancel(&mut self)
+pub fn runvil::Run::cancel_handle(&self) -> runvil::cancel::CancelHandle
+pub fn runvil::Run::decided(&self) -> bool
+pub fn runvil::Run::new(prompt: alloc::sync::Arc<runvil::Prompt>, args: &str, ctx: runvil::RunContext) -> runvil::Run
+pub fn runvil::Run::resume(&mut self, id: runvil::effect::EffectId, answer: runvil::effect::EffectAnswer)
+pub fn runvil::Run::step(&mut self) -> runvil::Step
+pub fn runvil::RunContext::cancel(self, handle: runvil::cancel::CancelHandle) -> runvil::RunContext
+pub fn runvil::RunContext::cancel_handle(&self) -> runvil::cancel::CancelHandle
+pub fn runvil::RunContext::catalog(&self) -> &runvil::tools::ToolCatalog
+pub fn runvil::RunContext::current_model(&self) -> core::option::Option<&runvil::model::ModelDescriptor>
+pub fn runvil::RunContext::depth(&self) -> u32
+pub fn runvil::RunContext::flags(self, flags: runvil::replay::Flags) -> runvil::RunContext
+pub fn runvil::RunContext::limits(self, limits: runvil::RunLimits) -> runvil::RunContext
+pub fn runvil::RunContext::model(self, model: runvil::model::ModelDescriptor) -> runvil::RunContext
+pub fn runvil::RunContext::model_bindings(&self) -> &runvil::model::ModelBindings
+pub fn runvil::RunContext::name(&self) -> &str
+pub fn runvil::RunContext::new(name: impl core::convert::Into<alloc::string::String>, seed: runvil::RunSeed, started_at: runvil::timestamp::Timestamp) -> runvil::RunContext
+pub fn runvil::RunContext::plugins(self, usable: alloc::vec::Vec<runvil::plugins::PluginId>, unavailable: alloc::vec::Vec<runvil::UnavailablePlugin>) -> runvil::RunContext
+pub fn runvil::RunContext::preludes(self, preludes: alloc::vec::Vec<runvil::plugins::Prelude>) -> runvil::RunContext
+pub fn runvil::RunContext::prepare(self, prompt: &runvil::Prompt) -> (runvil::RunContext, runvil::Requirements)
+pub fn runvil::RunContext::provenance_start(self, start: u32) -> runvil::RunContext
+pub fn runvil::RunContext::report_debug(self, mode: runvil::event::DebugMode) -> runvil::RunContext
+pub fn runvil::RunContext::run_flags(&self) -> runvil::replay::Flags
+pub fn runvil::RunContext::seed(&self) -> runvil::RunSeed
+pub fn runvil::RunContext::started_at(&self) -> runvil::timestamp::Timestamp
+pub fn runvil::RunContext::tools(self, tools: runvil::tools::ToolCatalog) -> runvil::RunContext
+pub fn runvil::RunContext::ui(self, snapshot: serde_json::value::Value) -> runvil::RunContext
+pub fn runvil::RunContext::uid(&self) -> runvil::RunUid
+pub fn runvil::RunContext::vfs(self, vfs: runvil::vfs::VfsRef) -> runvil::RunContext
+pub fn runvil::RunContext::vfs_handle(&self) -> &runvil::vfs::VfsRef
+pub fn runvil::RunError::cause(&self) -> core::option::Option<&dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static>
+pub fn runvil::RunError::is_cancelled(&self) -> bool
+pub fn runvil::RunError::is_retryable(&self) -> bool
+pub fn runvil::RunError::kind(&self) -> runvil::RunErrorKind
+pub fn runvil::RunError::location(&self) -> core::option::Option<runvil::SourceLocation>
+pub fn runvil::RunLimits::concurrency(&self) -> core::num::nonzero::NonZeroUsize
+pub fn runvil::RunLimits::lua_log_events(self, value: core::num::nonzero::NonZeroU32) -> runvil::RunLimits
+pub fn runvil::RunLimits::lua_logs(&self) -> core::num::nonzero::NonZeroU32
+pub fn runvil::RunLimits::lua_memory(&self) -> core::num::nonzero::NonZeroUsize
+pub fn runvil::RunLimits::lua_memory_bytes(self, value: core::num::nonzero::NonZeroUsize) -> runvil::RunLimits
+pub fn runvil::RunLimits::max_concurrency(self, value: core::num::nonzero::NonZeroUsize) -> runvil::RunLimits
+pub fn runvil::RunLimits::max_response_bytes(self, value: core::num::nonzero::NonZeroU64) -> runvil::RunLimits
+pub fn runvil::RunLimits::max_tool_iterations(self, value: core::num::nonzero::NonZeroU32) -> runvil::RunLimits
+pub fn runvil::RunLimits::new() -> runvil::RunLimits
+pub fn runvil::RunLimits::request_timeout(self, value: core::time::Duration) -> runvil::RunLimits
+pub fn runvil::RunLimits::response_bytes(&self) -> core::num::nonzero::NonZeroU64
+pub fn runvil::RunLimits::timeout(&self) -> core::time::Duration
+pub fn runvil::RunLimits::tool_iterations(&self) -> core::num::nonzero::NonZeroU32
+pub fn runvil::RunUid::from_seed(seed: &runvil::RunSeed) -> runvil::RunUid
+pub fn runvil::SourceLocation::new(path: impl core::convert::Into<alloc::string::String>) -> runvil::SourceLocation
+pub fn runvil::SourceLocation::with_column(self, column: core::option::Option<u32>) -> runvil::SourceLocation
+pub fn runvil::SourceLocation::with_line(self, line: core::option::Option<u32>) -> runvil::SourceLocation
+pub fn runvil::SourceLocation::with_span(self, span: core::option::Option<core::ops::range::Range<usize>>) -> runvil::SourceLocation
+pub fn runvil::UnavailablePlugin::new(plugin: runvil::plugins::PluginId, reason: impl core::convert::Into<alloc::string::String>) -> runvil::UnavailablePlugin
+pub fn runvil::cancel::CancelHandle::cancel(&self)
+pub fn runvil::cancel::CancelHandle::cancelled(&self) -> runvil::cancel::Cancelled
+pub fn runvil::cancel::CancelHandle::child(&self) -> runvil::cancel::CancelHandle
+pub fn runvil::cancel::CancelHandle::is_cancelled(&self) -> bool
+pub fn runvil::cancel::CancelHandle::new() -> Self
+pub fn runvil::effect::ChatAnswerRecord::new(model: impl core::convert::Into<alloc::string::String>) -> runvil::effect::ChatAnswerRecord
+pub fn runvil::effect::ChatAnswerRecord::with_finish_reason(self, finish_reason: core::option::Option<alloc::string::String>) -> runvil::effect::ChatAnswerRecord
+pub fn runvil::effect::ChatAnswerRecord::with_reply(self, reply: core::option::Option<alloc::string::String>) -> runvil::effect::ChatAnswerRecord
+pub fn runvil::effect::ChatAnswerRecord::with_tool_calls(self, tool_calls: alloc::vec::Vec<alloc::string::String>) -> runvil::effect::ChatAnswerRecord
+pub fn runvil::effect::Effect::record(&self) -> runvil::effect::EffectRecord
+pub fn runvil::effect::EffectAnswer::record(&self) -> runvil::effect::AnswerRecord
+pub fn runvil::effect::FailureRecord::new(kind: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> runvil::effect::FailureRecord
+pub fn runvil::effect::Round::new(id: runvil::ids::RoundId, origin: runvil::event::ReplyOrigin) -> runvil::effect::Round
+pub fn runvil::effect::ToolAnswerRecord::new(text: impl core::convert::Into<alloc::string::String>, trust: runvil::tools::OutputTrust) -> runvil::effect::ToolAnswerRecord
+pub fn runvil::effect::ToolCallOrigin::new(execution: impl core::convert::Into<alloc::string::String>, section: impl core::convert::Into<alloc::string::String>, caller: runvil::effect::ToolCaller) -> runvil::effect::ToolCallOrigin
+pub fn runvil::event::Event::execution(&self) -> &str
+pub fn runvil::event::Event::provenance(&self) -> &runvil::ids::Provenance
+pub fn runvil::event::Event::section(&self) -> &str
+pub fn runvil::ids::AbandonReason::why(self) -> &'static str
+pub fn runvil::ids::ChainId::child(&self, index: u32) -> Self
+pub fn runvil::ids::ChainId::entry(&self, index: u32) -> alloc::string::String
+pub fn runvil::ids::ChainId::root() -> Self
+pub fn runvil::ids::ParseIdError::input(&self) -> &str
+pub fn runvil::ids::ParseTaskOriginError::input(&self) -> &str
+pub fn runvil::ids::Provenance::new(task: runvil::ids::TaskId, seq: u32) -> runvil::ids::Provenance
+pub fn runvil::ids::TaskOrigin::tag(self) -> &'static str
+pub fn runvil::metrics::CallMetrics::new() -> runvil::metrics::CallMetrics
+pub fn runvil::metrics::CallMetrics::with_client(self, client: core::option::Option<runvil::metrics::ClientTiming>) -> runvil::metrics::CallMetrics
+pub fn runvil::metrics::CallMetrics::with_llama(self, llama: core::option::Option<runvil::metrics::LlamaTimings>) -> runvil::metrics::CallMetrics
+pub fn runvil::metrics::CallMetrics::with_usage(self, usage: core::option::Option<runvil::metrics::Usage>) -> runvil::metrics::CallMetrics
+pub fn runvil::metrics::CallMetrics::with_vllm(self, vllm: core::option::Option<runvil::metrics::VllmMetrics>) -> runvil::metrics::CallMetrics
+pub fn runvil::metrics::ClientTiming::new(e2e_ms: f64) -> runvil::metrics::ClientTiming
+pub fn runvil::metrics::ClientTiming::with_mean_itl_ms(self, mean_itl_ms: core::option::Option<f64>) -> runvil::metrics::ClientTiming
+pub fn runvil::metrics::ClientTiming::with_ttft_ms(self, ttft_ms: core::option::Option<f64>) -> runvil::metrics::ClientTiming
+pub fn runvil::metrics::LlamaTimings::new(prompt_n: u32, prompt_ms: f64, prompt_per_second: f64, predicted_n: u32, predicted_ms: f64, predicted_per_second: f64) -> runvil::metrics::LlamaTimings
+pub fn runvil::metrics::LlamaTimings::with_draft_n(self, draft_n: u32) -> runvil::metrics::LlamaTimings
+pub fn runvil::metrics::LlamaTimings::with_draft_n_accepted(self, draft_n_accepted: u32) -> runvil::metrics::LlamaTimings
+pub fn runvil::metrics::ToolCallEvent::new(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> runvil::metrics::ToolCallEvent
+pub fn runvil::metrics::ToolCallEvent::with_tool(self, tool: core::option::Option<runvil::tools::ToolId>) -> runvil::metrics::ToolCallEvent
+pub fn runvil::metrics::Usage::new(prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> runvil::metrics::Usage
+pub fn runvil::metrics::Usage::with_cached_tokens(self, cached_tokens: core::option::Option<u32>) -> runvil::metrics::Usage
+pub fn runvil::metrics::Usage::with_reasoning_tokens(self, reasoning_tokens: core::option::Option<u32>) -> runvil::metrics::Usage
+pub fn runvil::metrics::VllmMetrics::new() -> runvil::metrics::VllmMetrics
+pub fn runvil::metrics::VllmMetrics::with_generation_time_ms(self, ms: core::option::Option<f64>) -> runvil::metrics::VllmMetrics
+pub fn runvil::metrics::VllmMetrics::with_mean_itl_ms(self, ms: core::option::Option<f64>) -> runvil::metrics::VllmMetrics
+pub fn runvil::metrics::VllmMetrics::with_queue_time_ms(self, ms: core::option::Option<f64>) -> runvil::metrics::VllmMetrics
+pub fn runvil::metrics::VllmMetrics::with_time_to_first_token_ms(self, ms: core::option::Option<f64>) -> runvil::metrics::VllmMetrics
+pub fn runvil::metrics::VllmMetrics::with_tokens_per_second(self, rate: core::option::Option<f64>) -> runvil::metrics::VllmMetrics
+pub fn runvil::model::Completion::finish_reason(&self) -> core::option::Option<&str>
+pub fn runvil::model::Completion::from_result(result: runvil::model::CompletionResult, model: impl core::convert::Into<alloc::string::String>) -> core::result::Result<runvil::model::Completion, runvil::model::CompletionError>
+pub fn runvil::model::Completion::metadata_diagnostics(&self) -> &[alloc::string::String]
+pub fn runvil::model::Completion::metrics(&self) -> core::option::Option<&runvil::metrics::CallMetrics>
+pub fn runvil::model::Completion::model(&self) -> &str
+pub fn runvil::model::Completion::raw(&self) -> core::option::Option<&runvil::model::RawExchange>
+pub fn runvil::model::Completion::reasoning_content(&self) -> core::option::Option<&str>
+pub fn runvil::model::Completion::result(&self) -> &runvil::model::CompletionResult
+pub fn runvil::model::Completion::with_finish_reason(self, finish_reason: impl core::convert::Into<alloc::string::String>) -> runvil::model::Completion
+pub fn runvil::model::Completion::with_metadata_diagnostics(self, diagnostics: alloc::vec::Vec<alloc::string::String>) -> runvil::model::Completion
+pub fn runvil::model::Completion::with_metrics(self, metrics: runvil::metrics::CallMetrics) -> runvil::model::Completion
+pub fn runvil::model::Completion::with_model(self, model: impl core::convert::Into<alloc::string::String>) -> runvil::model::Completion
+pub fn runvil::model::Completion::with_raw(self, raw: runvil::model::RawExchange) -> runvil::model::Completion
+pub fn runvil::model::Completion::with_reasoning_content(self, reasoning_content: impl core::convert::Into<alloc::string::String>) -> runvil::model::Completion
+pub fn runvil::model::CompletionError::context_overflow(prompt_tokens: core::option::Option<u32>, window: core::option::Option<u32>, message: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionError
+pub fn runvil::model::CompletionError::detail(&self) -> core::option::Option<&str>
+pub fn runvil::model::CompletionError::finish_reason(&self) -> core::option::Option<&str>
+pub fn runvil::model::CompletionError::is_retryable(&self) -> bool
+pub fn runvil::model::CompletionError::kind(&self) -> runvil::model::CompletionErrorKind
+pub fn runvil::model::CompletionError::message(&self) -> &str
+pub fn runvil::model::CompletionError::new(kind: runvil::model::CompletionErrorKind, message: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionError
+pub fn runvil::model::CompletionError::overflow(&self) -> (core::option::Option<u32>, core::option::Option<u32>)
+pub fn runvil::model::CompletionError::with_detail(self, text: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionError
+pub fn runvil::model::CompletionError::with_finish_reason(self, reason: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionError
+pub fn runvil::model::CompletionError::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>>) -> runvil::model::CompletionError
+pub fn runvil::model::CompletionErrorKind::phrase(self) -> &'static str
+pub fn runvil::model::CompletionErrorKind::tag(self) -> &'static str
+pub fn runvil::model::CompletionOptions::max_tokens(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn runvil::model::CompletionOptions::model(&self) -> &str
+pub fn runvil::model::CompletionOptions::new(model: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionOptions
+pub fn runvil::model::CompletionOptions::temperature(&self) -> core::option::Option<runvil::model::Temperature>
+pub fn runvil::model::CompletionOptions::thinking(&self) -> core::option::Option<bool>
+pub fn runvil::model::CompletionOptions::with_max_tokens(self, max_tokens: core::num::nonzero::NonZeroU32) -> runvil::model::CompletionOptions
+pub fn runvil::model::CompletionOptions::with_model(self, model: impl core::convert::Into<alloc::string::String>) -> runvil::model::CompletionOptions
+pub fn runvil::model::CompletionOptions::with_temperature(self, temperature: f64) -> core::result::Result<runvil::model::CompletionOptions, runvil::model::TemperatureError>
+pub fn runvil::model::CompletionOptions::with_thinking(self, thinking: bool) -> runvil::model::CompletionOptions
+pub fn runvil::model::Message::assistant(content: impl core::convert::Into<alloc::string::String>) -> runvil::model::Message
+pub fn runvil::model::Message::content(&self) -> &str
+pub fn runvil::model::Message::role(&self) -> runvil::model::Role
+pub fn runvil::model::Message::tool(tool_call_id: impl core::convert::Into<alloc::string::String>, content: impl core::convert::Into<alloc::string::String>) -> runvil::model::Message
+pub fn runvil::model::Message::user(content: impl core::convert::Into<alloc::string::String>) -> runvil::model::Message
+pub fn runvil::model::ModelBinding::alias(&self) -> &str
+pub fn runvil::model::ModelBinding::capabilities(&self) -> &[alloc::string::String]
+pub fn runvil::model::ModelBinding::completion_options(&self) -> runvil::model::CompletionOptions
+pub fn runvil::model::ModelBinding::context(&self) -> core::num::nonzero::NonZeroU32
+pub fn runvil::model::ModelBinding::description(&self) -> &str
+pub fn runvil::model::ModelBinding::id(&self) -> &runvil::model::ModelId
+pub fn runvil::model::ModelBinding::invocation(&self) -> &runvil::model::ModelInvocation
+pub fn runvil::model::ModelBinding::new(alias: impl core::convert::Into<alloc::string::String>, description: impl core::convert::Into<alloc::string::String>, id: runvil::model::ModelId, invocation: runvil::model::ModelInvocation, context: core::num::nonzero::NonZeroU32) -> Self
+pub fn runvil::model::ModelBinding::provider(&self) -> core::option::Option<&str>
+pub fn runvil::model::ModelBinding::with_capabilities(self, capabilities: alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn runvil::model::ModelBinding::with_invocation(self, invocation: runvil::model::ModelInvocation) -> Self
+pub fn runvil::model::ModelBinding::with_provider(self, provider: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn runvil::model::ModelBindings::is_empty(&self) -> bool
+pub fn runvil::model::ModelBindings::len(&self) -> usize
+pub fn runvil::model::ModelBindings::model(&self, id: &runvil::model::ModelId) -> core::option::Option<&runvil::model::ModelDescriptor>
+pub fn runvil::model::ModelBindings::resolve(&self, label: &str) -> core::option::Option<&runvil::model::ModelDescriptor>
+pub fn runvil::model::ModelBindings::role_id(&self, label: &str) -> core::option::Option<&runvil::model::ModelId>
+pub fn runvil::model::ModelCatalog::contains(&self, id: &runvil::model::ModelId) -> bool
+pub fn runvil::model::ModelCatalog::empty() -> Self
+pub fn runvil::model::ModelCatalog::get(&self, id: &runvil::model::ModelId) -> core::option::Option<&runvil::model::ModelDescriptor>
+pub fn runvil::model::ModelCatalog::is_empty(&self) -> bool
+pub fn runvil::model::ModelCatalog::models(&self) -> &[runvil::model::ModelDescriptor]
+pub fn runvil::model::ModelCatalog::new(models: impl core::iter::traits::collect::IntoIterator<Item = runvil::model::ModelDescriptor>) -> core::result::Result<runvil::model::ModelCatalog, runvil::model::ModelCatalogError>
+pub fn runvil::model::ModelDescriptor::context(&self) -> core::num::nonzero::NonZeroU32
+pub fn runvil::model::ModelDescriptor::description(&self) -> &str
+pub fn runvil::model::ModelDescriptor::id(&self) -> &runvil::model::ModelId
+pub fn runvil::model::ModelDescriptor::new(id: runvil::model::ModelId, description: impl core::convert::Into<alloc::string::String>, context: core::num::nonzero::NonZeroU32, thinking: runvil::model::ThinkingMode) -> Self
+pub fn runvil::model::ModelDescriptor::provider(&self) -> core::option::Option<&str>
+pub fn runvil::model::ModelDescriptor::thinking(&self) -> runvil::model::ThinkingMode
+pub fn runvil::model::ModelDescriptor::with_provider(self, provider: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn runvil::model::ModelId::gateway(name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<runvil::model::ModelId, runvil::model::ModelIdError>
+pub fn runvil::model::ModelId::name(&self) -> &str
+pub fn runvil::model::ModelId::new(server: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<runvil::model::ModelId, runvil::model::ModelIdError>
+pub fn runvil::model::ModelId::server(&self) -> &str
+pub fn runvil::model::ModelInvocation::new() -> runvil::model::ModelInvocation
+pub fn runvil::model::ModelInvocation::with_max_tokens(self, max_tokens: core::option::Option<core::num::nonzero::NonZeroU32>) -> runvil::model::ModelInvocation
+pub fn runvil::model::ModelInvocation::with_temperature(self, temperature: core::option::Option<runvil::model::Temperature>) -> runvil::model::ModelInvocation
+pub fn runvil::model::ModelInvocation::with_thinking(self, thinking: core::option::Option<bool>) -> runvil::model::ModelInvocation
+pub fn runvil::model::ParseRoleError::input(&self) -> &str
+pub fn runvil::model::RawExchange::new(request: serde_json::value::Value, response: serde_json::value::Value) -> runvil::model::RawExchange
+pub fn runvil::model::RawExchange::request(&self) -> &serde_json::value::Value
+pub fn runvil::model::RawExchange::response(&self) -> &serde_json::value::Value
+pub fn runvil::model::Role::as_str(self) -> &'static str
+pub fn runvil::model::Temperature::get(self) -> f64
+pub fn runvil::model::Temperature::new(value: f64) -> core::result::Result<runvil::model::Temperature, runvil::model::TemperatureError>
+pub fn runvil::model::ToolArguments::contains(&self, key: &str) -> bool
+pub fn runvil::model::ToolArguments::is_empty(&self) -> bool
+pub fn runvil::model::ToolArguments::names(&self) -> runvil::model::ArgumentNames<'_>
+pub fn runvil::model::ToolArguments::to_json_string(&self) -> alloc::string::String
+pub fn runvil::model::ToolCall::arguments(&self) -> runvil::model::ToolArguments<'_>
+pub fn runvil::model::ToolCall::from_parts(id: impl core::convert::Into<alloc::string::String>, name: impl core::convert::Into<alloc::string::String>, arguments: serde_json::value::Value) -> core::result::Result<runvil::model::ToolCall, runvil::model::CompletionError>
+pub fn runvil::model::ToolCall::id(&self) -> &str
+pub fn runvil::model::ToolCall::name(&self) -> &str
+pub fn runvil::model::ToolSchema::description(&self) -> &str
+pub fn runvil::model::ToolSchema::name(&self) -> &str
+pub fn runvil::model::ToolSchema::parameters(&self) -> &serde_json::value::Value
+pub fn runvil::plugins::GlobalName::parse(s: &str) -> core::result::Result<runvil::plugins::GlobalName, runvil::plugins::GlobalNameError>
+pub fn runvil::plugins::GlobalNameError::kind(&self) -> runvil::plugins::GlobalNameErrorKind
+pub fn runvil::plugins::PluginId::contains(&self, tool: &runvil::tools::ToolId) -> bool
+pub fn runvil::plugins::PluginId::parse(name: &str) -> core::result::Result<runvil::plugins::PluginId, runvil::plugins::PluginIdError>
+pub fn runvil::plugins::PluginIdError::kind(&self) -> runvil::plugins::PluginIdErrorKind
+pub fn runvil::plugins::Prelude::new(plugin: runvil::plugins::PluginId, source: impl core::convert::Into<alloc::string::String>) -> runvil::plugins::Prelude
+pub fn runvil::plugins::Prelude::plugin(&self) -> &runvil::plugins::PluginId
+pub fn runvil::plugins::Prelude::source(&self) -> &str
+pub fn runvil::prompt::ArgDecl::default(&self) -> core::option::Option<&serde_yaml_ng::value::Value>
+pub fn runvil::prompt::ArgDecl::description(&self) -> core::option::Option<&str>
+pub fn runvil::prompt::ArgDecl::is_optional(&self) -> bool
+pub fn runvil::prompt::ArgDecl::kind(&self) -> runvil::prompt::ArgType
+pub fn runvil::prompt::ArgsDecl::get(&self, name: &str) -> core::option::Option<&runvil::prompt::ArgDecl>
+pub fn runvil::prompt::ArgsDecl::is_default(&self) -> bool
+pub fn runvil::prompt::ArgsDecl::is_empty(&self) -> bool
+pub fn runvil::prompt::ArgsDecl::iter(&self) -> runvil::prompt::ArgsDeclIter<'_>
+pub fn runvil::prompt::ArgsDecl::len(&self) -> usize
+pub fn runvil::prompt::FileDecl::description(&self) -> &str
+pub fn runvil::prompt::FileDecl::path(&self) -> &str
+pub fn runvil::prompt::Frontmatter::args(&self) -> &runvil::prompt::ArgsDecl
+pub fn runvil::prompt::Frontmatter::description(&self) -> &str
+pub fn runvil::prompt::Frontmatter::input(&self) -> core::option::Option<&runvil::prompt::FileDecl>
+pub fn runvil::prompt::Frontmatter::max_tool_iterations(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn runvil::prompt::Frontmatter::models(&self) -> &runvil::prompt::ModelRoles
+pub fn runvil::prompt::Frontmatter::name(&self) -> &str
+pub fn runvil::prompt::Frontmatter::output(&self) -> core::option::Option<&runvil::prompt::FileDecl>
+pub fn runvil::prompt::Frontmatter::plugins(&self) -> &[runvil::plugins::PluginId]
+pub fn runvil::prompt::Frontmatter::runvil(&self) -> core::option::Option<u32>
+pub fn runvil::prompt::ModelRole::description(&self) -> core::option::Option<&str>
+pub fn runvil::prompt::ModelRole::keywords(&self) -> &[runvil::prompt::ModelKeyword]
+pub fn runvil::prompt::ModelRole::min_context(&self) -> core::option::Option<core::num::nonzero::NonZeroU32>
+pub fn runvil::prompt::ModelRoles::get(&self, label: &str) -> core::option::Option<&runvil::prompt::ModelRole>
+pub fn runvil::prompt::ModelRoles::is_empty(&self) -> bool
+pub fn runvil::prompt::ModelRoles::iter(&self) -> runvil::prompt::ModelRolesIter<'_>
+pub fn runvil::prompt::ModelRoles::len(&self) -> usize
+pub fn runvil::timestamp::Timestamp::to_rfc3339(self) -> alloc::string::String
+pub fn runvil::tools::ToolCatalog::get(&self, id: &runvil::tools::ToolId) -> core::option::Option<&runvil::tools::ToolDescriptor>
+pub fn runvil::tools::ToolCatalog::new(tools: impl core::iter::traits::collect::IntoIterator<Item = runvil::tools::ToolDescriptor>) -> core::result::Result<Self, runvil::tools::ToolCatalogError>
+pub fn runvil::tools::ToolCatalog::tools(&self) -> &[runvil::tools::ToolDescriptor]
+pub fn runvil::tools::ToolCatalogError::duplicate_id(&self) -> core::option::Option<&runvil::tools::ToolId>
+pub fn runvil::tools::ToolCatalogError::kind(&self) -> runvil::tools::ToolCatalogErrorKind
+pub fn runvil::tools::ToolDescriptor::new(id: runvil::tools::ToolId, description: impl core::convert::Into<alloc::string::String>, parameters_schema: serde_json::value::Value) -> runvil::tools::ToolDescriptor
+pub fn runvil::tools::ToolDescriptor::structured(self, structured: bool) -> runvil::tools::ToolDescriptor
+pub fn runvil::tools::ToolDescriptor::survives_stop(self, survives: bool) -> runvil::tools::ToolDescriptor
+pub fn runvil::tools::ToolError::is_cancelled(&self) -> bool
+pub fn runvil::tools::ToolError::is_retryable(&self) -> bool
+pub fn runvil::tools::ToolError::kind(&self) -> runvil::tools::ToolErrorKind
+pub fn runvil::tools::ToolError::message(text: impl core::convert::Into<alloc::string::String>) -> runvil::tools::ToolError
+pub fn runvil::tools::ToolError::new(kind: runvil::tools::ToolErrorKind, text: impl core::convert::Into<alloc::string::String>) -> runvil::tools::ToolError
+pub fn runvil::tools::ToolError::with_kind(self, kind: runvil::tools::ToolErrorKind) -> runvil::tools::ToolError
+pub fn runvil::tools::ToolError::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<dyn core::error::Error + core::marker::Send + core::marker::Sync>>) -> runvil::tools::ToolError
+pub fn runvil::tools::ToolErrorKind::tag(self) -> &'static str
+pub fn runvil::tools::ToolId::name(&self) -> &str
+pub fn runvil::tools::ToolId::parse(id: &str) -> core::result::Result<runvil::tools::ToolId, runvil::tools::ToolIdError>
+pub fn runvil::tools::ToolId::plugin(&self) -> runvil::plugins::PluginId
+pub fn runvil::tools::ToolIdError::field(&self) -> &str
+pub fn runvil::tools::ToolIdError::kind(&self) -> runvil::tools::ToolIdErrorKind
+pub fn runvil::tools::ToolOutput::text(&self) -> &str
+pub fn runvil::tools::ToolOutput::trust(&self) -> runvil::tools::OutputTrust
+pub fn runvil::tools::ToolOutput::trusted(text: impl core::convert::Into<alloc::string::String>) -> runvil::tools::ToolOutput
+pub fn runvil::tools::ToolOutput::untrusted(text: impl core::convert::Into<alloc::string::String>) -> runvil::tools::ToolOutput
+pub fn runvil::vfs::Access::append(&self, path: &str, contents: &[u8]) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::close(self) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::exists(&self, path: &str) -> core::result::Result<bool, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::list(&self, path: &str) -> core::result::Result<alloc::vec::Vec<runvil::vfs::Entry>, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::mkdir(&self, path: &str, recursive: bool) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::mkdir_with(&self, path: &str, depth: runvil::vfs::Depth) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::read_range(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::read_range_numbered(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::read_string(&self, path: &str) -> core::result::Result<alloc::string::String, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::remove(&self, path: &str, recursive: bool) -> core::result::Result<bool, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::remove_with(&self, path: &str, depth: runvil::vfs::Depth) -> core::result::Result<bool, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::rename(&self, from: &str, to: &str) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::stat(&self, path: &str) -> core::result::Result<runvil::vfs::Stat, runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::str_replace(&self, path: &str, old: &str, new: &str) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::Access::write(&self, path: &str, contents: &[u8]) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::AcquireContext::id(&self) -> runvil::vfs::ExecId
+pub fn runvil::vfs::Entry::new(name: impl core::convert::Into<alloc::string::String>, stat: runvil::vfs::Stat) -> runvil::vfs::Entry
+pub fn runvil::vfs::Entry::with_description(self, description: core::option::Option<alloc::string::String>) -> runvil::vfs::Entry
+pub fn runvil::vfs::MemoryBackend::new() -> runvil::vfs::MemoryBackend
+pub fn runvil::vfs::ModeHandle::mode(&self) -> runvil::vfs::Mode
+pub fn runvil::vfs::ModeHandle::set(&self, mode: runvil::vfs::Mode)
+pub fn runvil::vfs::ModePolicy::handle(&self) -> runvil::vfs::ModeHandle
+pub fn runvil::vfs::ModePolicy::new(mode: runvil::vfs::Mode) -> runvil::vfs::ModePolicy
+pub fn runvil::vfs::OpEvent::op(&self) -> runvil::vfs::Op
+pub fn runvil::vfs::OpEvent::origin(&self) -> &'a runvil::vfs::Origin
+pub fn runvil::vfs::OpEvent::path(&self) -> &'a runvil::vfs::VfsPath
+pub fn runvil::vfs::Origin::at(label: impl core::convert::Into<alloc::string::String>, file: impl core::convert::Into<alloc::string::String>, line: u32) -> runvil::vfs::Origin
+pub fn runvil::vfs::Origin::new(label: impl core::convert::Into<alloc::string::String>) -> runvil::vfs::Origin
+pub fn runvil::vfs::ParsePathReasonError::input(&self) -> &str
+pub fn runvil::vfs::PathReason::from_tag(tag: &str) -> core::option::Option<runvil::vfs::PathReason>
+pub fn runvil::vfs::PathReason::tag(self) -> &'static str
+pub fn runvil::vfs::Policy::check(&self, op: runvil::vfs::Op, path: &runvil::vfs::VfsPath) -> runvil::vfs::Verdict
+pub fn runvil::vfs::RealBackend::identity() -> runvil::vfs::RealBackend
+pub fn runvil::vfs::RealBackend::rooted(dir: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<runvil::vfs::RealBackend, runvil::vfs::VfsError>
+pub fn runvil::vfs::RealBackend::with_read_only(self, read_only: bool) -> runvil::vfs::RealBackend
+pub fn runvil::vfs::RealBackend::with_writability(self, writability: runvil::vfs::Writability) -> runvil::vfs::RealBackend
+pub fn runvil::vfs::Stat::new(file_type: runvil::vfs::FileType, size: u64) -> runvil::vfs::Stat
+pub fn runvil::vfs::Stat::with_created(self, created: core::option::Option<std::time::SystemTime>) -> runvil::vfs::Stat
+pub fn runvil::vfs::Stat::with_mode(self, mode: core::option::Option<u32>) -> runvil::vfs::Stat
+pub fn runvil::vfs::Stat::with_modified(self, modified: core::option::Option<std::time::SystemTime>) -> runvil::vfs::Stat
+pub fn runvil::vfs::Vfs::acquire(&mut self, cx: &runvil::vfs::AcquireContext) -> core::result::Result<alloc::boxed::Box<dyn runvil::vfs::VfsAccess>, runvil::vfs::VfsError>
+pub fn runvil::vfs::Vfs::read_only(&self) -> bool { .. }
+pub fn runvil::vfs::Vfs::release(&mut self, id: runvil::vfs::ExecId) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::append(&mut self, path: &runvil::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::chmod(&mut self, path: &runvil::vfs::VfsPath, mode: u32) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::close(&mut self) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::copy(&mut self, from: &runvil::vfs::VfsPath, to: &runvil::vfs::VfsPath) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::exists(&self, path: &runvil::vfs::VfsPath) -> core::result::Result<bool, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::glob_kind(&self, pattern: &str, dirs_only: bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::glob_with(&self, pattern: &str, kind: runvil::vfs::GlobKind) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::list(&self, path: &runvil::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<runvil::vfs::Entry>, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::mkdir(&mut self, path: &runvil::vfs::VfsPath, recursive: bool) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::mkdir_with(&mut self, path: &runvil::vfs::VfsPath, depth: runvil::vfs::Depth) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::read(&self, path: &runvil::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<u8>, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::read_link(&self, path: &runvil::vfs::VfsPath) -> core::result::Result<runvil::vfs::VfsPathBuf, runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::read_range(&self, path: &runvil::vfs::VfsPath, offset: u64, len: u64) -> core::result::Result<alloc::vec::Vec<u8>, runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::remove(&mut self, path: &runvil::vfs::VfsPath, recursive: bool) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::remove_with(&mut self, path: &runvil::vfs::VfsPath, depth: runvil::vfs::Depth) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::rename(&mut self, from: &runvil::vfs::VfsPath, to: &runvil::vfs::VfsPath) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::stat(&self, path: &runvil::vfs::VfsPath) -> core::result::Result<runvil::vfs::Stat, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsAccess::str_replace(&mut self, path: &runvil::vfs::VfsPath, old: &str, new: &str) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::symlink(&mut self, target: &runvil::vfs::VfsPath, link: &runvil::vfs::VfsPath) -> core::result::Result<(), runvil::vfs::VfsError> { .. }
+pub fn runvil::vfs::VfsAccess::write(&mut self, path: &runvil::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsError::tag(&self) -> &'static str
+pub fn runvil::vfs::VfsPath::as_str(&self) -> &str
+pub fn runvil::vfs::VfsPath::to_buf(&self) -> runvil::vfs::VfsPathBuf
+pub fn runvil::vfs::VfsPathBuf::as_str(&self) -> &str
+pub fn runvil::vfs::VfsRef::acquire(&self, origin: runvil::vfs::Origin) -> core::result::Result<runvil::vfs::Access, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsRef::acquire_store(&self, origin: runvil::vfs::Origin) -> core::result::Result<runvil::vfs::Access, runvil::vfs::VfsError>
+pub fn runvil::vfs::VfsRef::builder() -> runvil::vfs::VfsRefBuilder
+pub fn runvil::vfs::VfsRef::new(backend: impl runvil::vfs::Vfs + 'static) -> runvil::vfs::VfsRef
+pub fn runvil::vfs::VfsRef::overlay(&self, prefix: &str, backend: impl runvil::vfs::Vfs + 'static) -> runvil::vfs::VfsRef
+pub fn runvil::vfs::VfsRef::with_policy(backend: impl runvil::vfs::Vfs + 'static, policy: impl runvil::vfs::Policy + core::marker::Sync + 'static) -> runvil::vfs::VfsRef
+pub fn runvil::vfs::VfsRefBuilder::build(self) -> runvil::vfs::VfsRef
+pub fn runvil::vfs::VfsRefBuilder::mount(self, prefix: &str, backend: impl runvil::vfs::Vfs + 'static) -> runvil::vfs::VfsRefBuilder
+pub fn runvil::vfs::VfsRefBuilder::on_op(self, sink: impl core::ops::function::Fn(runvil::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync + 'static) -> runvil::vfs::VfsRefBuilder
+pub fn runvil::vfs::VfsRefBuilder::policy(self, policy: impl runvil::vfs::Policy + core::marker::Sync + 'static) -> runvil::vfs::VfsRefBuilder
+pub fn runvil::vfs::VfsRefBuilder::store(self, root: &str, backend: impl runvil::vfs::Vfs + 'static) -> runvil::vfs::VfsRefBuilder
+pub fn runvil::vfs::perform_vfs_op(access: &runvil::vfs::Access, op: runvil::vfs::VfsOp) -> core::result::Result<runvil::vfs::VfsOutcome, runvil::vfs::VfsError>
+pub mod runvil::cancel
+pub mod runvil::effect
+pub mod runvil::event
+pub mod runvil::ids
+pub mod runvil::metrics
+pub mod runvil::model
+pub mod runvil::plugins
+pub mod runvil::prompt
+pub mod runvil::replay
+pub mod runvil::timestamp
+pub mod runvil::tools
+pub mod runvil::vfs
+pub runvil::MissingService::plugin: runvil::plugins::PluginId
+pub runvil::MissingService::service: alloc::string::String
+pub runvil::ParseErrorKind::Fence
+pub runvil::ParseErrorKind::Frontmatter
+pub runvil::ParseErrorKind::Internal
+pub runvil::ParseErrorKind::List
+pub runvil::ParseErrorKind::Lua
+pub runvil::ParseErrorKind::Structure
+pub runvil::RequirementCheck::ContextMinimum
+pub runvil::RequirementCheck::HardKeyword
+pub runvil::Requirements::missing_required: alloc::vec::Vec<runvil::plugins::PluginId>
+pub runvil::Requirements::missing_services: alloc::vec::Vec<runvil::MissingService>
+pub runvil::Requirements::unavailable: alloc::vec::Vec<runvil::UnavailablePlugin>
+pub runvil::Requirements::unmet_requirements: alloc::vec::Vec<runvil::UnmetRequirement>
+pub runvil::RunErrorKind::Binding
+pub runvil::RunErrorKind::Cancelled
+pub runvil::RunErrorKind::Completion
+pub runvil::RunErrorKind::ContextExhausted
+pub runvil::RunErrorKind::Determinism
+pub runvil::RunErrorKind::Internal
+pub runvil::RunErrorKind::Lua
+pub runvil::RunErrorKind::Parse
+pub runvil::RunErrorKind::Quota
+pub runvil::RunErrorKind::RequirementsUnmet
+pub runvil::RunErrorKind::Substitution
+pub runvil::RunErrorKind::Tool
+pub runvil::RunErrorKind::Version
+pub runvil::RunErrorKind::Vfs
+pub runvil::RunResult::Cancelled
+pub runvil::RunResult::Failure(..)
+pub runvil::RunResult::Failure::0: runvil::RunError
+pub runvil::RunResult::Ok(..)
+pub runvil::RunResult::Ok::0: alloc::string::String
+pub runvil::SourceLocation::column: core::option::Option<u32>
+pub runvil::SourceLocation::line: core::option::Option<u32>
+pub runvil::SourceLocation::path: alloc::string::String
+pub runvil::SourceLocation::span: core::option::Option<core::ops::range::Range<usize>>
+pub runvil::Step::Done { .. }
+pub runvil::Step::Done::events: alloc::vec::Vec<runvil::event::Event>
+pub runvil::Step::Done::result: runvil::RunResult
+pub runvil::Step::Pending { .. }
+pub runvil::Step::Pending::effects: alloc::vec::Vec<(runvil::effect::EffectId, runvil::ids::Provenance, runvil::effect::Effect)>
+pub runvil::Step::Pending::events: alloc::vec::Vec<runvil::event::Event>
+pub runvil::Step::Pending::withdrawn: alloc::vec::Vec<runvil::effect::EffectId>
+pub runvil::UnavailablePlugin::plugin: runvil::plugins::PluginId
+pub runvil::UnavailablePlugin::reason: alloc::string::String
+pub runvil::UnmetRequirement::actual: alloc::string::String
+pub runvil::UnmetRequirement::check: runvil::RequirementCheck
+pub runvil::UnmetRequirement::required: alloc::string::String
+pub runvil::UnmetRequirement::role: alloc::string::String
+pub runvil::effect::AnswerRecord::Chat(..)
+pub runvil::effect::AnswerRecord::Chat::0: core::result::Result<runvil::effect::ChatAnswerRecord, runvil::effect::FailureRecord>
+pub runvil::effect::AnswerRecord::Dropped
+pub runvil::effect::AnswerRecord::Timer
+pub runvil::effect::AnswerRecord::ToolCall(..)
+pub runvil::effect::AnswerRecord::ToolCall::0: core::result::Result<runvil::effect::ToolAnswerRecord, runvil::effect::FailureRecord>
+pub runvil::effect::AnswerRecord::Vfs(..)
+pub runvil::effect::AnswerRecord::Vfs::0: core::result::Result<runvil::vfs::VfsOutcome, runvil::effect::FailureRecord>
+pub runvil::effect::ChatAnswerRecord::finish_reason: core::option::Option<alloc::string::String>
+pub runvil::effect::ChatAnswerRecord::model: alloc::string::String
+pub runvil::effect::ChatAnswerRecord::reply: core::option::Option<alloc::string::String>
+pub runvil::effect::ChatAnswerRecord::tool_calls: alloc::vec::Vec<alloc::string::String>
+pub runvil::effect::Effect::Chat { .. }
+pub runvil::effect::Effect::Chat::after: core::option::Option<runvil::ids::RoundId>
+pub runvil::effect::Effect::Chat::binding: runvil::model::ModelBinding
+pub runvil::effect::Effect::Chat::keep: u64
+pub runvil::effect::Effect::Chat::messages: alloc::vec::Vec<runvil::model::Message>
+pub runvil::effect::Effect::Chat::options: runvil::model::CompletionOptions
+pub runvil::effect::Effect::Chat::round: runvil::effect::Round
+pub runvil::effect::Effect::Chat::tools: alloc::vec::Vec<runvil::model::ToolSchema>
+pub runvil::effect::Effect::Timer { .. }
+pub runvil::effect::Effect::Timer::duration: core::time::Duration
+pub runvil::effect::Effect::ToolCall { .. }
+pub runvil::effect::Effect::ToolCall::access: alloc::sync::Arc<runvil::vfs::Access>
+pub runvil::effect::Effect::ToolCall::alias: alloc::string::String
+pub runvil::effect::Effect::ToolCall::args: serde_json::value::Value
+pub runvil::effect::Effect::ToolCall::origin: runvil::effect::ToolCallOrigin
+pub runvil::effect::Effect::ToolCall::tool: runvil::tools::ToolId
+pub runvil::effect::Effect::Vfs { .. }
+pub runvil::effect::Effect::Vfs::access: alloc::sync::Arc<runvil::vfs::Access>
+pub runvil::effect::Effect::Vfs::op: runvil::vfs::VfsOp
+pub runvil::effect::EffectAnswer::Chat(..)
+pub runvil::effect::EffectAnswer::Chat::0: core::result::Result<alloc::boxed::Box<runvil::model::Completion>, runvil::model::CompletionError>
+pub runvil::effect::EffectAnswer::Dropped
+pub runvil::effect::EffectAnswer::Timer
+pub runvil::effect::EffectAnswer::ToolCall(..)
+pub runvil::effect::EffectAnswer::ToolCall::0: core::result::Result<runvil::tools::ToolOutput, runvil::tools::ToolError>
+pub runvil::effect::EffectAnswer::Vfs(..)
+pub runvil::effect::EffectAnswer::Vfs::0: core::result::Result<runvil::vfs::VfsOutcome, runvil::vfs::VfsError>
+pub runvil::effect::EffectRecord::Chat { .. }
+pub runvil::effect::EffectRecord::Chat::after: core::option::Option<runvil::ids::RoundId>
+pub runvil::effect::EffectRecord::Chat::alias: alloc::string::String
+pub runvil::effect::EffectRecord::Chat::keep: u64
+pub runvil::effect::EffectRecord::Chat::max_tokens: core::option::Option<u32>
+pub runvil::effect::EffectRecord::Chat::messages: alloc::vec::Vec<serde_json::value::Value>
+pub runvil::effect::EffectRecord::Chat::round: runvil::ids::RoundId
+pub runvil::effect::EffectRecord::Chat::temperature: core::option::Option<f64>
+pub runvil::effect::EffectRecord::Chat::thinking: core::option::Option<bool>
+pub runvil::effect::EffectRecord::Chat::tools: alloc::vec::Vec<alloc::string::String>
+pub runvil::effect::EffectRecord::Timer { .. }
+pub runvil::effect::EffectRecord::Timer::seconds: f64
+pub runvil::effect::EffectRecord::ToolCall { .. }
+pub runvil::effect::EffectRecord::ToolCall::alias: alloc::string::String
+pub runvil::effect::EffectRecord::ToolCall::args: serde_json::value::Value
+pub runvil::effect::EffectRecord::ToolCall::origin: runvil::effect::ToolCallOrigin
+pub runvil::effect::EffectRecord::ToolCall::tool: runvil::tools::ToolId
+pub runvil::effect::EffectRecord::Vfs { .. }
+pub runvil::effect::EffectRecord::Vfs::op: runvil::vfs::VfsOp
+pub runvil::effect::FailureRecord::kind: alloc::string::String
+pub runvil::effect::FailureRecord::message: alloc::string::String
+pub runvil::effect::Round::id: runvil::ids::RoundId
+pub runvil::effect::Round::origin: runvil::event::ReplyOrigin
+pub runvil::effect::ToolAnswerRecord::text: alloc::string::String
+pub runvil::effect::ToolAnswerRecord::trust: runvil::tools::OutputTrust
+pub runvil::effect::ToolCallOrigin::caller: runvil::effect::ToolCaller
+pub runvil::effect::ToolCallOrigin::execution: alloc::string::String
+pub runvil::effect::ToolCallOrigin::section: alloc::string::String
+pub runvil::effect::ToolCaller::Model
+pub runvil::effect::ToolCaller::Script
+pub runvil::event::DebugMode::Off
+pub runvil::event::DebugMode::On
+pub runvil::event::Event::AssistantReply { .. }
+pub runvil::event::Event::AssistantReply::execution: alloc::string::String
+pub runvil::event::Event::AssistantReply::finish_reason: core::option::Option<alloc::string::String>
+pub runvil::event::Event::AssistantReply::metrics: core::option::Option<runvil::metrics::CallMetrics>
+pub runvil::event::Event::AssistantReply::model: alloc::string::String
+pub runvil::event::Event::AssistantReply::origin: runvil::event::ReplyOrigin
+pub runvil::event::Event::AssistantReply::provenance: runvil::ids::Provenance
+pub runvil::event::Event::AssistantReply::round: runvil::ids::RoundId
+pub runvil::event::Event::AssistantReply::section: alloc::string::String
+pub runvil::event::Event::AssistantReply::text: alloc::string::String
+pub runvil::event::Event::AssistantReply::turn: u32
+pub runvil::event::Event::AssistantToolCalls { .. }
+pub runvil::event::Event::AssistantToolCalls::calls: alloc::vec::Vec<runvil::metrics::ToolCallEvent>
+pub runvil::event::Event::AssistantToolCalls::execution: alloc::string::String
+pub runvil::event::Event::AssistantToolCalls::model: alloc::string::String
+pub runvil::event::Event::AssistantToolCalls::provenance: runvil::ids::Provenance
+pub runvil::event::Event::AssistantToolCalls::round: runvil::ids::RoundId
+pub runvil::event::Event::AssistantToolCalls::section: alloc::string::String
+pub runvil::event::Event::AssistantToolCalls::turn: u32
+pub runvil::event::Event::Lua { .. }
+pub runvil::event::Event::Lua::execution: alloc::string::String
+pub runvil::event::Event::Lua::message: alloc::string::String
+pub runvil::event::Event::Lua::provenance: runvil::ids::Provenance
+pub runvil::event::Event::Lua::section: alloc::string::String
+pub runvil::event::Event::LuaChunkFailed { .. }
+pub runvil::event::Event::LuaChunkFailed::execution: alloc::string::String
+pub runvil::event::Event::LuaChunkFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaChunkFailed::section: alloc::string::String
+pub runvil::event::Event::LuaChunkStarted { .. }
+pub runvil::event::Event::LuaChunkStarted::execution: alloc::string::String
+pub runvil::event::Event::LuaChunkStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaChunkStarted::section: alloc::string::String
+pub runvil::event::Event::LuaChunkSucceeded { .. }
+pub runvil::event::Event::LuaChunkSucceeded::execution: alloc::string::String
+pub runvil::event::Event::LuaChunkSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaChunkSucceeded::section: alloc::string::String
+pub runvil::event::Event::LuaCompilationFailed { .. }
+pub runvil::event::Event::LuaCompilationFailed::execution: alloc::string::String
+pub runvil::event::Event::LuaCompilationFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaCompilationFailed::section: alloc::string::String
+pub runvil::event::Event::LuaCompilationStarted { .. }
+pub runvil::event::Event::LuaCompilationStarted::execution: alloc::string::String
+pub runvil::event::Event::LuaCompilationStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaCompilationStarted::section: alloc::string::String
+pub runvil::event::Event::LuaCompilationSucceeded { .. }
+pub runvil::event::Event::LuaCompilationSucceeded::execution: alloc::string::String
+pub runvil::event::Event::LuaCompilationSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaCompilationSucceeded::section: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadFailed { .. }
+pub runvil::event::Event::LuaLibraryLoadFailed::execution: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadFailed::library: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaLibraryLoadFailed::section: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadStarted { .. }
+pub runvil::event::Event::LuaLibraryLoadStarted::execution: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadStarted::library: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaLibraryLoadStarted::section: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadSucceeded { .. }
+pub runvil::event::Event::LuaLibraryLoadSucceeded::execution: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadSucceeded::library: alloc::string::String
+pub runvil::event::Event::LuaLibraryLoadSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaLibraryLoadSucceeded::section: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingFailed { .. }
+pub runvil::event::Event::LuaReplyBindingFailed::execution: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaReplyBindingFailed::section: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingStarted { .. }
+pub runvil::event::Event::LuaReplyBindingStarted::execution: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaReplyBindingStarted::section: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingSucceeded { .. }
+pub runvil::event::Event::LuaReplyBindingSucceeded::execution: alloc::string::String
+pub runvil::event::Event::LuaReplyBindingSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaReplyBindingSucceeded::section: alloc::string::String
+pub runvil::event::Event::LuaTeardownStarted { .. }
+pub runvil::event::Event::LuaTeardownStarted::execution: alloc::string::String
+pub runvil::event::Event::LuaTeardownStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaTeardownStarted::section: alloc::string::String
+pub runvil::event::Event::LuaTeardownSucceeded { .. }
+pub runvil::event::Event::LuaTeardownSucceeded::execution: alloc::string::String
+pub runvil::event::Event::LuaTeardownSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::LuaTeardownSucceeded::section: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationFailed { .. }
+pub runvil::event::Event::ModelCatalogValidationFailed::execution: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelCatalogValidationFailed::section: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationStarted { .. }
+pub runvil::event::Event::ModelCatalogValidationStarted::execution: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelCatalogValidationStarted::section: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationSucceeded { .. }
+pub runvil::event::Event::ModelCatalogValidationSucceeded::execution: alloc::string::String
+pub runvil::event::Event::ModelCatalogValidationSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelCatalogValidationSucceeded::section: alloc::string::String
+pub runvil::event::Event::ModelMetadataDegraded { .. }
+pub runvil::event::Event::ModelMetadataDegraded::execution: alloc::string::String
+pub runvil::event::Event::ModelMetadataDegraded::message: alloc::string::String
+pub runvil::event::Event::ModelMetadataDegraded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelMetadataDegraded::section: alloc::string::String
+pub runvil::event::Event::ModelMetadataDegraded::turn: u32
+pub runvil::event::Event::ModelTurnCompleted { .. }
+pub runvil::event::Event::ModelTurnCompleted::execution: alloc::string::String
+pub runvil::event::Event::ModelTurnCompleted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelTurnCompleted::section: alloc::string::String
+pub runvil::event::Event::ModelTurnFailed { .. }
+pub runvil::event::Event::ModelTurnFailed::execution: alloc::string::String
+pub runvil::event::Event::ModelTurnFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelTurnFailed::section: alloc::string::String
+pub runvil::event::Event::ModelTurnTruncated { .. }
+pub runvil::event::Event::ModelTurnTruncated::execution: alloc::string::String
+pub runvil::event::Event::ModelTurnTruncated::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ModelTurnTruncated::section: alloc::string::String
+pub runvil::event::Event::ParseFailed { .. }
+pub runvil::event::Event::ParseFailed::execution: alloc::string::String
+pub runvil::event::Event::ParseFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ParseFailed::section: alloc::string::String
+pub runvil::event::Event::ParseStarted { .. }
+pub runvil::event::Event::ParseStarted::execution: alloc::string::String
+pub runvil::event::Event::ParseStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ParseStarted::section: alloc::string::String
+pub runvil::event::Event::ParseSucceeded { .. }
+pub runvil::event::Event::ParseSucceeded::execution: alloc::string::String
+pub runvil::event::Event::ParseSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ParseSucceeded::section: alloc::string::String
+pub runvil::event::Event::Request { .. }
+pub runvil::event::Event::Request::body: serde_json::value::Value
+pub runvil::event::Event::Request::execution: alloc::string::String
+pub runvil::event::Event::Request::provenance: runvil::ids::Provenance
+pub runvil::event::Event::Request::section: alloc::string::String
+pub runvil::event::Event::Request::turn: u32
+pub runvil::event::Event::Response { .. }
+pub runvil::event::Event::Response::body: serde_json::value::Value
+pub runvil::event::Event::Response::execution: alloc::string::String
+pub runvil::event::Event::Response::finish_reason: core::option::Option<alloc::string::String>
+pub runvil::event::Event::Response::provenance: runvil::ids::Provenance
+pub runvil::event::Event::Response::reasoning_content: core::option::Option<alloc::string::String>
+pub runvil::event::Event::Response::section: alloc::string::String
+pub runvil::event::Event::Response::turn: u32
+pub runvil::event::Event::RunFailed { .. }
+pub runvil::event::Event::RunFailed::execution: alloc::string::String
+pub runvil::event::Event::RunFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::RunFailed::section: alloc::string::String
+pub runvil::event::Event::RunStarted { .. }
+pub runvil::event::Event::RunStarted::execution: alloc::string::String
+pub runvil::event::Event::RunStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::RunStarted::section: alloc::string::String
+pub runvil::event::Event::RunSucceeded { .. }
+pub runvil::event::Event::RunSucceeded::execution: alloc::string::String
+pub runvil::event::Event::RunSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::RunSucceeded::section: alloc::string::String
+pub runvil::event::Event::SectionFinished { .. }
+pub runvil::event::Event::SectionFinished::execution: alloc::string::String
+pub runvil::event::Event::SectionFinished::provenance: runvil::ids::Provenance
+pub runvil::event::Event::SectionFinished::section: alloc::string::String
+pub runvil::event::Event::SectionStarted { .. }
+pub runvil::event::Event::SectionStarted::execution: alloc::string::String
+pub runvil::event::Event::SectionStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::SectionStarted::section: alloc::string::String
+pub runvil::event::Event::TaskAbandoned { .. }
+pub runvil::event::Event::TaskAbandoned::execution: alloc::string::String
+pub runvil::event::Event::TaskAbandoned::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskAbandoned::reason: runvil::ids::AbandonReason
+pub runvil::event::Event::TaskAbandoned::section: alloc::string::String
+pub runvil::event::Event::TaskAbandoned::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskCancelled { .. }
+pub runvil::event::Event::TaskCancelled::execution: alloc::string::String
+pub runvil::event::Event::TaskCancelled::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskCancelled::section: alloc::string::String
+pub runvil::event::Event::TaskCancelled::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskFailed { .. }
+pub runvil::event::Event::TaskFailed::execution: alloc::string::String
+pub runvil::event::Event::TaskFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskFailed::section: alloc::string::String
+pub runvil::event::Event::TaskFailed::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskNote { .. }
+pub runvil::event::Event::TaskNote::execution: alloc::string::String
+pub runvil::event::Event::TaskNote::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskNote::section: alloc::string::String
+pub runvil::event::Event::TaskNote::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskNote::text: alloc::string::String
+pub runvil::event::Event::TaskNotice { .. }
+pub runvil::event::Event::TaskNotice::execution: alloc::string::String
+pub runvil::event::Event::TaskNotice::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskNotice::section: alloc::string::String
+pub runvil::event::Event::TaskNotice::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskNotice::text: alloc::string::String
+pub runvil::event::Event::TaskNotice::turn: u32
+pub runvil::event::Event::TaskResumed { .. }
+pub runvil::event::Event::TaskResumed::execution: alloc::string::String
+pub runvil::event::Event::TaskResumed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskResumed::section: alloc::string::String
+pub runvil::event::Event::TaskResumed::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskStarted { .. }
+pub runvil::event::Event::TaskStarted::execution: alloc::string::String
+pub runvil::event::Event::TaskStarted::index: core::option::Option<u64>
+pub runvil::event::Event::TaskStarted::input: core::option::Option<alloc::string::String>
+pub runvil::event::Event::TaskStarted::item: core::option::Option<serde_json::value::Value>
+pub runvil::event::Event::TaskStarted::origin: runvil::ids::TaskOrigin
+pub runvil::event::Event::TaskStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskStarted::section: alloc::string::String
+pub runvil::event::Event::TaskStarted::target: alloc::string::String
+pub runvil::event::Event::TaskStarted::task: runvil::ids::TaskId
+pub runvil::event::Event::TaskStarted::var: serde_json::value::Value
+pub runvil::event::Event::TaskSucceeded { .. }
+pub runvil::event::Event::TaskSucceeded::execution: alloc::string::String
+pub runvil::event::Event::TaskSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::TaskSucceeded::section: alloc::string::String
+pub runvil::event::Event::TaskSucceeded::task: runvil::ids::TaskId
+pub runvil::event::Event::Thinking { .. }
+pub runvil::event::Event::Thinking::execution: alloc::string::String
+pub runvil::event::Event::Thinking::model: alloc::string::String
+pub runvil::event::Event::Thinking::provenance: runvil::ids::Provenance
+pub runvil::event::Event::Thinking::round: runvil::ids::RoundId
+pub runvil::event::Event::Thinking::section: alloc::string::String
+pub runvil::event::Event::Thinking::text: alloc::string::String
+pub runvil::event::Event::Thinking::turn: u32
+pub runvil::event::Event::ToolCallFailed { .. }
+pub runvil::event::Event::ToolCallFailed::execution: alloc::string::String
+pub runvil::event::Event::ToolCallFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolCallFailed::section: alloc::string::String
+pub runvil::event::Event::ToolCallSucceeded { .. }
+pub runvil::event::Event::ToolCallSucceeded::execution: alloc::string::String
+pub runvil::event::Event::ToolCallSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolCallSucceeded::section: alloc::string::String
+pub runvil::event::Event::ToolResult { .. }
+pub runvil::event::Event::ToolResult::alias: alloc::string::String
+pub runvil::event::Event::ToolResult::content: alloc::string::String
+pub runvil::event::Event::ToolResult::execution: alloc::string::String
+pub runvil::event::Event::ToolResult::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolResult::section: alloc::string::String
+pub runvil::event::Event::ToolResult::tool: core::option::Option<runvil::tools::ToolId>
+pub runvil::event::Event::ToolResult::tool_call_id: alloc::string::String
+pub runvil::event::Event::ToolResult::trusted: bool
+pub runvil::event::Event::ToolResult::turn: u32
+pub runvil::event::Event::ToolScopeValidationFailed { .. }
+pub runvil::event::Event::ToolScopeValidationFailed::execution: alloc::string::String
+pub runvil::event::Event::ToolScopeValidationFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolScopeValidationFailed::section: alloc::string::String
+pub runvil::event::Event::ToolScopeValidationStarted { .. }
+pub runvil::event::Event::ToolScopeValidationStarted::execution: alloc::string::String
+pub runvil::event::Event::ToolScopeValidationStarted::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolScopeValidationStarted::section: alloc::string::String
+pub runvil::event::Event::ToolScopeValidationSucceeded { .. }
+pub runvil::event::Event::ToolScopeValidationSucceeded::execution: alloc::string::String
+pub runvil::event::Event::ToolScopeValidationSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::ToolScopeValidationSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsAppendFailed { .. }
+pub runvil::event::Event::VfsAppendFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsAppendFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsAppendFailed::section: alloc::string::String
+pub runvil::event::Event::VfsAppendSucceeded { .. }
+pub runvil::event::Event::VfsAppendSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsAppendSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsAppendSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsDeleteFailed { .. }
+pub runvil::event::Event::VfsDeleteFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsDeleteFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsDeleteFailed::section: alloc::string::String
+pub runvil::event::Event::VfsDeleteSucceeded { .. }
+pub runvil::event::Event::VfsDeleteSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsDeleteSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsDeleteSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsExistsFailed { .. }
+pub runvil::event::Event::VfsExistsFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsExistsFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsExistsFailed::section: alloc::string::String
+pub runvil::event::Event::VfsExistsSucceeded { .. }
+pub runvil::event::Event::VfsExistsSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsExistsSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsExistsSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsGlobFailed { .. }
+pub runvil::event::Event::VfsGlobFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsGlobFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsGlobFailed::section: alloc::string::String
+pub runvil::event::Event::VfsGlobSucceeded { .. }
+pub runvil::event::Event::VfsGlobSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsGlobSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsGlobSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsReadFailed { .. }
+pub runvil::event::Event::VfsReadFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsReadFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReadFailed::section: alloc::string::String
+pub runvil::event::Event::VfsReadNumberedFailed { .. }
+pub runvil::event::Event::VfsReadNumberedFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsReadNumberedFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReadNumberedFailed::section: alloc::string::String
+pub runvil::event::Event::VfsReadNumberedSucceeded { .. }
+pub runvil::event::Event::VfsReadNumberedSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsReadNumberedSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReadNumberedSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsReadSucceeded { .. }
+pub runvil::event::Event::VfsReadSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsReadSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReadSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsReplaceFailed { .. }
+pub runvil::event::Event::VfsReplaceFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsReplaceFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReplaceFailed::section: alloc::string::String
+pub runvil::event::Event::VfsReplaceSucceeded { .. }
+pub runvil::event::Event::VfsReplaceSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsReplaceSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsReplaceSucceeded::section: alloc::string::String
+pub runvil::event::Event::VfsWriteFailed { .. }
+pub runvil::event::Event::VfsWriteFailed::execution: alloc::string::String
+pub runvil::event::Event::VfsWriteFailed::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsWriteFailed::section: alloc::string::String
+pub runvil::event::Event::VfsWriteSucceeded { .. }
+pub runvil::event::Event::VfsWriteSucceeded::execution: alloc::string::String
+pub runvil::event::Event::VfsWriteSucceeded::provenance: runvil::ids::Provenance
+pub runvil::event::Event::VfsWriteSucceeded::section: alloc::string::String
+pub runvil::event::ReplyOrigin::Chat
+pub runvil::event::ReplyOrigin::Infer
+pub runvil::ids::AbandonReason::OwnerAborted
+pub runvil::ids::AbandonReason::OwnerFailed
+pub runvil::ids::AbandonReason::OwnerReturned
+pub runvil::ids::AbandonReason::RunTerminated
+pub runvil::ids::AbandonReason::ToolLoopExhausted
+pub runvil::ids::Provenance::seq: u32
+pub runvil::ids::Provenance::task: runvil::ids::TaskId
+pub runvil::ids::TaskOrigin::Author
+pub runvil::ids::TaskOrigin::Model
+pub runvil::metrics::CallMetrics::client: core::option::Option<runvil::metrics::ClientTiming>
+pub runvil::metrics::CallMetrics::llama: core::option::Option<runvil::metrics::LlamaTimings>
+pub runvil::metrics::CallMetrics::usage: core::option::Option<runvil::metrics::Usage>
+pub runvil::metrics::CallMetrics::vllm: core::option::Option<runvil::metrics::VllmMetrics>
+pub runvil::metrics::ClientTiming::e2e_ms: f64
+pub runvil::metrics::ClientTiming::mean_itl_ms: core::option::Option<f64>
+pub runvil::metrics::ClientTiming::ttft_ms: core::option::Option<f64>
+pub runvil::metrics::LlamaTimings::draft_n: u32
+pub runvil::metrics::LlamaTimings::draft_n_accepted: u32
+pub runvil::metrics::LlamaTimings::predicted_ms: f64
+pub runvil::metrics::LlamaTimings::predicted_n: u32
+pub runvil::metrics::LlamaTimings::predicted_per_second: f64
+pub runvil::metrics::LlamaTimings::prompt_ms: f64
+pub runvil::metrics::LlamaTimings::prompt_n: u32
+pub runvil::metrics::LlamaTimings::prompt_per_second: f64
+pub runvil::metrics::ToolCallEvent::arguments: serde_json::value::Value
+pub runvil::metrics::ToolCallEvent::id: alloc::string::String
+pub runvil::metrics::ToolCallEvent::name: alloc::string::String
+pub runvil::metrics::ToolCallEvent::tool: core::option::Option<runvil::tools::ToolId>
+pub runvil::metrics::Usage::cached_tokens: core::option::Option<u32>
+pub runvil::metrics::Usage::completion_tokens: u32
+pub runvil::metrics::Usage::prompt_tokens: u32
+pub runvil::metrics::Usage::reasoning_tokens: core::option::Option<u32>
+pub runvil::metrics::Usage::total_tokens: u32
+pub runvil::metrics::VllmMetrics::generation_time_ms: core::option::Option<f64>
+pub runvil::metrics::VllmMetrics::mean_itl_ms: core::option::Option<f64>
+pub runvil::metrics::VllmMetrics::queue_time_ms: core::option::Option<f64>
+pub runvil::metrics::VllmMetrics::time_to_first_token_ms: core::option::Option<f64>
+pub runvil::metrics::VllmMetrics::tokens_per_second: core::option::Option<f64>
+pub runvil::model::CompletionErrorKind::ContextOverflow
+pub runvil::model::CompletionErrorKind::EmptyReply
+pub runvil::model::CompletionErrorKind::InvalidParts
+pub runvil::model::CompletionErrorKind::MalformedResponse
+pub runvil::model::CompletionErrorKind::Overloaded
+pub runvil::model::CompletionErrorKind::QuotaExhausted
+pub runvil::model::CompletionErrorKind::RateLimited
+pub runvil::model::CompletionErrorKind::Refused
+pub runvil::model::CompletionErrorKind::Rejected
+pub runvil::model::CompletionErrorKind::ServerError
+pub runvil::model::CompletionErrorKind::Timeout
+pub runvil::model::CompletionErrorKind::Transport
+pub runvil::model::CompletionErrorKind::Unavailable
+pub runvil::model::CompletionResult::Text(..)
+pub runvil::model::CompletionResult::Text::0: alloc::string::String
+pub runvil::model::CompletionResult::ToolCalls(..)
+pub runvil::model::CompletionResult::ToolCalls::0: alloc::vec::Vec<runvil::model::ToolCall>
+pub runvil::model::ModelCatalogError::DuplicateId::name: alloc::string::String
+pub runvil::model::ModelCatalogError::DuplicateId::server: alloc::string::String
+pub runvil::model::ModelInvocation::max_tokens: core::option::Option<core::num::nonzero::NonZeroU32>
+pub runvil::model::ModelInvocation::temperature: core::option::Option<runvil::model::Temperature>
+pub runvil::model::ModelInvocation::thinking: core::option::Option<bool>
+pub runvil::model::Role::Assistant
+pub runvil::model::Role::System
+pub runvil::model::Role::Tool
+pub runvil::model::Role::User
+pub runvil::model::TemperatureError::NotFinite
+pub runvil::model::TemperatureError::OutOfRange::value: f64
+pub runvil::model::ThinkingMode::Always
+pub runvil::model::ThinkingMode::Never
+pub runvil::model::ThinkingMode::Switchable
+pub runvil::plugins::GlobalNameErrorKind::Charset
+pub runvil::plugins::GlobalNameErrorKind::Control
+pub runvil::plugins::GlobalNameErrorKind::Empty
+pub runvil::plugins::PluginIdErrorKind::Charset
+pub runvil::plugins::PluginIdErrorKind::Control
+pub runvil::plugins::PluginIdErrorKind::Empty
+pub runvil::plugins::PluginIdErrorKind::SegmentCount
+pub runvil::prompt::ArgType::Boolean
+pub runvil::prompt::ArgType::Integer
+pub runvil::prompt::ArgType::Number
+pub runvil::prompt::ArgType::String
+pub runvil::prompt::ModelKeyword::Chat
+pub runvil::prompt::ModelKeyword::Creative
+pub runvil::prompt::ModelKeyword::Fast
+pub runvil::prompt::ModelKeyword::Frontier
+pub runvil::prompt::ModelKeyword::NoThinking
+pub runvil::prompt::ModelKeyword::Small
+pub runvil::prompt::ModelKeyword::Thinking
+pub runvil::tools::OutputTrust::Trusted
+pub runvil::tools::OutputTrust::Untrusted
+pub runvil::tools::ToolCatalogError::DuplicateId::id: runvil::tools::ToolId
+pub runvil::tools::ToolCatalogErrorKind::DuplicateId
+pub runvil::tools::ToolDescriptor::description: alloc::string::String
+pub runvil::tools::ToolDescriptor::id: runvil::tools::ToolId
+pub runvil::tools::ToolDescriptor::parameters_schema: serde_json::value::Value
+pub runvil::tools::ToolDescriptor::structured_output: bool
+pub runvil::tools::ToolDescriptor::survives_stop: bool
+pub runvil::tools::ToolErrorKind::Backend
+pub runvil::tools::ToolErrorKind::Cancelled
+pub runvil::tools::ToolErrorKind::InvalidArguments
+pub runvil::tools::ToolErrorKind::Other
+pub runvil::tools::ToolErrorKind::Transport
+pub runvil::tools::ToolIdErrorKind::Charset
+pub runvil::tools::ToolIdErrorKind::Control
+pub runvil::tools::ToolIdErrorKind::Empty
+pub runvil::tools::ToolIdErrorKind::SegmentCount
+pub runvil::vfs::Depth::One
+pub runvil::vfs::Depth::Recursive
+pub runvil::vfs::Entry::description: core::option::Option<alloc::string::String>
+pub runvil::vfs::Entry::name: alloc::string::String
+pub runvil::vfs::Entry::stat: runvil::vfs::Stat
+pub runvil::vfs::FileType::BlockDevice
+pub runvil::vfs::FileType::CharDevice
+pub runvil::vfs::FileType::Directory
+pub runvil::vfs::FileType::Fifo
+pub runvil::vfs::FileType::File
+pub runvil::vfs::FileType::Socket
+pub runvil::vfs::FileType::Symlink
+pub runvil::vfs::GlobKind::DirsOnly
+pub runvil::vfs::GlobKind::FilesOnly
+pub runvil::vfs::Mode::Agent
+pub runvil::vfs::Mode::Ask
+pub runvil::vfs::Mode::Plan
+pub runvil::vfs::Op::Append
+pub runvil::vfs::Op::Chmod
+pub runvil::vfs::Op::Copy
+pub runvil::vfs::Op::Delete
+pub runvil::vfs::Op::Exists
+pub runvil::vfs::Op::Glob
+pub runvil::vfs::Op::List
+pub runvil::vfs::Op::Mkdir
+pub runvil::vfs::Op::Read
+pub runvil::vfs::Op::ReadLink
+pub runvil::vfs::Op::Rename
+pub runvil::vfs::Op::Stat
+pub runvil::vfs::Op::Symlink
+pub runvil::vfs::Op::Write
+pub runvil::vfs::Origin::file: alloc::string::String
+pub runvil::vfs::Origin::label: alloc::string::String
+pub runvil::vfs::Origin::line: u32
+pub runvil::vfs::PathReason::Absolute
+pub runvil::vfs::PathReason::Backslash
+pub runvil::vfs::PathReason::Control
+pub runvil::vfs::PathReason::Empty
+pub runvil::vfs::PathReason::EmptySegment
+pub runvil::vfs::PathReason::IntoDescendant
+pub runvil::vfs::PathReason::ReservedName
+pub runvil::vfs::PathReason::TooLong
+pub runvil::vfs::PathReason::Traversal
+pub runvil::vfs::PathReason::UnsafeSuffix
+pub runvil::vfs::PathReason::Wildcard
+pub runvil::vfs::Stat::created: core::option::Option<std::time::SystemTime>
+pub runvil::vfs::Stat::file_type: runvil::vfs::FileType
+pub runvil::vfs::Stat::mode: core::option::Option<u32>
+pub runvil::vfs::Stat::modified: core::option::Option<std::time::SystemTime>
+pub runvil::vfs::Stat::size: u64
+pub runvil::vfs::Verdict::Allow
+pub runvil::vfs::Verdict::Ask(..)
+pub runvil::vfs::Verdict::Ask::0: alloc::string::String
+pub runvil::vfs::Verdict::Deny(..)
+pub runvil::vfs::Verdict::Deny::0: alloc::string::String
+pub runvil::vfs::VfsError::AlreadyExists { .. }
+pub runvil::vfs::VfsError::AlreadyExists::path: alloc::string::String
+pub runvil::vfs::VfsError::Anchor { .. }
+pub runvil::vfs::VfsError::Anchor::anchor: alloc::string::String
+pub runvil::vfs::VfsError::Anchor::count: usize
+pub runvil::vfs::VfsError::Anchor::path: alloc::string::String
+pub runvil::vfs::VfsError::ApprovalRequired { .. }
+pub runvil::vfs::VfsError::ApprovalRequired::path: alloc::string::String
+pub runvil::vfs::VfsError::ApprovalRequired::reason: alloc::string::String
+pub runvil::vfs::VfsError::Backend { .. }
+pub runvil::vfs::VfsError::Backend::message: alloc::string::String
+pub runvil::vfs::VfsError::Conflict { .. }
+pub runvil::vfs::VfsError::Conflict::detail: alloc::string::String
+pub runvil::vfs::VfsError::Conflict::path: alloc::string::String
+pub runvil::vfs::VfsError::CrossMount { .. }
+pub runvil::vfs::VfsError::CrossMount::detail: alloc::string::String
+pub runvil::vfs::VfsError::CrossMount::path: alloc::string::String
+pub runvil::vfs::VfsError::DirectoryNotEmpty { .. }
+pub runvil::vfs::VfsError::DirectoryNotEmpty::path: alloc::string::String
+pub runvil::vfs::VfsError::InvalidPath { .. }
+pub runvil::vfs::VfsError::InvalidPath::path: alloc::string::String
+pub runvil::vfs::VfsError::InvalidPath::reason: runvil::vfs::PathReason
+pub runvil::vfs::VfsError::InvalidRange { .. }
+pub runvil::vfs::VfsError::InvalidRange::path: alloc::string::String
+pub runvil::vfs::VfsError::InvalidRange::reason: &'static str
+pub runvil::vfs::VfsError::Io { .. }
+pub runvil::vfs::VfsError::Io::kind: core::io::error::ErrorKind
+pub runvil::vfs::VfsError::Io::message: alloc::string::String
+pub runvil::vfs::VfsError::Io::path: alloc::string::String
+pub runvil::vfs::VfsError::Io::raw_os_error: core::option::Option<i32>
+pub runvil::vfs::VfsError::IsADirectory { .. }
+pub runvil::vfs::VfsError::IsADirectory::path: alloc::string::String
+pub runvil::vfs::VfsError::NoStore
+pub runvil::vfs::VfsError::NotADirectory { .. }
+pub runvil::vfs::VfsError::NotADirectory::path: alloc::string::String
+pub runvil::vfs::VfsError::NotFound { .. }
+pub runvil::vfs::VfsError::NotFound::path: alloc::string::String
+pub runvil::vfs::VfsError::NotUtf8 { .. }
+pub runvil::vfs::VfsError::NotUtf8::path: alloc::string::String
+pub runvil::vfs::VfsError::NotUtf8::valid_up_to: usize
+pub runvil::vfs::VfsError::OutsideRoot { .. }
+pub runvil::vfs::VfsError::OutsideRoot::detail: alloc::string::String
+pub runvil::vfs::VfsError::OutsideRoot::path: alloc::string::String
+pub runvil::vfs::VfsError::PermissionDenied { .. }
+pub runvil::vfs::VfsError::PermissionDenied::path: alloc::string::String
+pub runvil::vfs::VfsError::PermissionDenied::reason: alloc::string::String
+pub runvil::vfs::VfsError::ReadOnly { .. }
+pub runvil::vfs::VfsError::ReadOnly::path: alloc::string::String
+pub runvil::vfs::VfsError::RootProtected { .. }
+pub runvil::vfs::VfsError::RootProtected::path: alloc::string::String
+pub runvil::vfs::VfsError::ScopeEnded { .. }
+pub runvil::vfs::VfsError::ScopeEnded::path: alloc::string::String
+pub runvil::vfs::VfsError::Unsupported { .. }
+pub runvil::vfs::VfsError::Unsupported::detail: alloc::string::String
+pub runvil::vfs::VfsError::Unsupported::path: alloc::string::String
+pub runvil::vfs::VfsOp::Append { .. }
+pub runvil::vfs::VfsOp::Append::contents: alloc::string::String
+pub runvil::vfs::VfsOp::Append::path: alloc::string::String
+pub runvil::vfs::VfsOp::Delete { .. }
+pub runvil::vfs::VfsOp::Delete::path: alloc::string::String
+pub runvil::vfs::VfsOp::Exists { .. }
+pub runvil::vfs::VfsOp::Exists::path: alloc::string::String
+pub runvil::vfs::VfsOp::Glob { .. }
+pub runvil::vfs::VfsOp::Glob::pattern: alloc::string::String
+pub runvil::vfs::VfsOp::Read { .. }
+pub runvil::vfs::VfsOp::Read::end: core::option::Option<i64>
+pub runvil::vfs::VfsOp::Read::path: alloc::string::String
+pub runvil::vfs::VfsOp::Read::start: core::option::Option<i64>
+pub runvil::vfs::VfsOp::ReadNumbered { .. }
+pub runvil::vfs::VfsOp::ReadNumbered::end: core::option::Option<i64>
+pub runvil::vfs::VfsOp::ReadNumbered::path: alloc::string::String
+pub runvil::vfs::VfsOp::ReadNumbered::start: core::option::Option<i64>
+pub runvil::vfs::VfsOp::StrReplace { .. }
+pub runvil::vfs::VfsOp::StrReplace::new: alloc::string::String
+pub runvil::vfs::VfsOp::StrReplace::old: alloc::string::String
+pub runvil::vfs::VfsOp::StrReplace::path: alloc::string::String
+pub runvil::vfs::VfsOp::Write { .. }
+pub runvil::vfs::VfsOp::Write::contents: alloc::string::String
+pub runvil::vfs::VfsOp::Write::path: alloc::string::String
+pub runvil::vfs::VfsOutcome::Bool(..)
+pub runvil::vfs::VfsOutcome::Bool::0: bool
+pub runvil::vfs::VfsOutcome::Paths(..)
+pub runvil::vfs::VfsOutcome::Paths::0: alloc::vec::Vec<alloc::string::String>
+pub runvil::vfs::VfsOutcome::Text(..)
+pub runvil::vfs::VfsOutcome::Text::0: alloc::string::String
+pub runvil::vfs::VfsOutcome::Unit
+pub runvil::vfs::Writability::ReadOnly
+pub runvil::vfs::Writability::ReadWrite
+pub struct runvil::Run { /* private fields */ }
+pub struct runvil::RunSeed(/* private fields */)
+pub struct runvil::RunUid(/* private fields */)
+pub struct runvil::cancel::CancelHandle { /* private fields */ }
+pub struct runvil::cancel::Cancelled { /* private fields */ }
+pub struct runvil::effect::EffectId(/* private fields */)
+pub struct runvil::ids::ChainId(/* private fields */)
+pub struct runvil::ids::ParseIdError { /* private fields */ }
+pub struct runvil::ids::ParseTaskOriginError { /* private fields */ }
+pub struct runvil::ids::RoundId(/* private fields */)
+pub struct runvil::ids::TaskId(/* private fields */)
+pub struct runvil::model::ArgumentNames<'a> { /* private fields */ }
+pub struct runvil::model::ModelBinding { /* private fields */ }
+pub struct runvil::model::ParseRoleError { /* private fields */ }
+pub struct runvil::model::Temperature(/* private fields */)
+pub struct runvil::plugins::GlobalName { /* private fields */ }
+pub struct runvil::plugins::Prelude { /* private fields */ }
+pub struct runvil::prompt::ArgsDeclIter<'a> { /* private fields */ }
+pub struct runvil::prompt::ModelRolesIter<'a> { /* private fields */ }
+pub struct runvil::replay::Flags(/* private fields */)
+pub struct runvil::timestamp::Timestamp(/* private fields */)
+pub struct runvil::vfs::Access { /* private fields */ }
+pub struct runvil::vfs::AcquireContext { /* private fields */ }
+pub struct runvil::vfs::AllowAll;
+pub struct runvil::vfs::ExecId(/* private fields */)
+pub struct runvil::vfs::ModeHandle { /* private fields */ }
+pub struct runvil::vfs::ModePolicy { /* private fields */ }
+pub struct runvil::vfs::OpEvent<'a> { /* private fields */ }
+pub struct runvil::vfs::ParsePathReasonError { /* private fields */ }
+pub struct runvil::vfs::VfsPath { /* private fields */ }
+pub struct runvil::vfs::VfsPathBuf(/* private fields */)
+pub struct runvil::vfs::VfsRef { /* private fields */ }
+pub struct runvil::vfs::VfsRefBuilder { /* private fields */ }
+pub trait runvil::vfs::Policy: core::marker::Send
+pub trait runvil::vfs::Vfs: core::marker::Send
+pub trait runvil::vfs::VfsAccess: core::marker::Send
+pub type runvil::vfs::OpSink = alloc::sync::Arc<dyn core::ops::function::Fn(runvil::vfs::OpEvent<'_>) + core::marker::Send + core::marker::Sync>

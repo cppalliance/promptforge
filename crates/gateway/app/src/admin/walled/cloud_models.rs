@@ -1,7 +1,7 @@
 //! The cloud provider model sheet cache and its admin routes.
 //!
 //! The published provider sheet (the gateway-api-types [`Sheet`]) is a
-//! release artifact of the promptforge-cloud-providers repository. At
+//! release artifact of the runvil-cloud-providers repository. At
 //! launch, after the async boot completes and off the serving path, the
 //! gateway loads `<profile>/cloud-provider-models.json` from disk when
 //! present, parseable, and of an accepted schema version (an

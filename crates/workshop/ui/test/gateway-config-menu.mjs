@@ -108,7 +108,7 @@ console.error = (...args) => {
   consoleErrors.push(args.join(" "));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-step19-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-step19-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   Commands,

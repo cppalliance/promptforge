@@ -176,7 +176,7 @@ impl Capabilities {
     }
 }
 
-/// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
+/// One catalogued model, with Runvil extensions beside the OpenAI `id`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ModelInfo {
     /// The caller-facing model name (`[[model]].name`).

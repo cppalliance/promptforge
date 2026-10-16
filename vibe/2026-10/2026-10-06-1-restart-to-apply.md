@@ -1,6 +1,6 @@
 ---
 name: Restart to Apply and Gateway supervisor
-overview: "Make config changes that need a restart land atomically with that restart, so the files, the UI, and the running gateway never disagree. The default `promptforge-gateway` launch becomes a long-lived, background supervisor process that runs the serving gateway, tray included, as a child; that child asks for a restart by exiting with `RESTART_REQUESTED`, and the supervisor relaunches it on the same port. If the new gateway fails to boot, the supervisor rolls back the new config to pending and retries. In the config UI, whenever pending changes need a restart, 'Apply' becomes 'Restart to Apply'."
+overview: "Make config changes that need a restart land atomically with that restart, so the files, the UI, and the running gateway never disagree. The default `runvil-gateway` launch becomes a long-lived, background supervisor process that runs the serving gateway, tray included, as a child; that child asks for a restart by exiting with `RESTART_REQUESTED`, and the supervisor relaunches it on the same port. If the new gateway fails to boot, the supervisor rolls back the new config to pending and retries. In the config UI, whenever pending changes need a restart, 'Apply' becomes 'Restart to Apply'."
 todos:
   - id: pending-env-validation
     content: "Resolve ${VAR} at save and capture against the pending env file, then the process env, so a key staged on the Secrets tab validates the endpoint that references it"
@@ -18,7 +18,7 @@ todos:
     content: "Config UI: Restart to Apply button, Restart now on the profile banner, rollback failure display, unsupervised fallback; harness and tests"
     status: pending
   - id: docs
-    content: "User guide (promptforge-docs) and gateway README: supervisor model, Restart to Apply, rollback"
+    content: "User guide (runvil-docs) and gateway README: supervisor model, Restart to Apply, rollback"
     status: pending
 isProject: false
 ---
@@ -62,7 +62,7 @@ What stays the same: the tray icon (it belongs to the gateway, so it disappears 
 
 ```mermaid
 flowchart TD
-    Launch["promptforge-gateway (bare, --login, --no-tray)"] --> Sup[supervisor]
+    Launch["runvil-gateway (bare, --login, --no-tray)"] --> Sup[supervisor]
     Desktop[workshop desktop supervisor] -->|"bare launch, unchanged"| Sup
     Sup -->|"spawn --supervised --port-hint P, stdin pipe"| Child["serving gateway (tray unless --no-tray)"]
     Child -->|"exit 0"| SupExit[supervisor exits]
@@ -99,7 +99,7 @@ sequenceDiagram
 ## Decisions
 
 - **Restart is an exit code, not a spawn.** A child that wants a restart shuts down gracefully and exits with `RESTART_REQUESTED`, one constant in the gateway crate (value 75) that `main` and the supervisor both name. The child never launches its successor, so the lease and port races of a self-restart do not exist. The code is private to the supervisor and its child; the supervisor never exits with it, so the value carries no meaning outside the pair beyond being distinct from 0 and 1 and below the 128+N signal range.
-- **No service-manager special case.** The shipped unit (`crates/gateway/app/packaging/gateway.service`) runs `promptforge-gateway --config ... --profile main` with `Restart=on-failure`; that launch becomes a supervisor like any other, and the supervisor's own exit behaves as the gateway's does today: 0 on a stop, and the child's own non-zero code at once when the first boot fails or a running gateway dies, so systemd's restart policy applies unchanged and on the same schedule. A UI restart happens inside the supervisor and systemd never sees it. `--supervised` is an internal flag between the supervisor and its child, not documented for users. The unit file does not change.
+- **No service-manager special case.** The shipped unit (`crates/gateway/app/packaging/gateway.service`) runs `runvil-gateway --config ... --profile main` with `Restart=on-failure`; that launch becomes a supervisor like any other, and the supervisor's own exit behaves as the gateway's does today: 0 on a stop, and the child's own non-zero code at once when the first boot fails or a running gateway dies, so systemd's restart policy applies unchanged and on the same schedule. A UI restart happens inside the supervisor and systemd never sees it. `--supervised` is an internal flag between the supervisor and its child, not documented for users. The unit file does not change.
 - **The supervisor is the same binary.** A bare launch, `--login`, and `--no-tray` run the supervisor; `--supervised` runs the serving gateway as today, tray included unless `--no-tray` is also given. The Windows Run key, the Linux autostart file, macOS `SMAppService`, the installer, and the workshop desktop's bare launch (`workshop/desktop/src/gateway/boot.rs:166-173`) all keep working with no change to what they launch.
 - **The child keeps the instance lease; the supervisor uses the launch election.** The discovery file and the lease identify the serving process by pid and image (`runner.rs:1071`, `gateway-api-discovery/src/validated.rs:16-19`), so they stay with the child and `settle_gateway_startup` is untouched. The supervisor settles its own start with `launch_or_attach` (`gateway-api-discovery/src/lock.rs:106`): `Attach` is today's second-launch handoff (open Settings unless `--login`), `Launch(lock)` spawns the first child. Across a restart the supervisor takes `gateway.json.lock` before the old child exits and holds it until the new child publishes. The desktop supervisor, which sees the gap as `Missing` on its 5 s probe (`workshop/desktop/src/gateway/supervisor.rs:88-108`), then waits in its own `launch_or_attach` and attaches to the new child instead of launching a competitor. This reuses the election exactly as the lock's doc describes it ("a Workshop parent may hold the launch election while the spawned Gateway acquires this lease", `lock.rs:35-37`).
 - **Orphan safety through a stdin pipe.** The supervisor gives the child a piped stdin; a supervised child watches it on a thread and fires `ShutdownSignal` on EOF. Killing the supervisor closes the pipe on every OS, so the child shuts down gracefully and its `llama-server` children drop through `ServerGuard::drop` (`gateway/local/src/server.rs:586-594`). No Job Object, `PR_SET_PDEATHSIG`, or new unsafe code. Orphaned `llama-server` children after a hard kill of the serving process itself are a pre-existing gap and out of scope.
@@ -123,7 +123,7 @@ sequenceDiagram
 
 Fixes the reproduced Secrets-then-Cloud-Models failure in Problem: validation of pending config resolves `${VAR}` against the environment the next boot will have, not only the environment this process booted with.
 
-- Write the failing test first, at the route level in `admin/walled/config-tests.rs`: stage `gateway.env.next` holding a variable no test process sets (a unique name such as `PF_TEST_STAGED_KEY`), then `PUT /admin/config` with a document that adds an `openai` endpoint whose `api_key` is `"${PF_TEST_STAGED_KEY}"`, the shape `mergeCloudModel` sends. Today it fails with `UnresolvedVar`; after this step it stages.
+- Write the failing test first, at the route level in `admin/walled/config-tests.rs`: stage `gateway.env.next` holding a variable no test process sets (a unique name such as `RV_TEST_STAGED_KEY`), then `PUT /admin/config` with a document that adds an `openai` endpoint whose `api_key` is `"${RV_TEST_STAGED_KEY}"`, the shape `mergeCloudModel` sends. Today it fails with `UnresolvedVar`; after this step it stages.
 - `gateway-config` interpolation takes a lookup (`VarLookupFn`, `config/src/config/interpolate.rs`) instead of calling `std::env::var` directly. `Config::parse_toml_at` passes the process environment, so the boot path does not change; `Config::parse_toml_with_lookup` takes the caller's lookup. `save_config_shadow` and `load_pending_config` gain a `lookup` parameter and resolve through it.
 - The env file is read in the gateway app, not the config crate, which keeps its rule of loading no env files (`vibe/2026-08/2026-08-23-1-dominion-refactor.md:284`). `PendingEnv` in `app/src/config_shadow.rs` reads the pending env file into a map without touching the process environment: `gateway.env.next` when staged, else `gateway.env`. `read_env_file` there replaces `env_file.rs`'s `parse_env`, so `GET /admin/env` and `PendingEnv` share one reader. The three app callers (`admin/walled/config.rs`, `admin/walled/config_pending.rs`, `commands/apply.rs`) pass `PendingEnv::resolve_var`; the save builds it inside `blocking`.
 - Precedence is file first, then the process environment, so a key edited in the UI validates with its new value even when the boot loaded an older one from `gateway.env`. Two cases differ from the next boot, documented on `resolve_var` and accepted because a user who sets a key in the launching shell does not also edit it in the UI: a variable the launching process exports resolves to the file's value, while the boot keeps the export; and a variable deleted from the pending file still resolves from the process environment, which loaded it at boot (Step 4's rollback catches a boot that then fails). Telling external variables from file-loaded ones would need `load_env_file` to record the names it set; not done.
@@ -194,9 +194,9 @@ This step only adds the option; nothing passes it yet. Step 4's supervisor is it
 
 ## Step 6: Docs
 
-- The gateway book's chapters live in the separate `promptforge-docs` checkout (`crates/build-xtask/src/site.rs:4-5`, located through `PROMPTFORGE_DOCS`), not in this repo; that change is a commit there. Find the pages that describe starting the gateway, the tray, Apply, the env file, the config UI's restart banner, and profile selection, and update them for: the supervisor model (one visible behavior change: the tray icon disappears briefly during a restart), Restart to Apply, `.prev` files and rollback, and the end of "restart the gateway by hand" for supervised gateways. Nothing about systemd changes.
+- The gateway book's chapters live in the separate `runvil-docs` checkout (`crates/build-xtask/src/site.rs:4-5`, located through `RUNVIL_DOCS`), not in this repo; that change is a commit there. Find the pages that describe starting the gateway, the tray, Apply, the env file, the config UI's restart banner, and profile selection, and update them for: the supervisor model (one visible behavior change: the tray icon disappears briefly during a restart), Restart to Apply, `.prev` files and rollback, and the end of "restart the gateway by hand" for supervised gateways. Nothing about systemd changes.
 - `crates/gateway/app/README.md`: "System tray", "The `[server]` section", "Process-owned sections"; the new route.
-- Build the books with `PROMPTFORGE_DOCS` set and `cargo xtask site --books-only`.
+- Build the books with `RUNVIL_DOCS` set and `cargo xtask site --books-only`.
 - Commit: `Document the gateway supervisor and Restart to Apply`
 
 ## Follow-up plans

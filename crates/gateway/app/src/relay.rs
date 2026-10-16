@@ -22,7 +22,7 @@ use crate::wire::{
 };
 
 /// Header naming the caller for fair queue scheduling. Absent → `"default"`.
-pub(crate) const CLIENT_HEADER: &str = "X-PromptForge-Client";
+pub(crate) const CLIENT_HEADER: &str = "X-Runvil-Client";
 
 const CHAT_COMPLETIONS: RouteInfo = RouteInfo::open("/v1/chat/completions", &[Method::POST]);
 const EMBEDDINGS: RouteInfo = RouteInfo::open("/v1/embeddings", &[Method::POST]);

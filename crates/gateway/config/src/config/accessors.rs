@@ -188,7 +188,7 @@ impl ServerConfig {
 
 impl LocalConfig {
     /// Returns the root directory for GGUF files and the pinned
-    /// `llama-server` install, or `None` for the default `~/.promptforge`.
+    /// `llama-server` install, or `None` for the default `~/.runvil`.
     #[must_use]
     pub fn cache_dir(&self) -> Option<&str> {
         self.cache_dir.as_deref()

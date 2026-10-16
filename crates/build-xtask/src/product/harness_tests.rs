@@ -1,5 +1,5 @@
 //! Harness-family fixtures: outside their family, Harness crates depend on
-//! `promptforge` and `promptforge-plugin` only, and outside crates reach
+//! `runvil` and `runvil-plugin` only, and outside crates reach
 //! the family only through `harness` and `harness-gateway-client`.
 
 use super::product_boundary_violations;
@@ -55,13 +55,13 @@ fn a_harness_crate_depending_on_the_plugin_contract_passes() {
         root.path(),
         "harness-internal/plugins",
         "harness-plugins",
-        "[dependencies]\npromptforge-plugin = { path = \"../../promptforge-plugin\" }\n",
+        "[dependencies]\nrunvil-plugin = { path = \"../../runvil-plugin\" }\n",
     );
-    write_crate(root.path(), "promptforge-plugin", "promptforge-plugin", "");
+    write_crate(root.path(), "runvil-plugin", "runvil-plugin", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
-        "promptforge-plugin is the second public promptforge crate harness crates may name: {violations:?}"
+        "runvil-plugin is the second public runvil crate harness crates may name: {violations:?}"
     );
 }
 
@@ -80,7 +80,7 @@ fn a_harness_crate_build_depending_on_a_build_crate_is_reported() {
     assert!(
         violations[0].starts_with("harness-runner depends on build-ui:")
             && violations[0].contains(
-                "harness crates must not depend on build-* crates; outside their family they may name only promptforge and promptforge-plugin"
+                "harness crates must not depend on build-* crates; outside their family they may name only runvil and runvil-plugin"
             ),
         "build-* crates are closed to harness crates in every dependency table: {violations:?}"
     );
@@ -101,7 +101,7 @@ fn a_harness_crate_depending_on_an_unaffiliated_crate_is_reported() {
     assert!(
         violations[0].starts_with("harness-plugins depends on some-tool:")
             && violations[0].contains(
-                "harness crates must not depend on unaffiliated crates; outside their family they may name only promptforge and promptforge-plugin"
+                "harness crates must not depend on unaffiliated crates; outside their family they may name only runvil and runvil-plugin"
             ),
         "unaffiliated crates are closed to harness crates: {violations:?}"
     );

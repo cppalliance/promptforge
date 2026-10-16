@@ -55,7 +55,7 @@ export class UpdateView extends Disposable {
     }
     this.notifiedPhase = snapshot.phase;
     if (snapshot.phase === "available") {
-      this.toasts.show(`PromptForge ${snapshot.version} is available`, "info");
+      this.toasts.show(`Runvil ${snapshot.version} is available`, "info");
     } else if (snapshot.phase === "error" && !snapshot.background) {
       this.toasts.show(`Update failed: ${snapshot.error}`, "error");
     }
@@ -68,7 +68,7 @@ export class UpdateView extends Disposable {
       return;
     }
     const title = document.createElement("strong");
-    title.textContent = `PromptForge ${snapshot.version} is available`;
+    title.textContent = `Runvil ${snapshot.version} is available`;
     const notes = document.createElement("p");
     notes.textContent = snapshot.notes || "A new desktop release is ready.";
     const actions = document.createElement("div");
@@ -109,7 +109,7 @@ export class UpdateView extends Disposable {
     panel.setAttribute("aria-labelledby", "update-screen-title");
     const title = document.createElement("h2");
     title.id = "update-screen-title";
-    title.textContent = `Updating to PromptForge ${snapshot.version}`;
+    title.textContent = `Updating to Runvil ${snapshot.version}`;
     const status = document.createElement("p");
     const progressValue = percentage(snapshot);
     if (snapshot.phase === "downloading") {
@@ -118,7 +118,7 @@ export class UpdateView extends Disposable {
     } else if (snapshot.phase === "installing") {
       status.textContent = "Installing Update...";
     } else if (snapshot.phase === "restarting") {
-      status.textContent = "Restarting PromptForge...";
+      status.textContent = "Restarting Runvil...";
     } else {
       status.textContent = `Update failed: ${snapshot.error}`;
     }

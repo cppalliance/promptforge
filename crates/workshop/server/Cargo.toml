@@ -18,9 +18,9 @@ harness.workspace = true
 # The Gateway web search client the agent sessions' search provider
 # sends each search through.
 harness-gateway-client.workspace = true
-# The two Plugins every agent run's Host installs: `promptforge/web`, with
+# The two Plugins every agent run's Host installs: `runvil/web`, with
 # the search-provider and runtime services it reads, and
-# `promptforge/user-input`, whose ask tool id the agent socket frames by.
+# `runvil/user-input`, whose ask tool id the agent socket frames by.
 plugin-user-input.workspace = true
 plugin-web.workspace = true
 # The MCP client Plugin, installed once per server of the configured
@@ -29,10 +29,10 @@ plugin-mcp.workspace = true
 # The Engine's public API: the events the agent socket frames as
 # transcript entries and the status reporter derives status from, and
 # the prompt parser behind the `/prompts/contract` route.
-promptforge.workspace = true
+runvil.workspace = true
 # The Plugin contract's tokio runtime service name, which the agent
 # sessions provide the server's runtime under.
-promptforge-plugin.workspace = true
+runvil-plugin.workspace = true
 reqwest.workspace = true
 rust-embed.workspace = true
 serde.workspace = true

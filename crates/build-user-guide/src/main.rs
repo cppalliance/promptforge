@@ -1,8 +1,8 @@
-//! Stages the PromptForge guide for the docs site: `stage <out>` checks
-//! every set's chapters under `src/<set>/` in the `promptforge-docs`
-//! checkout that `PROMPTFORGE_DOCS` names, then writes under the absolute
+//! Stages the Runvil guide for the docs site: `stage <out>` checks
+//! every set's chapters under `src/<set>/` in the `runvil-docs`
+//! checkout that `RUNVIL_DOCS` names, then writes under the absolute
 //! folder `<out>` one mdBook source tree per book and, beside them, the
-//! per-set single-file exports `promptforge-<set>-guide.md` (see
+//! per-set single-file exports `runvil-<set>-guide.md` (see
 //! `stage.rs`). Each book's `book.toml` and the mdBook chrome come from
 //! this repository's `guide/`.
 //!
@@ -29,9 +29,9 @@ const BOOKS: &[(&str, &str)] = &[
     ("language", "The Prompt Language"),
 ];
 
-/// The environment variable naming the root of the `promptforge-docs`
+/// The environment variable naming the root of the `runvil-docs`
 /// checkout.
-const DOCS_VAR: &str = "PROMPTFORGE_DOCS";
+const DOCS_VAR: &str = "RUNVIL_DOCS";
 
 /// One chapter file inside a set directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,10 +211,10 @@ mod tests {
 
     /// A fake of the split layout, both trees under one temporary folder.
     pub(crate) struct FakeGuide {
-        /// Stands in for promptforge's `guide/`: every book's `book.toml`
+        /// Stands in for runvil's `guide/`: every book's `book.toml`
         /// and the mdBook back-link script.
         pub(crate) guide: PathBuf,
-        /// Stands in for a `promptforge-docs` checkout: `src/introduction.md`
+        /// Stands in for a `runvil-docs` checkout: `src/introduction.md`
         /// and every set in `BOOKS` under `src/`.
         pub(crate) docs: PathBuf,
         _root: tempfile::TempDir,
@@ -242,7 +242,7 @@ mod tests {
         for (set, _) in BOOKS {
             fs::create_dir_all(src.join(set)).expect("mkdir set");
         }
-        fs::write(src.join("introduction.md"), "# PromptForge\n").expect("intro");
+        fs::write(src.join("introduction.md"), "# Runvil\n").expect("intro");
         fs::write(
             src.join("workshop").join("01-the-window.md"),
             "# The Window\n\nBody.\n",

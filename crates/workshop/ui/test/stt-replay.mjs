@@ -12,7 +12,7 @@ import { applyEdits, createTakeRegistry, reduceTakeRegistry } from "./take-reduc
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const replayDir = path.resolve(testDir, "../../../gateway/stt/api/tests/fixtures/replay");
-const UPDATE_VARIABLE = "PROMPTFORGE_REPLAY_UPDATE";
+const UPDATE_VARIABLE = "RUNVIL_REPLAY_UPDATE";
 const UI_SECTION = "ui";
 const SNAPSHOTS_SUFFIX = ".snapshots.json";
 const ITEM_ID = "replay";

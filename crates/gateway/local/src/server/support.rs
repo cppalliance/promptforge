@@ -220,8 +220,8 @@ pub(super) fn random_identity() -> AttemptIdentity {
     let model_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
     let key_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
     AttemptIdentity {
-        model_alias: format!("promptforge-local-{model_nonce}"),
-        api_key: format!("promptforge-local-{key_nonce}"),
+        model_alias: format!("runvil-local-{model_nonce}"),
+        api_key: format!("runvil-local-{key_nonce}"),
     }
 }
 

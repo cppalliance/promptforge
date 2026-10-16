@@ -7,7 +7,7 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use promptforge::model::{CompletionErrorKind, CompletionResult, RawExchange};
+use runvil::model::{CompletionErrorKind, CompletionResult, RawExchange};
 use serde_json::json;
 
 use super::*;

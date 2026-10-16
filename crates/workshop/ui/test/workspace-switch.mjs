@@ -99,7 +99,7 @@ globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 globalThis.MutationObserver = window.MutationObserver;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-workspace-switch-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-workspace-switch-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   register,
@@ -315,7 +315,7 @@ window.__TAURI_DIALOG__ = { calls: [], answer: null };
 window.__TAURI_EVENTS__ = { emitted: [], fail: false };
 
 const CURRENT = {
-  path: "C:\\work\\Alpha.pfwork",
+  path: "C:\\work\\Alpha.rvwork",
   name: "Alpha",
   grants: [{ path: "C:\\work\\src", exists: true }],
   window_state: null,
@@ -387,7 +387,7 @@ const workspaceSets = () => storage.sets.filter((entry) => entry.bucket === "wor
 
 // --- Open: the file's arrangement replaces the live one -------------------------
 
-const OPENED_PATH = "C:\\work\\Beta.pfwork";
+const OPENED_PATH = "C:\\work\\Beta.rvwork";
 const FILE_LAYOUT = {
   version: LAYOUT_SCHEMA_VERSION,
   zones: { left: "beta-left", right: "beta-right" },
@@ -466,7 +466,7 @@ const FILE_CLOSED = ["C:\\beta\\docs\\readme.md", "C:\\beta\\notes.md"];
   const fromJsonBefore = dock.fromJSONCalls.length;
   const setsBefore = storage.sets.length;
   window.__TAURI_DIALOG__.answer = "C:\\elsewhere\\notes.txt";
-  answerQueue.push({ status: 400, body: { error: { code: "refused", message: "not a PromptForge workspace" } } });
+  answerQueue.push({ status: 400, body: { error: { code: "refused", message: "not a Runvil workspace" } } });
   await Commands.execute("workbench.action.openWorkspace");
   await flush();
   check("a refused open paints the error", statusMessages.at(-1)?.severity === "error");
@@ -480,7 +480,7 @@ const FILE_CLOSED = ["C:\\beta\\docs\\readme.md", "C:\\beta\\notes.md"];
 
 // --- Save As: the new file gets the live arrangement ------------------------------
 
-const SAVED_PATH = "C:\\work\\Gamma.pfwork";
+const SAVED_PATH = "C:\\work\\Gamma.rvwork";
 {
   // Interactive changes since the open, so the live values differ from
   // the file's: a folder opened (no write yet: the tree debounces), and
@@ -532,7 +532,7 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
   await flush();
   check("a cancelled save-as writes nothing", storage.sets.length === setsBefore);
 
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Alpha.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Alpha.rvwork";
   answerQueue.push(
     { status: 200, body: { ...CURRENT, path: SAVED_PATH, name: "Gamma" } },
     { status: 409, body: { error: { code: "conflict", message: "workspace file already exists" } } },
@@ -552,7 +552,7 @@ const SAVED_PATH = "C:\\work\\Gamma.pfwork";
   window.__TAURI_DIALOG__.answer = "C:\\work\\Gamma copy";
   answerQueue.push(
     { status: 200, body: { ...CURRENT, path: SAVED_PATH, name: "Gamma" } },
-    { status: 200, body: { ...CURRENT, path: "C:\\work\\Gamma copy.pfwork", name: "Gamma copy" } },
+    { status: 200, body: { ...CURRENT, path: "C:\\work\\Gamma copy.rvwork", name: "Gamma copy" } },
   );
   await Commands.execute("workbench.action.duplicateWorkspace");
   await flush();
@@ -576,7 +576,7 @@ const TIMED_OUT = {
     },
   },
 };
-const DELTA_PATH = "C:\\work\\Delta.pfwork";
+const DELTA_PATH = "C:\\work\\Delta.rvwork";
 const DELTA_ROOTS = { path: null, entries: [dir("delta", "C:\\delta")] };
 const DELTA_EXPANDED = ["C:\\delta"];
 const DELTA_CURRENT = { ...CURRENT, path: DELTA_PATH, name: "Delta", grants: [{ path: "C:\\delta", exists: true }] };
@@ -614,7 +614,7 @@ const trafficSince = (start) => fetches.slice(start).map((entry) => `${entry.met
   const fromJsonBefore = dock.fromJSONCalls.length;
   const rootsFetchesBefore = rootsFetches;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Epsilon.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Epsilon.rvwork";
   answerQueue.push(TIMED_OUT, { status: 200, body: DELTA_CURRENT });
   await Commands.execute("workbench.action.openWorkspace");
   await flush();
@@ -626,7 +626,7 @@ const trafficSince = (start) => fetches.slice(start).map((entry) => `${entry.met
   );
 }
 
-const ZETA_PATH = "C:\\work\\Zeta.pfwork";
+const ZETA_PATH = "C:\\work\\Zeta.rvwork";
 {
   const fetchesBefore = fetches.length;
   const setsBefore = storage.sets.length;
@@ -656,7 +656,7 @@ const ZETA_PATH = "C:\\work\\Zeta.pfwork";
   const fetchesBefore = fetches.length;
   const setsBefore = storage.sets.length;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Eta.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Eta.rvwork";
   answerQueue.push(
     { status: 200, body: { ...DELTA_CURRENT, path: ZETA_PATH, name: "Zeta" } },
     TIMED_OUT,
@@ -674,7 +674,7 @@ const ZETA_PATH = "C:\\work\\Zeta.pfwork";
 
 // Duplicate shares the save-picker switch, and the server's duplicate
 // route the same deadline tier, so a late commit resyncs there too.
-const ZETA_COPY_PATH = "C:\\work\\Zeta copy.pfwork";
+const ZETA_COPY_PATH = "C:\\work\\Zeta copy.rvwork";
 const ZETA_COPY_CURRENT = { ...DELTA_CURRENT, path: ZETA_COPY_PATH, name: "Zeta copy" };
 {
   const fetchesBefore = fetches.length;
@@ -707,7 +707,7 @@ const ZETA_COPY_CURRENT = { ...DELTA_CURRENT, path: ZETA_COPY_PATH, name: "Zeta 
   const fromJsonBefore = dock.fromJSONCalls.length;
   const rootsFetchesBefore = rootsFetches;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Theta.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Theta.rvwork";
   answerQueue.push({ status: 200, body: ZETA_COPY_CURRENT }, TIMED_OUT, { status: 200, body: ZETA_COPY_CURRENT });
   await Commands.execute("workbench.action.duplicateWorkspace");
   await flush();
@@ -728,7 +728,7 @@ const ZETA_COPY_CURRENT = { ...DELTA_CURRENT, path: ZETA_COPY_PATH, name: "Zeta 
 // --- Open: a file with no stored layout gets the registered policy's default ------------
 
 {
-  const IOTA_PATH = "C:\\work\\Iota.pfwork";
+  const IOTA_PATH = "C:\\work\\Iota.rvwork";
   const seedsBefore = seeds;
   const clearsBefore = dock.clears;
   const fromJsonBefore = dock.fromJSONCalls.length;

@@ -293,7 +293,7 @@ fn interpolation_ignores_comments_and_keys() {
     // variable there must not fail the load. Raw-text interpolation would have
     // tried to resolve it and errored.
     let toml = r#"
-# a comment mentioning ${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}
+# a comment mentioning ${RUNVIL_DEFINITELY_UNSET_VAR_XYZ}
 config-version = 0
 [server]
 bind = "127.0.0.1:8081"
@@ -319,7 +319,7 @@ endpoints = ["e"]
 
 #[test]
 fn unresolved_variable_is_an_error() {
-    let missing = "${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}";
+    let missing = "${RUNVIL_DEFINITELY_UNSET_VAR_XYZ}";
     assert!(matches!(
         interpolate(missing, &config_lookup),
         Err(ConfigError::UnresolvedVar(..))

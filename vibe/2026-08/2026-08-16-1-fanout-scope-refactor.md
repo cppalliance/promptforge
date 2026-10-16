@@ -37,16 +37,16 @@ isProject: false
 
 **Files:**
 
-- `promptforge/crates/promptforge-core/src/lua/vm.rs` (line ~1106): Change the `fanout` Lua function signature from `(String, String)` to `(String, Value)`. When `Value` is a string, resolve as section heading (current behavior). When it's a table, extract string items directly. Also add `items` as a new Lua global that takes a heading string and returns the section's pre-parsed items as a Lua table.
+- `runvil/crates/runvil-core/src/lua/vm.rs` (line ~1106): Change the `fanout` Lua function signature from `(String, String)` to `(String, Value)`. When `Value` is a string, resolve as section heading (current behavior). When it's a table, extract string items directly. Also add `items` as a new Lua global that takes a heading string and returns the section's pre-parsed items as a Lua table.
 
-- `promptforge/crates/promptforge-core/src/execute/engine.rs` (`make_fanout_callback`): Change signature to accept `items: Vec<String>` directly instead of resolving from a list section. The callback in `run_section_lua` handles the string-vs-table dispatch before calling `make_fanout_callback`.
+- `runvil/crates/runvil-core/src/execute/engine.rs` (`make_fanout_callback`): Change signature to accept `items: Vec<String>` directly instead of resolving from a list section. The callback in `run_section_lua` handles the string-vs-table dispatch before calling `make_fanout_callback`.
 
-- `promptforge/crates/promptforge-core/src/fanout/mod.rs`: `run_fanout_arms` already takes `items: &[String]` - no change needed there. The `resolve_sibling` call for the list section moves from `make_fanout_callback` into the Lua-facing dispatch code.
+- `runvil/crates/runvil-core/src/fanout/mod.rs`: `run_fanout_arms` already takes `items: &[String]` - no change needed there. The `resolve_sibling` call for the list section moves from `make_fanout_callback` into the Lua-facing dispatch code.
 
 **Documentation:**
 
-- `promptforge/guide/src/fanout.md`: Add array-based fanout example alongside section-based example. Document `items()` function.
-- `promptforge/crates/promptforge-core/design-core.md` item 20 (now item 21 after renumber): Update fanout description to mention array support and `items()`.
+- `runvil/guide/src/fanout.md`: Add array-based fanout example alongside section-based example. Document `items()` function.
+- `runvil/crates/runvil-core/design-core.md` item 20 (now item 21 after renumber): Update fanout description to mention array support and `items()`.
 
 ### Order of work
 
@@ -58,4 +58,4 @@ Steps, in order:
 
 3. **Add tests.** fanout with Lua array, items() function.
 
-4. **Update fanout docs.** guide/src/fanout.md, design-core.md item 21, guide/promptforge-user-guide.md fanout section. *(Verify: final step)*
+4. **Update fanout docs.** guide/src/fanout.md, design-core.md item 21, guide/runvil-user-guide.md fanout section. *(Verify: final step)*

@@ -1,6 +1,6 @@
 ---
 name: Gateway Config SPA
-overview: Build a full read-write config SPA for the PromptForge gateway, served on the gateway's own port behind a `config-ui` feature flag (separate crate, loopback-only). Clones Unsloth Studio's Model Hub layout with a molten lava accent. Full write path from day one - TOML and .env files are app-owned, written atomically, with profile reload on save and restart-required banner for boot sections.
+overview: Build a full read-write config SPA for the Runvil gateway, served on the gateway's own port behind a `config-ui` feature flag (separate crate, loopback-only). Clones Unsloth Studio's Model Hub layout with a molten lava accent. Full write path from day one - TOML and .env files are app-owned, written atomically, with profile reload on save and restart-required banner for boot sections.
 todos:
   - id: step-01
     content: Serialize derives on all config types (structs, enums, DraftTokenMax, RawConfig) + ser_redacted for Secret fields.
@@ -78,7 +78,7 @@ todos:
     content: "Workspace revoke endpoint: POST /workspace/revoke removes a granted root (exact match, nested grants independent)."
     status: completed
   - id: step-26
-    content: "Desktop shell folder-picker bridge: workspace-pick-folder web message, native dialog via rfd, promptforge:folder-picked event."
+    content: "Desktop shell folder-picker bridge: workspace-pick-folder web message, native dialog via rfd, runvil:folder-picked event."
     status: completed
   - id: step-27
     content: "Workspace panel context menu: right-click Remove from Workspace on roots, Add Folder via picker (desktop) or path input (browser), reusing showDropdown."
@@ -92,7 +92,7 @@ isProject: false
 
 Everything an executor needs that does not live in the plan body:
 
-- **Repository:** `c:\Users\Vinnie\cursor\promptforge` (a git repo; workspace root is `c:\Users\Vinnie\cursor`). All plan paths are relative to the workspace root. Per the vibe rulebook: if the worktree is dirty at run start, stop and tell the user to commit or stash first. The tool never pushes.
+- **Repository:** `c:\Users\Vinnie\cursor\runvil` (a git repo; workspace root is `c:\Users\Vinnie\cursor`). All plan paths are relative to the workspace root. Per the vibe rulebook: if the worktree is dirty at run start, stop and tell the user to commit or stash first. The tool never pushes.
 - **Rulebooks (read before executing):**
   - `c:\Users\Vinnie\cursor\tools-public\rulebooks\vibe-rulebook.md` - execution model
   - `c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md` - all Rust work
@@ -102,8 +102,8 @@ Everything an executor needs that does not live in the plan body:
   - Model Hub (Discover): `C:\Users\Vinnie\.cursor\projects\c-Users-Vinnie-cursor\assets\c__Users_Vinnie_AppData_Roaming_Cursor_User_workspaceStorage_70d1070fbc17b15dcfcb6aa0345a5424_images_image-d15506db-caad-4b54-96c9-19a453b73839.png`
   - Settings > System page: `...\image-56aff5aa-6441-4830-9dec-ba27fb6fd6a2.png` (same directory)
   - Model detail card with quant selector + Download: `...\image-09ad9fe6-f528-4867-8518-2a5cd9104fe0.png` (same directory)
-- **Brand assets:** the medallion icon is `promptforge/crates/promptforge-workshop-server/ui/icons/promptforge-icon-1.png` (cold state). Frames 2-5 of a cold-to-hot sequence exist in `promptforge/crates/promptforge-desktop-shell/assets/icons/` for a future activity animation - not in scope for this plan, but the config-ui should load the icon from a shared, copied asset in its own `ui/icons/`.
-- **Known AGENTS.md files** (gather the full manifest per vibe rule 3 before dispatching): `promptforge/crates/promptforge-workshop-server/AGENTS.md`, `promptforge/crates/promptforge-workshop/AGENTS.md`, `promptforge/crates/promptforge-desktop-shell/AGENTS.md`. Check for a root `promptforge/AGENTS.md` and any others.
+- **Brand assets:** the medallion icon is `runvil/crates/runvil-workshop-server/ui/icons/runvil-icon-1.png` (cold state). Frames 2-5 of a cold-to-hot sequence exist in `runvil/crates/runvil-desktop-shell/assets/icons/` for a future activity animation - not in scope for this plan, but the config-ui should load the icon from a shared, copied asset in its own `ui/icons/`.
+- **Known AGENTS.md files** (gather the full manifest per vibe rule 3 before dispatching): `runvil/crates/runvil-workshop-server/AGENTS.md`, `runvil/crates/runvil-workshop/AGENTS.md`, `runvil/crates/runvil-desktop-shell/AGENTS.md`. Check for a root `runvil/AGENTS.md` and any others.
 - **Run ledger:** main keeps `vibe-ledger.md` and the review subagent writes `vibe-review.md` in `c:\Users\Vinnie\cursor\cabinet\_scratch\gateway-config-spa\` (create the directory at run start).
 - **Toolchain:** Node >= 22 for the esbuild pipelines (`npm ci` once in each `ui/` directory), Rust 1.89+ (workspace MSRV), Windows machine.
 
@@ -111,13 +111,13 @@ Everything an executor needs that does not live in the plan body:
 
 ```mermaid
 graph TD
-  subgraph gateway ["promptforge-gateway (axum, single port)"]
+  subgraph gateway ["runvil-gateway (axum, single port)"]
     InferenceAPI["Inference API<br>/v1/chat/completions, /v1/models<br>bearer auth, any source"]
     AdminAPI["Admin API<br>/admin/status, /admin/profiles<br>bearer auth, any source"]
     NewEndpoints["New endpoints<br>GET /admin/config<br>GET /admin/orphans<br>bearer auth, any source"]
     ConfigRoutes["Config UI routes<br>GET /config/*<br>loopback-only, no auth"]
   end
-  subgraph configUICrate ["promptforge-gateway-config-ui (separate crate)"]
+  subgraph configUICrate ["runvil-gateway-config-ui (separate crate)"]
     EmbeddedSPA["Embedded SPA assets<br>rust-embed"]
     LoopbackMW["Loopback middleware"]
     RoutesExport["pub fn routes -> Router"]
@@ -141,19 +141,19 @@ graph TD
 
 ### Single-port design, separate crate
 
-The config UI is served on the gateway's own port - no second listener. But the SPA assets, the esbuild pipeline, the loopback middleware, and `rust-embed` all live in a **separate crate** (`promptforge-gateway-config-ui`), keeping the gateway lean. The gateway pulls it as an optional dependency behind the `config-ui` feature flag (same pattern as `workshop = ["dep:promptforge-workshop-server"]`), and mounts the crate's exported routes at `/config/*` in `build_router`.
+The config UI is served on the gateway's own port - no second listener. But the SPA assets, the esbuild pipeline, the loopback middleware, and `rust-embed` all live in a **separate crate** (`runvil-gateway-config-ui`), keeping the gateway lean. The gateway pulls it as an optional dependency behind the `config-ui` feature flag (same pattern as `workshop = ["dep:runvil-workshop-server"]`), and mounts the crate's exported routes at `/config/*` in `build_router`.
 
 A headless build without `config-ui` never compiles the config-ui crate, never needs Node for esbuild, and adds nothing to the binary.
 
-**Loopback guard:** Two layers, because the routes live in two places. The config-ui crate wraps its `/config/*` asset routes in a middleware that extracts `ConnectInfo<SocketAddr>` and checks `remote_addr.ip().is_loopback()` (403 otherwise). The **new admin config endpoints** (everything in the "Complete endpoint list" section except the "existing endpoints reused" line: config read/write, env, orphans, system, model-info, hf proxy, profiles create/delete, reveal) get the same loopback-only middleware applied in the gateway's `build_router` - they hold secrets in plaintext (`GET /admin/env`) and write files, so they must never be reachable from the LAN even with the bearer key. The middleware is a small shared function in the tiny always-on crate `promptforge-gateway-loopback` (axum-only), re-exported by the config-ui crate and depended on unconditionally by the gateway, so the check exists in exactly one place AND headless builds (no config-ui feature) still carry the wall without pulling in rust-embed or the Node pipeline. (As-built change from the original design, which placed the function in the config-ui crate: that crate is optional, but the wall must exist in every build.) Existing admin routes (`/admin/status`, `/admin/profiles`, `/admin/switch-profile`, `/admin/progress`) and inference routes keep their current bearer-only, any-source behavior.
+**Loopback guard:** Two layers, because the routes live in two places. The config-ui crate wraps its `/config/*` asset routes in a middleware that extracts `ConnectInfo<SocketAddr>` and checks `remote_addr.ip().is_loopback()` (403 otherwise). The **new admin config endpoints** (everything in the "Complete endpoint list" section except the "existing endpoints reused" line: config read/write, env, orphans, system, model-info, hf proxy, profiles create/delete, reveal) get the same loopback-only middleware applied in the gateway's `build_router` - they hold secrets in plaintext (`GET /admin/env`) and write files, so they must never be reachable from the LAN even with the bearer key. The middleware is a small shared function in the tiny always-on crate `runvil-gateway-loopback` (axum-only), re-exported by the config-ui crate and depended on unconditionally by the gateway, so the check exists in exactly one place AND headless builds (no config-ui feature) still carry the wall without pulling in rust-embed or the Node pipeline. (As-built change from the original design, which placed the function in the config-ui crate: that crate is optional, but the wall must exist in every build.) Existing admin routes (`/admin/status`, `/admin/profiles`, `/admin/switch-profile`, `/admin/progress`) and inference routes keep their current bearer-only, any-source behavior.
 
 **Auth model:** Config UI static assets (HTML/CSS/JS) are served at `/config/` with the loopback guard but **no bearer auth** - they're just the SPA shell with no secrets. The SPA prompts for the gateway's bearer key on first load, stores it in `sessionStorage`, and sends it as the `Authorization` header on all admin API calls. No proxy layer, no credential forwarding, same-origin requests.
 
 ### Crate layout
 
-- **New crate:** `promptforge-gateway-config-ui` - owns the SPA assets, build pipeline, `rust-embed`, loopback middleware, and exports `pub fn routes() -> Router`
-- **Feature on gateway:** `config-ui = ["dep:promptforge-gateway-config-ui"]` - pulls the crate and mounts its routes in `build_router`. (As-built change, user-directed after step 24: `config-ui` joined the gateway's default feature list and the desktop app pins it explicitly - both shipped binaries always carry the config UI. Cost accepted: default builds require Node 22. Policy recorded in the repo's root AGENTS.md "Binaries and features" section.)
-- **UI dir:** `promptforge-gateway-config-ui/ui/` - TypeScript SPA with its own `package.json` and esbuild pipeline, same pattern as `promptforge-workshop-server/ui/`
+- **New crate:** `runvil-gateway-config-ui` - owns the SPA assets, build pipeline, `rust-embed`, loopback middleware, and exports `pub fn routes() -> Router`
+- **Feature on gateway:** `config-ui = ["dep:runvil-gateway-config-ui"]` - pulls the crate and mounts its routes in `build_router`. (As-built change, user-directed after step 24: `config-ui` joined the gateway's default feature list and the desktop app pins it explicitly - both shipped binaries always carry the config UI. Cost accepted: default builds require Node 22. Policy recorded in the repo's root AGENTS.md "Binaries and features" section.)
+- **UI dir:** `runvil-gateway-config-ui/ui/` - TypeScript SPA with its own `package.json` and esbuild pipeline, same pattern as `runvil-workshop-server/ui/`
 - **Embedding:** `rust-embed` with `#[folder = "ui/dist/"]` in the config-ui crate; debug reads from disk, release embeds into the gateway binary transitively
 - **No `[config_ui]` boot section.** The feature flag alone controls whether the routes are mounted. No configuration needed - the UI is always at `/config/` on the gateway's existing port, loopback-only.
 
@@ -161,7 +161,7 @@ A headless build without `config-ui` never compiles the config-ui crate, never n
 
 ### 1. Add `Serialize` to config types
 
-In [`promptforge-gateway-config/src/config.rs`](promptforge/crates/promptforge-gateway-config/src/config.rs) and companion modules, add `Serialize` to all pub config structs and enums that lack it. `Secret` fields get `#[serde(serialize_with = "ser_redacted")]` emitting `"***"` - the UI shows a password field, never echoes secrets.
+In [`runvil-gateway-config/src/config.rs`](runvil/crates/runvil-gateway-config/src/config.rs) and companion modules, add `Serialize` to all pub config structs and enums that lack it. `Secret` fields get `#[serde(serialize_with = "ser_redacted")]` emitting `"***"` - the UI shows a password field, never echoes secrets.
 
 Types needing `Serialize` added:
 - Structs: `ServerConfig`, `LocalConfig`, `DominionConfig`, `EndpointConfig`, `ModelConfig`, `LocalModelConfig`, `ToolsConfig`, `WebSearchConfig`, `WorkshopConfig`, `WorkshopVoiceConfig`, `WorkshopTapeConfig`, `SpeculativeConfig`, `MultimodalProjectorConfig`
@@ -172,7 +172,7 @@ Types needing `Serialize` added:
 
 Returns the full resolved config as JSON. `Config` itself has no serde impls (validated construction only), so the endpoint serializes through `RawConfig`: step 1 adds `Serialize` to `RawConfig` (private, crate-internal) plus a `Config::to_raw()` (or equivalent) that reconstructs the raw shape via the existing accessors. `Secret` fields serialize as `"***"`.
 
-**Provenance is part of the payload.** The UI's "from common.toml" annotations require knowing which file each entry came from, and the merged `Config` does not carry that today. The profile loader's merge pass (`merge.rs`) is extended to record the origin file of every keyed-array entry (`[[model]]`, `[[local_model]]`, `[[endpoint]]`, `[[dominion]]`) and every overridden table path, returned as a `source_file` field per entry in the JSON. This is additive backend work in `promptforge-gateway-config`, covered by step 2's tests.
+**Provenance is part of the payload.** The UI's "from common.toml" annotations require knowing which file each entry came from, and the merged `Config` does not carry that today. The profile loader's merge pass (`merge.rs`) is extended to record the origin file of every keyed-array entry (`[[model]]`, `[[local_model]]`, `[[endpoint]]`, `[[dominion]]`) and every overridden table path, returned as a `source_file` field per entry in the JSON. This is additive backend work in `runvil-gateway-config`, covered by step 2's tests.
 
 **Secret round-trip rule:** the UI never sends a real secret back. On write, any secret field arriving as `"***"` means "preserve the existing value from the current file" - the write path substitutes the on-disk value before serializing. A secret only changes when the UI sends a new literal value or a `${VAR}` reference.
 
@@ -190,16 +190,16 @@ Only available with the `local` feature.
 
 ### 4. Config UI feature and route mounting
 
-In [`promptforge-gateway/Cargo.toml`](promptforge/crates/promptforge-gateway/Cargo.toml):
+In [`runvil-gateway/Cargo.toml`](runvil/crates/runvil-gateway/Cargo.toml):
 ```toml
-config-ui = ["dep:promptforge-gateway-config-ui"]
+config-ui = ["dep:runvil-gateway-config-ui"]
 ```
 
-In [`promptforge-gateway/src/lib.rs`](promptforge/crates/promptforge-gateway/src/lib.rs), `build_router` conditionally nests the config-ui crate's exported routes behind `#[cfg(feature = "config-ui")]`:
+In [`runvil-gateway/src/lib.rs`](runvil/crates/runvil-gateway/src/lib.rs), `build_router` conditionally nests the config-ui crate's exported routes behind `#[cfg(feature = "config-ui")]`:
 
 ```rust
 #[cfg(feature = "config-ui")]
-let router = router.nest("/config", promptforge_gateway_config_ui::routes());
+let router = router.nest("/config", runvil_gateway_config_ui::routes());
 ```
 
 The config-ui crate's `routes()` returns a `Router` with the loopback middleware already applied and all asset routes mounted. The gateway crate has no `config_ui.rs` module, no stub - just the one-line nest call.
@@ -219,7 +219,7 @@ SPA tests run under `node --test` with `jsdom`, same as the workshop UI's test s
 Use [Lucide](https://lucide.dev) (MIT license) as the icon system for **both** the new config-ui SPA and the existing workshop UI. Lucide is the same icon set llama.cpp's web UI uses.
 
 **How it integrates:**
-- Add `lucide` (the vanilla JS package, not `lucide-react`) as a dependency in both `promptforge-gateway-config-ui/ui/package.json` and `promptforge-workshop-server/ui/package.json`
+- Add `lucide` (the vanilla JS package, not `lucide-react`) as a dependency in both `runvil-gateway-config-ui/ui/package.json` and `runvil-workshop-server/ui/package.json`
 - Import individual icons by name: `import { Cpu, MemoryStick, HardDrive, Download, Search, Settings, Trash2, RotateCcw } from "lucide"`
 - Each import is a tree-shakeable function returning SVG path data; esbuild bundles only the icons actually used
 - Icons render as inline SVGs with `currentColor` - they inherit the molten lava accent (or any theme color) via CSS `color` on the parent element
@@ -234,10 +234,10 @@ Use [Lucide](https://lucide.dev) (MIT license) as the icon system for **both** t
 
 **Workshop UI icon migration (replace hand-inlined SVGs with Lucide imports):**
 
-The workshop already uses Lucide-identical SVGs, but they're hand-pasted as HTML string constants in [`promptforge-workshop-server/ui/src/chat/utils/icons.ts`](promptforge/crates/promptforge-workshop-server/ui/src/chat/utils/icons.ts) (12 icons: copy, check, edit, settings, paperclip, chevron-right, git-branch, more-horizontal, more-vertical, pin, pin-off, trash). Nine consumer files import from that module.
+The workshop already uses Lucide-identical SVGs, but they're hand-pasted as HTML string constants in [`runvil-workshop-server/ui/src/chat/utils/icons.ts`](runvil/crates/runvil-workshop-server/ui/src/chat/utils/icons.ts) (12 icons: copy, check, edit, settings, paperclip, chevron-right, git-branch, more-horizontal, more-vertical, pin, pin-off, trash). Nine consumer files import from that module.
 
 Migration:
-1. Add `lucide` to [`promptforge-workshop-server/ui/package.json`](promptforge/crates/promptforge-workshop-server/ui/package.json) as a dependency
+1. Add `lucide` to [`runvil-workshop-server/ui/package.json`](runvil/crates/runvil-workshop-server/ui/package.json) as a dependency
 2. Rewrite `icons.ts` to import from `lucide` and re-export SVG HTML strings via a helper that calls `createElement` and serializes (preserving the current `innerHTML` assignment pattern the consumers use), or switch consumers to a `createIcon` element-based API matching the config-ui helper
 3. Delete all hand-inlined SVG path data from `icons.ts`
 4. Verify the 9 consumer files still work: `turn-footer.ts`, `feed-node.ts`, `thinking-plugin.ts`, `tool-run-group.ts`, `tool-row.ts`, `html.ts` (code block copy), `settings-plugin.ts`, `edit-plugin.ts`, `attachment-plugin.ts`, `sidebar.ts`, `feed.ts`
@@ -341,7 +341,7 @@ Detection: `new URLSearchParams(location.search).get("mode") === "panel"` at boo
 
 ### Global shell - standalone mode elements
 
-- **Tab bar** as the single top element: PromptForge medallion left (standalone only - workshop already shows it), then the **profile switcher**, icon+label tabs center, Apply/Revert All right **[Adapted: Unsloth]** Discover/On Device segmented toggle extended to a full tab bar.
+- **Tab bar** as the single top element: Runvil medallion left (standalone only - workshop already shows it), then the **profile switcher**, icon+label tabs center, Apply/Revert All right **[Adapted: Unsloth]** Discover/On Device segmented toggle extended to a full tab bar.
 - **Profile switcher** in the tab bar, left of the tabs: a dropdown button showing the active profile name (from `GET /admin/status`) with a `chevron-down`. Opening it lists every profile from `GET /admin/profiles` with the active one checked **[Adapted: workshop]** - the workshop's Model menu Profiles section is exactly this pattern (radio rows, check on active, pending mark while switching). Selecting another profile runs `POST /admin/switch-profile` with the SSE stage overlay. While a switch is in flight, all rows disable and the target shows a pending mark - same behavior as the workshop menu. The Profiles *view* remains the management surface (create/delete/includes); the tab bar switcher is the fast path.
 - **No left sidebar.** 6 flat destinations don't justify 280px of sidebar.
 - **No persistent hardware strip.** System stats (CPU, RAM, VRAM, Disk) live in Settings > System, like Unsloth. Hardware info is consulted, not monitored - it doesn't need to be always-visible.
@@ -375,7 +375,7 @@ The tab bar's right cluster holds: connection dot (green = gateway reachable) **
 ### Key prompt screen (first load / 401)
 
 Centered card on `--bg-primary` **[Adapted: Unsloth]** local auth bootstrap screen:
-- Cold medallion icon (`promptforge-icon-1.png`), "PromptForge Gateway" title.
+- Cold medallion icon (`runvil-icon-1.png`), "Runvil Gateway" title.
 - Password input labeled "API key", submit button in accent.
 - Wrong key: inline error "Invalid API key" below the input.
 - Key stored in `sessionStorage`; any API 401 returns to this screen.
@@ -417,7 +417,7 @@ Same header minus file info, `cloud` icon. Sections:
 
 ### Inheritance and provenance (core UX rules)
 
-The merge semantics in [`merge.rs`](promptforge/crates/promptforge-gateway-config/src/profile/merge.rs) produce **two different override behaviors**, and the UI encodes both:
+The merge semantics in [`merge.rs`](runvil/crates/runvil-gateway-config/src/profile/merge.rs) produce **two different override behaviors**, and the UI encodes both:
 
 1. **Table fields** (`[local]`, `[tools]`, scalars): recursive field-level merge. Overriding writes just that one key to the leaf file.
 2. **Keyed array entries** (`[[model]]`, `[[local_model]]` by `name`; `[[endpoint]]`, `[[dominion]]` by `id`): an overlay entry **replaces the whole entry**. Overriding any field of an inherited model copies the entire definition into the leaf file.
@@ -736,7 +736,7 @@ The config UI has no boot section. It is compiled in by the `config-ui` feature 
 
 #### `[local]` - artifact cache settings
 
-Fields: `cache_dir` (optional string, default `~/.promptforge`).
+Fields: `cache_dir` (optional string, default `~/.runvil`).
 
 **UI behavior:** displayed in the Settings view's "Storage" card. Shows the resolved `cache_dir` path with disk usage (total/free, from `GET /admin/system`). In edit mode: a text input for the path. Changing this requires understanding that existing model files stay at the old location - a warning appears: "Changing cache_dir does not move existing files."
 
@@ -978,11 +978,11 @@ This plan executes per the **vibe rulebook**: each step is one commit carrying i
 
 Steps are ordered by dependency. Backend steps come first because the SPA depends on the endpoints existing.
 
-**Component: Config serialization (promptforge-gateway-config)**
+**Component: Config serialization (runvil-gateway-config)**
 
 1. **Add `Serialize` to all config types.** Add `Serialize` derive to every pub struct and enum in `config.rs`, `config/companion.rs`, `config/workshop.rs` that lacks it. Add `ser_redacted` for `Secret` fields (emits `"***"`). Add custom `Serialize` for `DraftTokenMax`. Tests: round-trip each type through `serde_json` and back, verify secrets serialize as `"***"`.
 
-**Component: Gateway read endpoints (promptforge-gateway)**
+**Component: Gateway read endpoints (runvil-gateway)**
 
 2. **`GET /admin/config` with provenance** - returns the running config as JSON via a serializable `RawConfig` view (`Config::to_raw()`), with per-entry `source_file` provenance recorded during the include-merge pass. Tests: load a fixture config with includes, call the endpoint, assert the JSON shape matches the TOML structure, secrets are redacted, and each keyed-array entry carries the file it came from.
 
@@ -994,7 +994,7 @@ Steps are ordered by dependency. Backend steps come first because the SPA depend
 
 6. **HF proxy: `GET /admin/hf/search` + `GET /admin/hf/model/{repo}`** - proxies to huggingface.co API using `HF_TOKEN` from process env. Tests: mock the HF API, assert proxy forwards correctly, handles 401/404.
 
-**Component: Gateway write endpoints (promptforge-gateway)**
+**Component: Gateway write endpoints (runvil-gateway)**
 
 7. **Shadow file write endpoints.** `PUT /admin/config` (write `.toml.next` shadow + validate merged chain), `PUT /admin/boot-config`, `PUT /admin/include/{path}`, `PUT /admin/env` (`.env.next`), plus `GET /admin/env` (read the real `.env`, values included - loopback-only). All loopback-guarded. Secret fields arriving as `"***"` preserve the on-disk value. Tests: write a shadow, verify file exists, verify validation catches invalid configs, verify real file is untouched, verify a `"***"` secret round-trips to the original value in the shadow, verify `GET /admin/env` returns parsed variables.
 
@@ -1006,13 +1006,13 @@ Steps are ordered by dependency. Backend steps come first because the SPA depend
 
 11. **`POST /admin/reveal`** - open OS file manager at a path, loopback-only. Tests: verify path validation rejects non-loopback, verify the open command is constructed correctly (mock the opener).
 
-**Component: Config UI crate (promptforge-gateway-config-ui)**
+**Component: Config UI crate (runvil-gateway-config-ui)**
 
 12. **Crate scaffold + build pipeline.** `Cargo.toml` (axum, rust-embed), `src/lib.rs` with loopback middleware and `pub fn routes() -> Router`, `build.rs` with esbuild pipeline, `ui/package.json` + `ui/build.mjs` + `ui/tsconfig.json`. Tests: crate compiles, `routes()` returns a Router, loopback middleware rejects non-loopback ConnectInfo.
 
-13. **Gateway feature integration.** Add `config-ui` feature to `promptforge-gateway/Cargo.toml`, `nest("/config", ...)` in `build_router`. Tests: build with and without the feature, verify routes exist/absent.
+13. **Gateway feature integration.** Add `config-ui` feature to `runvil-gateway/Cargo.toml`, `nest("/config", ...)` in `build_router`. Tests: build with and without the feature, verify routes exist/absent.
 
-**Component: SPA shell (promptforge-gateway-config-ui/ui)**
+**Component: SPA shell (runvil-gateway-config-ui/ui)**
 
 14. **Base CSS + design tokens.** `base.css` with molten lava tokens, `controls.css` with slider/toggle/dropdown/input components, `layout.css` with tab bar and master-detail split. Per html-css-rulebook: semantic HTML, cascade layers, custom properties with fallbacks, `:focus-visible` styles, 4.5:1 contrast. Tests: visual review only (no automated CSS tests).
 
@@ -1044,11 +1044,11 @@ Steps are ordered by dependency. Backend steps come first because the SPA depend
 
 Today workspace roots come only from drag-and-drop (`POST /workspace/grant`); there is no revoke and no picker. This component adds right-click management to the workspace panel.
 
-25. **Workspace revoke endpoint.** `POST /workspace/revoke` in [`promptforge-workshop-server/src/workspace.rs`](promptforge/crates/promptforge-workshop-server/src/workspace.rs): removes a granted root from the in-memory `BTreeSet` (exact canonical match; nested grants are independent - revoking `C:\a` leaves a separate `C:\a\b` grant intact). Refuses unknown roots with a 404-class error. (As-built clarification: the server re-checks grants per operation, so both reads and writes under a revoked root fail with `OutsideGrants`; only client-held editor text survives a revoke.) Tests: grant then revoke removes the root, revoking an unknown root errors, reads under a revoked root are rejected, a nested grant survives its parent's revoke.
+25. **Workspace revoke endpoint.** `POST /workspace/revoke` in [`runvil-workshop-server/src/workspace.rs`](runvil/crates/runvil-workshop-server/src/workspace.rs): removes a granted root from the in-memory `BTreeSet` (exact canonical match; nested grants are independent - revoking `C:\a` leaves a separate `C:\a\b` grant intact). Refuses unknown roots with a 404-class error. (As-built clarification: the server re-checks grants per operation, so both reads and writes under a revoked root fail with `OutsideGrants`; only client-held editor text survives a revoke.) Tests: grant then revoke removes the root, revoking an unknown root errors, reads under a revoked root are rejected, a nested grant survives its parent's revoke.
 
-26. **Desktop shell folder-picker bridge.** New web-message command in [`promptforge-desktop-shell/src/window.rs`](promptforge/crates/promptforge-desktop-shell/src/window.rs), mirroring the file-drop bridge: the page posts `workspace-pick-folder` over the WebView2 channel, the shell opens a native folder dialog (add the `rfd` crate - verify identity per rust-rulebook section 9), and answers with a `promptforge:folder-picked` event carrying the chosen path. (As-built contract: cancel dispatches NO event, mirroring the file-drop bridge's empty-drop convention; a `promptforge:folder-picked` event always carries `detail.path`.) Tests: command parsing, cancel produces no event, a chosen path round-trips through the event payload validation.
+26. **Desktop shell folder-picker bridge.** New web-message command in [`runvil-desktop-shell/src/window.rs`](runvil/crates/runvil-desktop-shell/src/window.rs), mirroring the file-drop bridge: the page posts `workspace-pick-folder` over the WebView2 channel, the shell opens a native folder dialog (add the `rfd` crate - verify identity per rust-rulebook section 9), and answers with a `runvil:folder-picked` event carrying the chosen path. (As-built contract: cancel dispatches NO event, mirroring the file-drop bridge's empty-drop convention; a `runvil:folder-picked` event always carries `detail.path`.) Tests: command parsing, cancel produces no event, a chosen path round-trips through the event payload validation.
 
-27. **Workspace panel context menu.** Right-click on the workspace tree in `workshop-panel.ts`, reusing the chat sidebar's `showDropdown` helper ([`ui/src/chat/components/dropdown.ts`](promptforge/crates/promptforge-workshop-server/ui/src/chat/components/dropdown.ts)) anchored at the pointer. (User-directed addition: the roots listing carries a per-root `exists` flag - the server stats each root - and the panel renders a missing root struck through in the danger color with a "missing" label, not color alone; Remove from Workspace is the cleanup path for dead roots.)
+27. **Workspace panel context menu.** Right-click on the workspace tree in `workshop-panel.ts`, reusing the chat sidebar's `showDropdown` helper ([`ui/src/chat/components/dropdown.ts`](runvil/crates/runvil-workshop-server/ui/src/chat/components/dropdown.ts)) anchored at the pointer. (User-directed addition: the roots listing carries a per-root `exists` flag - the server stats each root - and the panel renders a missing root struck through in the danger color with a "missing" label, not color alone; Remove from Workspace is the cleanup path for dead roots.)
    - On a root row: "Remove from Workspace" (danger item, `trash-2` icon) -> `POST /workspace/revoke` -> dispatch `WORKSPACE_CHANGED_EVENT` (the existing refresh signal from `workspace-drops.ts`).
    - On empty panel space and as a header "+" button: "Add Folder to Workspace..." (`folder-plus` icon) -> in the desktop shell, posts `workspace-pick-folder` and grants the picked path; in a plain browser (no bridge, no absolute paths available), opens a small dialog with a text input for the folder path and grants what the user types.
    - Status bar confirmation/error per action, same as the drop flow (`statusBar.showLocal`).
@@ -1060,22 +1060,22 @@ Per the vibe rulebook: Verify runs on every 3rd step, at the end of each compone
 
 ### Files touched in existing crates
 
-- [`promptforge/Cargo.toml`](promptforge/Cargo.toml) - add new crate to workspace deps
-- [`promptforge-gateway/Cargo.toml`](promptforge/crates/promptforge-gateway/Cargo.toml) - add `config-ui` feature + optional dep
-- [`promptforge-gateway/src/lib.rs`](promptforge/crates/promptforge-gateway/src/lib.rs) - new admin routes, `nest("/config", ...)` in `build_router`
-- [`promptforge-gateway-config/src/config.rs`](promptforge/crates/promptforge-gateway-config/src/config.rs) - add `Serialize` derives
-- [`promptforge-gateway-config/src/config/companion.rs`](promptforge/crates/promptforge-gateway-config/src/config/companion.rs) - add `Serialize`
-- [`promptforge-gateway-config/src/config/workshop.rs`](promptforge/crates/promptforge-gateway-config/src/config/workshop.rs) - add `Serialize`
-- [`promptforge-workshop-server/ui/package.json`](promptforge/crates/promptforge-workshop-server/ui/package.json) - add `lucide`
-- [`promptforge-workshop-server/ui/src/chat/utils/icons.ts`](promptforge/crates/promptforge-workshop-server/ui/src/chat/utils/icons.ts) - rewrite to use lucide
-- [`promptforge-workshop-server/src/workspace.rs`](promptforge/crates/promptforge-workshop-server/src/workspace.rs) - add `Workspace::revoke` and the `POST /workspace/revoke` route
-- [`promptforge-workshop-server/ui/src/ui/workshop/workshop-panel.ts`](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/workshop-panel.ts) - right-click context menu (add/remove folder)
-- [`promptforge-desktop-shell/Cargo.toml`](promptforge/crates/promptforge-desktop-shell/Cargo.toml) - add `rfd` (native folder dialog)
-- [`promptforge-desktop-shell/src/window.rs`](promptforge/crates/promptforge-desktop-shell/src/window.rs) - `workspace-pick-folder` web-message command and `promptforge:folder-picked` event
+- [`runvil/Cargo.toml`](runvil/Cargo.toml) - add new crate to workspace deps
+- [`runvil-gateway/Cargo.toml`](runvil/crates/runvil-gateway/Cargo.toml) - add `config-ui` feature + optional dep
+- [`runvil-gateway/src/lib.rs`](runvil/crates/runvil-gateway/src/lib.rs) - new admin routes, `nest("/config", ...)` in `build_router`
+- [`runvil-gateway-config/src/config.rs`](runvil/crates/runvil-gateway-config/src/config.rs) - add `Serialize` derives
+- [`runvil-gateway-config/src/config/companion.rs`](runvil/crates/runvil-gateway-config/src/config/companion.rs) - add `Serialize`
+- [`runvil-gateway-config/src/config/workshop.rs`](runvil/crates/runvil-gateway-config/src/config/workshop.rs) - add `Serialize`
+- [`runvil-workshop-server/ui/package.json`](runvil/crates/runvil-workshop-server/ui/package.json) - add `lucide`
+- [`runvil-workshop-server/ui/src/chat/utils/icons.ts`](runvil/crates/runvil-workshop-server/ui/src/chat/utils/icons.ts) - rewrite to use lucide
+- [`runvil-workshop-server/src/workspace.rs`](runvil/crates/runvil-workshop-server/src/workspace.rs) - add `Workspace::revoke` and the `POST /workspace/revoke` route
+- [`runvil-workshop-server/ui/src/ui/workshop/workshop-panel.ts`](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/workshop-panel.ts) - right-click context menu (add/remove folder)
+- [`runvil-desktop-shell/Cargo.toml`](runvil/crates/runvil-desktop-shell/Cargo.toml) - add `rfd` (native folder dialog)
+- [`runvil-desktop-shell/src/window.rs`](runvil/crates/runvil-desktop-shell/src/window.rs) - `workspace-pick-folder` web-message command and `runvil:folder-picked` event
 
 ### New crate
 
-- `promptforge-gateway-config-ui/` - Cargo.toml (axum, rust-embed), src/lib.rs (loopback middleware, asset serving, `pub fn routes() -> Router`), build.rs (esbuild pipeline), ui/ (full SPA)
+- `runvil-gateway-config-ui/` - Cargo.toml (axum, rust-embed), src/lib.rs (loopback middleware, asset serving, `pub fn routes() -> Router`), build.rs (esbuild pipeline), ui/ (full SPA)
 
 
 ---
@@ -1122,6 +1122,6 @@ The user wanted the gateway's configuration to be fully operable from a UI so th
 ## Run-time deviations (from run chats)
 
 - **MSRV break:** `sysinfo 0.39.6` (pulled in for the system-stats endpoint) requires rustc 1.95, breaking the workspace MSRV of 1.89; the user surfaced the build error and the dependency had to be pinned to a compatible version.
-- **Feature policy change (user-directed, after step 24):** "I want \"cargo build --release -p promptforge-workshop\" to build promptforge-workshop.exe with the config-ui and the gateway built in, always" and the gateway build "should always... include the config-ui feature." The user asked for the agent's opinion, agreed with the trade-off (default builds now require Node 22), and directed: "Add lean, concise guidance to that effect to the proper AGENTS.md in the repo."
+- **Feature policy change (user-directed, after step 24):** "I want \"cargo build --release -p runvil-workshop\" to build runvil-workshop.exe with the config-ui and the gateway built in, always" and the gateway build "should always... include the config-ui feature." The user asked for the agent's opinion, agreed with the trade-off (default builds now require Node 22), and directed: "Add lean, concise guidance to that effect to the proper AGENTS.md in the repo."
 - **Workspace panel addition:** during the workspace-folder work the user added a UI refinement - "could it check every root for existence and then draw it in red with a line through it if absent."
 - **Environment constraint (process, not design):** AwaitShell/background shell waits hang in this environment; run chats record that all commands must run as plain foreground shell calls. This cost roughly 2.5 hours of stalled execution in the first run chat.

@@ -305,7 +305,7 @@ async fn the_auth_handoff_sets_a_cookie_and_redirects_key_free() {
         .to_str()
         .unwrap();
     assert!(
-        cookie.starts_with("promptforge-gateway-session="),
+        cookie.starts_with("runvil-gateway-session="),
         "the handoff cookie: {cookie}"
     );
     assert!(

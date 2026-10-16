@@ -88,7 +88,7 @@ impl LocalUpstream {
     /// Called at profile-switch teardown so the old child is freed
     /// deterministically even while the outgoing routing table still holds an
     /// `Arc<dyn Upstream>` clone (dropping [`crate::LocalRuntime`] alone
-    /// cannot guarantee this - PFGL-MOD-001/PF-GW-SERVER-004).
+    /// cannot guarantee this - RVGL-MOD-001/RV-GW-SERVER-004).
     ///
     /// The `shut_down` flag is set *before* acquiring the guard, so an in-flight
     /// recovery worker's readiness wait is cancelled (via `respawn`'s `cancel`
@@ -114,7 +114,7 @@ impl LocalUpstream {
     /// Returns `true` when a respawn completed successfully.
     fn recover_if_dead(inner: &LocalInner) -> Result<bool, LocalError> {
         // An explicit teardown wins over recovery: never resurrect a child that
-        // was deliberately shut down at profile-switch time (PFGL-MOD-001).
+        // was deliberately shut down at profile-switch time (RVGL-MOD-001).
         if inner.shut_down.load(Ordering::Acquire) {
             return Ok(false);
         }
@@ -124,7 +124,7 @@ impl LocalUpstream {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Re-check after acquiring the guard: a teardown may have set the flag
         // and killed the child while we waited for the lock. Racing past the
-        // pre-lock check must not respawn a torn-down child (PF-GW-SERVER-004).
+        // pre-lock check must not respawn a torn-down child (RV-GW-SERVER-004).
         if inner.shut_down.load(Ordering::Acquire) {
             return Ok(false);
         }

@@ -1,0 +1,386 @@
+//! The Runvil virtual filesystem and the editor mode policy over it.
+//!
+//! The machinery modules hold canonical paths, the claims model, the
+//! mount router, the operation-observation seam, and the backends. The
+//! crate root holds runvil policy: [`ModePolicy`], the editor mode
+//! gate. The machinery modules hold no runvil policy (no run
+//! concepts). The declared store is generic machinery:
+//! [`VfsRefBuilder::store`] names any mount as the store, and the store
+//! view's strict logical-path rules are the store's caller contract, not
+//! runvil policy.
+//!
+//! This crate is the permanent bottom of the dependency stack: the library
+//! is std only, with no normal or build dependencies.
+//!
+//! ## Invariants
+//!
+//! - May depend on: nothing. The library is std only, with no normal or
+//!   build dependency, which the manifest test enforces.
+//!   `cargo test -p build-xtask` enforces the product and container
+//!   boundaries.
+
+pub mod detail;
+mod error;
+mod glob;
+mod handle;
+mod memory;
+mod observe;
+mod path;
+mod real;
+mod router;
+mod stat;
+#[cfg(test)]
+mod test_support;
+mod traits;
+
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+pub use error::{ParsePathReasonError, PathReason, VfsError};
+pub use handle::{Access, VfsRef};
+pub use memory::MemoryBackend;
+pub use observe::{OpEvent, OpSink, Origin};
+pub use path::{VfsPath, VfsPathBuf};
+pub use real::{RealBackend, Writability};
+pub use router::VfsRefBuilder;
+pub use stat::{Entry, FileType, Stat};
+pub use traits::{
+    AcquireContext, AllowAll, Depth, ExecId, GlobKind, Op, Policy, Verdict, Vfs, VfsAccess,
+};
+
+/// The default handle has one mount: an in-memory store at `/`.
+///
+/// The handle is built with [`VfsRefBuilder::store`], which mounts the
+/// memory backend at `/` and declares it the store. Relative paths
+/// therefore address the store directly.
+impl Default for VfsRef {
+    fn default() -> VfsRef {
+        VfsRef::builder().store("/", MemoryBackend::new()).build()
+    }
+}
+
+/// A permission mode that sets which changes the model may make to
+/// storage.
+///
+/// Reads are allowed in every mode.
+///
+/// The enum is `#[non_exhaustive]`, so a `match` on it outside this crate
+/// needs a wildcard arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Mode {
+    /// Every change is refused pending user approval. Reads are allowed.
+    Ask,
+    /// Changes are allowed only to markdown paths, which are paths that
+    /// end in `.md`, matched case-sensitively. Reads are allowed.
+    ///
+    /// A copy is checked on its source and its destination alike, so
+    /// both paths must end in `.md`.
+    Plan,
+    /// Every operation is allowed.
+    Agent,
+}
+
+/// A policy that limits changes to storage according to the current
+/// `Mode`.
+///
+/// A `VfsRef` holds one policy and consults it on every operation,
+/// before it checks for conflicting claims. The mode limits only operations
+/// that change storage: writes, appends, deletes, renames, directory
+/// creation, copies, symbolic links, and permission changes.
+///
+/// The policy shares its current mode with every [`ModeHandle`] it
+/// returns. The caller keeps a handle and can change the mode mid-run.
+/// The change reaches the next operation through the shared mode alone.
+/// Whether a mode change can be undone depends only on whether anyone
+/// still holds a handle.
+#[derive(Debug)]
+pub struct ModePolicy {
+    mode: Arc<Mutex<Mode>>,
+}
+
+/// A handle that reads and changes the mode of a `ModePolicy`.
+///
+/// Clones share one mode with each other and with the policy.
+#[derive(Debug, Clone)]
+pub struct ModeHandle {
+    mode: Arc<Mutex<Mode>>,
+}
+
+impl ModePolicy {
+    /// Returns a policy starting in `mode`.
+    #[must_use]
+    pub fn new(mode: Mode) -> ModePolicy {
+        ModePolicy {
+            mode: Arc::new(Mutex::new(mode)),
+        }
+    }
+
+    /// Returns a handle that reads and changes this policy's mode. A
+    /// change made mid-run takes effect on the next operation.
+    #[must_use]
+    pub fn handle(&self) -> ModeHandle {
+        ModeHandle {
+            mode: Arc::clone(&self.mode),
+        }
+    }
+}
+
+impl ModeHandle {
+    /// Sets the current mode.
+    pub fn set(&self, mode: Mode) {
+        *lock(&self.mode) = mode;
+    }
+
+    /// Returns the current mode.
+    #[must_use]
+    pub fn mode(&self) -> Mode {
+        *lock(&self.mode)
+    }
+}
+
+/// Poison-safe lock on the shared mode cell.
+fn lock(mode: &Arc<Mutex<Mode>>) -> MutexGuard<'_, Mode> {
+    mode.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether the operation mutates storage. Modes gate mutations, never
+/// reads.
+fn is_mutation(op: Op) -> bool {
+    match op {
+        Op::Write
+        | Op::Append
+        | Op::Delete
+        | Op::Rename
+        | Op::Mkdir
+        | Op::Copy
+        | Op::Symlink
+        | Op::Chmod => true,
+        Op::Read | Op::Exists | Op::Glob | Op::List | Op::Stat | Op::ReadLink => false,
+    }
+}
+
+/// Plan mode's markdown rule: a `.md` suffix, case-sensitively - the
+/// virtual namespace follows POSIX path rules strictly, so `.MD` is not
+/// markdown and the case-insensitive suggestion does not apply.
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "virtual paths are POSIX-strict; case-insensitive extension matching is an operating-system notion"
+)]
+fn is_markdown(path: &VfsPath) -> bool {
+    path.as_str().ends_with(".md")
+}
+
+impl Policy for ModePolicy {
+    fn check(&self, op: Op, path: &VfsPath) -> Verdict {
+        if !is_mutation(op) {
+            return Verdict::Allow;
+        }
+        match *lock(&self.mode) {
+            Mode::Agent => Verdict::Allow,
+            Mode::Ask => Verdict::Ask(format!(
+                "{op:?} on {path} needs user approval: the Ask mode refuses all mutations"
+            )),
+            // Copy is checked per path, source and destination alike,
+            // so Plan refuses to even read a non-markdown source. The
+            // policy cannot tell the two apart; conservative refusal
+            // is the safe side.
+            Mode::Plan if is_markdown(path) => Verdict::Allow,
+            Mode::Plan => Verdict::Deny(format!(
+                "{op:?} on {path} is refused: the Plan mode allows mutations only to markdown paths"
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Mode, ModePolicy};
+    use crate::{Origin, VfsError, VfsRef};
+
+    /// A manifest section is a dependency table when it is exactly
+    /// `dependencies` or `build-dependencies`, a sub-table of one
+    /// (`[dependencies.foo]` declares a dependency the same way), or either
+    /// of those under a `target.<cfg>` qualifier. A cfg string may itself
+    /// hold dots (`"sse4.1"`), so a target section is matched on any
+    /// dot-separated key rather than on a fixed position.
+    fn is_dependency_table(section: &str) -> bool {
+        const TABLES: [&str; 2] = ["dependencies", "build-dependencies"];
+        let mut keys = section.split('.');
+        match keys.next() {
+            Some("target") => keys.any(|key| TABLES.contains(&key)),
+            first => first.is_some_and(|key| TABLES.contains(&key)),
+        }
+    }
+
+    /// Every entry `manifest` declares under a dependency table, each
+    /// naming its section and entry.
+    fn dependency_declarations(manifest: &str) -> Vec<String> {
+        let mut section = String::new();
+        let mut declared = Vec::new();
+        for raw_line in manifest.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                section = line.trim_matches(['[', ']']).to_owned();
+                continue;
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if is_dependency_table(&section) {
+                declared.push(format!("[{section}] declares `{line}`"));
+            }
+        }
+        declared
+    }
+
+    /// The zero-dependency rule is load-bearing: the library compiles alone
+    /// and never rebuilds for a dependency rev, so the manifest must never
+    /// declare a normal or build dependency. Dev-dependencies serve only the
+    /// tests. This test reads the crate's own Cargo.toml and fails if a
+    /// normal or build dependency table has an entry.
+    #[test]
+    fn the_manifest_declares_no_normal_or_build_dependencies() -> Result<(), std::io::Error> {
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+        )?;
+        let declared = dependency_declarations(&manifest);
+        assert!(
+            declared.is_empty(),
+            "zero-dependency rule violated: {declared:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_manifest_with_a_target_qualified_dependency_table_is_refused() {
+        let manifest = |table: &str, entry: &str| {
+            format!(
+                "[package]\nname = \"fixture\"\n\n[target.'cfg(windows)']\n\n[{table}]\n{entry}\n"
+            )
+        };
+        for (table, entry) in [
+            (
+                "target.'cfg(target_feature = \"sse4.1\")'.build-dependencies",
+                "foo = \"1\"",
+            ),
+            ("target.'cfg(windows)'.dependencies.foo", "version = \"1\""),
+        ] {
+            assert_eq!(
+                dependency_declarations(&manifest(table, entry)),
+                [format!("[{table}] declares `{entry}`")],
+                "[{table}] must be refused"
+            );
+        }
+        let table = "target.'cfg(windows)'.dev-dependencies";
+        assert_eq!(
+            dependency_declarations(&manifest(table, "foo = \"1\"")),
+            Vec::<String>::new(),
+            "[{table}] must pass"
+        );
+    }
+
+    #[test]
+    fn dependency_sub_tables_count_as_dependency_tables() {
+        // `[dependencies.foo]` declares a dependency without its section
+        // name equalling a dependency table's.
+        for section in [
+            "dependencies",
+            "dependencies.foo",
+            "build-dependencies",
+            "build-dependencies.foo",
+            "target.'cfg(windows)'.dependencies",
+        ] {
+            assert!(is_dependency_table(section), "[{section}] must be caught");
+        }
+        for section in [
+            "package",
+            "lints",
+            "features",
+            "dependenciesfoo",
+            "dev-dependencies",
+            "dev-dependencies.foo",
+            "target.'cfg(windows)'",
+        ] {
+            assert!(!is_dependency_table(section), "[{section}] must pass");
+        }
+    }
+
+    #[test]
+    fn a_mode_flip_through_the_shared_handle_is_visible_on_the_next_operation()
+    -> Result<(), VfsError> {
+        let policy = ModePolicy::new(Mode::Ask);
+        let handle = policy.handle();
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
+        let access = vfs.acquire(Origin::new("mode flip test"))?;
+        let path = "notes.md";
+        match access.write(path, b"x") {
+            Err(VfsError::ApprovalRequired { path, .. }) => assert_eq!(path, "/notes.md"),
+            other => panic!("expected an approval refusal, got {other:?}"),
+        }
+        // The UI flips the mode mid-run through the shared handle; the
+        // very next operation sees it.
+        handle.set(Mode::Agent);
+        access.write(path, b"x")?;
+        assert_eq!(access.read(path)?, b"x");
+        Ok(())
+    }
+
+    #[test]
+    fn plan_mode_allows_mutations_only_to_markdown_paths() -> Result<(), VfsError> {
+        let policy = ModePolicy::new(Mode::Plan);
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
+        let access = vfs.acquire(Origin::new("plan mode test"))?;
+        let markdown = "notes.md";
+        let binary = "data.bin";
+        access.write(markdown, b"# ok")?;
+        match access.write(binary, b"x") {
+            Err(VfsError::PermissionDenied { path, .. }) => assert_eq!(path, "/data.bin"),
+            other => panic!("expected a denial, got {other:?}"),
+        }
+        // The denied write never partially applied.
+        assert!(!access.exists(binary)?);
+        Ok(())
+    }
+
+    #[test]
+    fn exactly_the_operations_that_change_storage_are_mutations() {
+        use super::is_mutation;
+        use crate::Op;
+        let mutations = [
+            Op::Write,
+            Op::Append,
+            Op::Delete,
+            Op::Rename,
+            Op::Mkdir,
+            Op::Copy,
+            Op::Symlink,
+            Op::Chmod,
+        ];
+        let reads = [
+            Op::Read,
+            Op::Exists,
+            Op::Glob,
+            Op::List,
+            Op::Stat,
+            Op::ReadLink,
+        ];
+        assert!(mutations.into_iter().all(is_mutation));
+        assert!(!reads.into_iter().any(is_mutation));
+    }
+
+    #[test]
+    fn modes_gate_mutations_never_reads() -> Result<(), VfsError> {
+        let policy = ModePolicy::new(Mode::Agent);
+        let handle = policy.handle();
+        let vfs = VfsRef::with_policy(VfsRef::default(), policy);
+        let path = "paper.md";
+        vfs.acquire(Origin::new("read gate test"))?
+            .write(path, b"text")?;
+        // Even in Ask, the strictest mode, reads flow.
+        handle.set(Mode::Ask);
+        let access = vfs.acquire(Origin::new("read gate test"))?;
+        assert_eq!(access.read(path)?, b"text");
+        assert!(access.exists(path)?);
+        Ok(())
+    }
+}

@@ -21,21 +21,21 @@ todos:
     content: "Step 6: section VM reorder - replay as first chunk, delete scoped machinery, tests, docs, Verify"
     status: completed
   - id: step-7-design-doc
-    content: "Step 7: generate design-promptforge-store-and-vm-rework.md via the design-doc block"
+    content: "Step 7: generate design-runvil-store-and-vm-rework.md via the design-doc block"
     status: completed
 isProject: false
 ---
 
-# PromptForge: store reads and section VM rework
+# Runvil: store reads and section VM rework
 
 ## Target
 
-PromptForge's Lua surface gains a global `untrusted(s)` that guard-wraps any string for model-facing injection. The store gains bounded reads - `store.read(path[, start[, end]])` verbatim and `store.read_numbered(path[, start[, end]])` with absolute line numbers - and loses the two fused methods `store.inject` and `store.read_lines`. Section VM startup becomes one linear sequence with every Engine global installed before the shared library replays as the section's first chunk, fixing in passing the bug that shared replay ran under default rather than configured limits.
+Runvil's Lua surface gains a global `untrusted(s)` that guard-wraps any string for model-facing injection. The store gains bounded reads - `store.read(path[, start[, end]])` verbatim and `store.read_numbered(path[, start[, end]])` with absolute line numbers - and loses the two fused methods `store.inject` and `store.read_lines`. Section VM startup becomes one linear sequence with every Engine global installed before the shared library replays as the section's first chunk, fixing in passing the bug that shared replay ran under default rather than configured limits.
 
 ## Decisions
 
-1. **`untrusted(s)` is a global, not a store method.** `untrusted::wrap` is already a pure string-to-string function (`crates/promptforge-core/src/untrusted.rs:63`); the store was only one of its two callers (the tool loop wraps untrusted tool output directly at `execute/tool_loop.rs:331`). A store-bound inject forces a write-then-inject round trip for any string not already in a file. Rejected: keeping wrapping store-bound.
-2. **`store.inject` is removed.** One way to wrap: `untrusted(store.read(p))`. Accepted as a prompt-facing break; the Engine frontmatter stays `promptforge: 1` because everything else is additive.
+1. **`untrusted(s)` is a global, not a store method.** `untrusted::wrap` is already a pure string-to-string function (`crates/runvil-core/src/untrusted.rs:63`); the store was only one of its two callers (the tool loop wraps untrusted tool output directly at `execute/tool_loop.rs:331`). A store-bound inject forces a write-then-inject round trip for any string not already in a file. Rejected: keeping wrapping store-bound.
+2. **`store.inject` is removed.** One way to wrap: `untrusted(store.read(p))`. Accepted as a prompt-facing break; the Engine frontmatter stays `runvil: 1` because everything else is additive.
 3. **Line numbering stays in the store as `read_numbered`.** Numbering a range needs the range's origin, and the store holds that provenance at slice time. Rejected: a `numbered(text, start)` global - it forced either repeating the start literal at call sites or reading a whole file to slice 400 lines. A pure `numbered` global can still be added later if numbering non-store strings shows up in practice.
 4. **Bounds are 1-based inclusive (start, end), clamping.** Matches the dissect schema (`start_line`/`end_line` in papergate's `add_section`) and citation usage ("lines 22-82"). Rejected: (start, count) - it forces `end - start + 1` arithmetic at every call site, the documented small-model failure mode; with numbered text, start and end are extractive copies while count is always computed.
 5. **Section startup order: build VM, apply limits, inject Engine global values, install Engine functions, install control globals, replay shared, install captured bindings, run chunks.** One linear path replaces the two-phase construction. Fixes the latent bug that shared replay ran under default limits, because `apply_lua_limits` currently lands after `new_for_section` replays.
@@ -49,9 +49,9 @@ PromptForge's Lua surface gains a global `untrusted(s)` that guard-wraps any str
 
 - Build loop per `tools-public/rulebooks/vibe-rulebook.md`: one testable commit per step carrying code, test, and docs; dispatch the coder subagent with the plan path and step number; review-and-fix applies the `<code-review>` block from that file, overwriting `vibe-review.md`; amend the step's commit if review dirtied the tree.
 - Rust obligations per `tools-public/rulebooks/rust-rulebook.md`: rustdoc with `# Errors` and doctest `# Examples` on every new public `StoreRef` method; no `unwrap` outside tests; `cargo fmt --all --check` and `cargo clippy --all-targets --all-features -- -D warnings` green before every commit; tests live in the existing modules (`store/tests.rs`, `lua/tests.rs`, `execute/tests/`).
-- House conventions (vibe rule 3): follow existing promptforge-core patterns - observer detail naming in `observe.rs`, the mlua binding pattern in `host.rs`, doc-comment style in `store.rs`.
+- House conventions (vibe rule 3): follow existing runvil-core patterns - observer detail naming in `observe.rs`, the mlua binding pattern in `host.rs`, doc-comment style in `store.rs`.
 - Decision currency: where a step's implementation contradicts, extends, or resolves a decision recorded here, the step revises this plan in the same commit, naming what forced the change.
-- Verify runs on steps 3, 5, and 6 (every third step and end of each component), plus a live `promptforge papergate` smoke after steps 4 and 6 (gateway and MCP server per `promptforge/promptforge.md`).
+- Verify runs on steps 3, 5, and 6 (every third step and end of each component), plus a live `runvil papergate` smoke after steps 4 and 6 (gateway and MCP server per `runvil/runvil.md`).
 - Debt removal is part of every step, not a phase: review-and-fix applies the plan-local `<debt-review>` block below alongside `<code-review>`. Findings inside the step's file set fold into the step's commit; anything larger is recorded under Found debt with file, finding, and size, and is never fixed in passing.
 - Tests cover absence as well as presence: removed names error on access, blocked actions fail, invalid inputs are rejected. Each step runs its own tests before committing; Verify runs the workspace suite on the schedule above.
 
@@ -68,22 +68,22 @@ Fold each finding that stays inside the step's file set into the same commit. Re
 
 ## Found debt
 
-- **Pre-existing `cargo fmt --all` drift** (found at step 1 review): 19 files across promptforge-core, promptforge-dev, and promptforge-mcp-server are not rustfmt-clean on master. Outside every step's file set. Fix as one formatting-only commit (rust rulebook: own commit, add the hash to `.git-blame-ignore-revs`) after step 6 lands, so the drift fix does not entangle with the reorder diff. Size: small.
-- **`guide/promptforge-report.md` presents the removed `store.inject` as current API** (found at step 4 review): lines 663-674 describe it as the language's untrusted-injection mechanism, line 929 recommends elevating it, and line 931 recommends a general untrusted-value abstraction "later" - which step 1's `untrusted()` global now is. The document is a design report whose living-vs-historical status is the user's call. If living: update 663-674 to `untrusted(store.read(path))`, mark the 929/931 recommendations as landed. Size: small.
-- **`crates/promptforge-core/design-core-residue.md:55` still describes the store as exposing `read_lines` and `inject`** (found at step 5 review; already stale after step 4). Same living-vs-historical question as the report. If living: update to the eight-method surface (`read`, `read_numbered`, `write`, `append`, `str_replace`, `delete`, `glob`, `exists`). Size: trivial.
-- **`crates/promptforge-core/src/lua/tools_bridge.rs:269` doc on `install_tasks_table` describes a "phase-local author diagnostic callback" borrowing through `Scope`** (found at step 6 review): pre-existing, matches nothing the function does. Fix: rewrite the doc to describe what the function actually does. Size: trivial.
+- **Pre-existing `cargo fmt --all` drift** (found at step 1 review): 19 files across runvil-core, runvil-dev, and runvil-mcp-server are not rustfmt-clean on master. Outside every step's file set. Fix as one formatting-only commit (rust rulebook: own commit, add the hash to `.git-blame-ignore-revs`) after step 6 lands, so the drift fix does not entangle with the reorder diff. Size: small.
+- **`guide/runvil-report.md` presents the removed `store.inject` as current API** (found at step 4 review): lines 663-674 describe it as the language's untrusted-injection mechanism, line 929 recommends elevating it, and line 931 recommends a general untrusted-value abstraction "later" - which step 1's `untrusted()` global now is. The document is a design report whose living-vs-historical status is the user's call. If living: update 663-674 to `untrusted(store.read(path))`, mark the 929/931 recommendations as landed. Size: small.
+- **`crates/runvil-core/design-core-residue.md:55` still describes the store as exposing `read_lines` and `inject`** (found at step 5 review; already stale after step 4). Same living-vs-historical question as the report. If living: update to the eight-method surface (`read`, `read_numbered`, `write`, `append`, `str_replace`, `delete`, `glob`, `exists`). Size: trivial.
+- **`crates/runvil-core/src/lua/tools_bridge.rs:269` doc on `install_tasks_table` describes a "phase-local author diagnostic callback" borrowing through `Scope`** (found at step 6 review): pre-existing, matches nothing the function does. Fix: rewrite the doc to describe what the function actually does. Size: trivial.
 
 ## Steps
 
 ### Step 1: `untrusted()` global
 
-- Code: add `install_untrusted(lua)` in `crates/promptforge-core/src/lua/host.rs` - one `lua.create_function(|_, s: String| Ok(crate::untrusted::wrap(&s)))` installed as the global `untrusted`. Non-string input fails through mlua's automatic type error. Install in `SectionVm::new` (`crates/promptforge-core/src/lua/vm.rs:232`) immediately after `harden(&vm.lua)`; that single site covers H1, H2 sections, fanout workers, shared replay, and local tool handlers, in every phase.
+- Code: add `install_untrusted(lua)` in `crates/runvil-core/src/lua/host.rs` - one `lua.create_function(|_, s: String| Ok(crate::untrusted::wrap(&s)))` installed as the global `untrusted`. Non-string input fails through mlua's automatic type error. Install in `SectionVm::new` (`crates/runvil-core/src/lua/vm.rs:232`) immediately after `harden(&vm.lua)`; that single site covers H1, H2 sections, fanout workers, shared replay, and local tool handlers, in every phase.
 - Test (`lua/tests.rs`): `untrusted("a < b")` escapes `<` and wraps with a fresh nonce per call (two calls on the same input differ); callable from shared-library top level and from a section chunk.
-- Docs: `guide/src/lua.md` API table; `promptforge.md` quickref Lua API table.
+- Docs: `guide/src/lua.md` API table; `runvil.md` quickref Lua API table.
 
 ### Step 2: `store.read(path[, start[, end]])`
 
-- Code: add `StoreRef::read_range(path, start, end)` in `crates/promptforge-core/src/store.rs` - lock, `read`, slice lines in Rust so only the slice crosses the Lua boundary; the `Store` trait in `store/mem.rs` is unchanged (no test-fake churn). Bounds, evaluated in this order: `start < 1` is a `StoreError`; `start > line_count` returns `""` (range entirely beyond EOF); omitted `end` means the last line, and a given `end` clamps to it; `end < start` at this point is a `StoreError`. Lua: overload `read` on both store tables in `host.rs` (permanent and scoped) - `read(path)` whole file, `read(path, start)` from `start` to EOF, `read(path, start, end)` slice - dispatched to `read`/`read_range` and reported under the existing `STORE_READ_SUCCEEDED/FAILED` details.
+- Code: add `StoreRef::read_range(path, start, end)` in `crates/runvil-core/src/store.rs` - lock, `read`, slice lines in Rust so only the slice crosses the Lua boundary; the `Store` trait in `store/mem.rs` is unchanged (no test-fake churn). Bounds, evaluated in this order: `start < 1` is a `StoreError`; `start > line_count` returns `""` (range entirely beyond EOF); omitted `end` means the last line, and a given `end` clamps to it; `end < start` at this point is a `StoreError`. Lua: overload `read` on both store tables in `host.rs` (permanent and scoped) - `read(path)` whole file, `read(path, start)` from `start` to EOF, `read(path, start, end)` slice - dispatched to `read`/`read_range` and reported under the existing `STORE_READ_SUCCEEDED/FAILED` details.
 - Test (`store/tests.rs`, `lua/tests.rs`): whole-file, start-only, start+end, clamped end, beyond-EOF empty, both error cases.
 - Docs: rustdoc `# Errors` + doctest on `read_range`; `guide/src/store.md`; quickref.
 
@@ -95,9 +95,9 @@ Fold each finding that stays inside the step's file set into the same commit. Re
 
 ### Step 4: remove `store.inject`
 
-- Code: remove `StoreRef::inject` (`store.rs:230-234`), both Lua bindings (`host.rs` permanent ~258-269, scoped ~419-433), the `STORE_INJECT_SUCCEEDED/FAILED` details (`observe.rs`), and the `untrusted.rs:6` doc mention. Migrate `promptforge/local/prompts/papergate.md:24` to `var.paper = untrusted(store.read("paper.md"))` and every remaining caller found by grep (`promptforge-core-tests/prompts/execution/store-triad.md`, the test suites).
+- Code: remove `StoreRef::inject` (`store.rs:230-234`), both Lua bindings (`host.rs` permanent ~258-269, scoped ~419-433), the `STORE_INJECT_SUCCEEDED/FAILED` details (`observe.rs`), and the `untrusted.rs:6` doc mention. Migrate `runvil/local/prompts/papergate.md:24` to `var.paper = untrusted(store.read("paper.md"))` and every remaining caller found by grep (`runvil-core-tests/prompts/execution/store-triad.md`, the test suites).
 - Test: `store.inject` is absent from Lua (indexing it errors); papergate parses; suite green.
-- Verify: live `promptforge papergate` smoke against the migrated prompt.
+- Verify: live `runvil papergate` smoke against the migrated prompt.
 
 ### Step 5: remove `store.read_lines`
 
@@ -110,14 +110,14 @@ Fold each finding that stays inside the step's file set into the same commit. Re
 - Code (`execute/engine.rs:224-246`, `fanout/arm.rs:142`, `lua/vm.rs`): section startup becomes the linear sequence - `SectionVm::new` (harden, budget, `untrusted`), `apply_lua_limits`, `inject_host_with_var`, `install_host_apis`, `install_control_globals`, replay shared via `run_loaded_with_control` (an empty compiled chunk when `prompt.replay` is `None`), `install_captured_bindings`, then chunks. A `LuaBlockResult::Jump` from replay becomes the hard error "jump is not available during shared library load". During replay the `tools`/`models` tables work; the bare alias userdata globals install only after replay (decision 8). Delete `run_loaded_without_host`, `run_loaded_with_log`, `install_log_scoped`, `install_store_table_scoped`, and the nil-out cleanup; `new_for_section` collapses into the linear sequence.
 - Test: invert `host_leaked_early` (shared sees the full environment at load); `jump` during replay errors; a shared function calling `tools.add` or mutating `var` succeeds when invoked from a later chunk; shared-defined globals are visible to section chunks; absent shared library takes the same path; replay consumes the configured `RunLimits`, not defaults.
 - Docs: `guide/src/prompt-files.md` (shared replays per section VM as the first chunk, full environment, `jump` excluded), `guide/src/lua.md`, quickref, `SectionVm` doc comments.
-- Verify: full workspace `cargo test`; live `promptforge papergate` smoke (papergate has no shared library, so it exercises the empty-chunk path).
+- Verify: full workspace `cargo test`; live `runvil papergate` smoke (papergate has no shared library, so it exercises the empty-chunk path).
 
 ### Step 7: design document
 
-After implementation is complete, generate the design document: spawn one subagent whose entire prompt is - read this plan at c:\Users\Vinnie\.cursor\plans\untrusted_global_and_vm_reorder_42176da9.plan.md, grep for `<design-doc>`, and follow the block inside it. Move the generated `design-promptforge-store-and-vm-rework.md` into `crates/promptforge-core/` beside `design-core.md`.
+After implementation is complete, generate the design document: spawn one subagent whose entire prompt is - read this plan at c:\Users\Vinnie\.cursor\plans\untrusted_global_and_vm_reorder_42176da9.plan.md, grep for `<design-doc>`, and follow the block inside it. Move the generated `design-runvil-store-and-vm-rework.md` into `crates/runvil-core/` beside `design-core.md`.
 
 <design-doc>
-OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-promptforge-store-and-vm-rework.md,
+OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-runvil-store-and-vm-rework.md,
 that explains the design of what this plan describes. You run as the final step
 of the plan, after the implementation is complete, so describe the design as
 built, reconciling against the finished work any decision the implementation
@@ -208,4 +208,4 @@ carries no key design choices, write no document and return the reason.
 
 - **Replay gating (deferred; the tightening path for decision 6):** if real prompts show confusing top-level behavior at replay, add a phase-aware proxy `_ENV` for the replay chunk only - `__index`/`__newindex` Rust closures over the real globals plus an `Arc<AtomicBool>` replay flag on `SectionVm`, raising a phase error on `tools`/`models`/`var`/`reply`/`jump` access while the flag is set and forwarding otherwise. Because the gate lives in `__index` (evaluated at access time), shared functions called later resolve through it with the flag clear and work; nothing cacheable stays bricked. Needs `LuaProgram::load_with_environment` (`program.rs:163` area, `lua.load(bytes).set_environment(env).into_function()`). Self-contained at one call site; roughly 130 lines with tests.
 - **A pure `numbered(text, start)` global:** add only if numbering non-store strings shows up in practice (decision 3).
-- **No change to `promptforge: 1` frontmatter:** the `store.inject` removal is an accepted prompt-facing break, not an Engine major.
+- **No change to `runvil: 1` frontmatter:** the `store.inject` removal is an accepted prompt-facing break, not an Engine major.

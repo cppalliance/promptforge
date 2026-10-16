@@ -1,9 +1,9 @@
 //! Boot-time configuration: discovery and first-run provisioning.
 //!
 //! An explicit config path (the CLI `--config` flag or
-//! `PROMPTFORGE_GATEWAY_CONFIG`, resolved by the binary) always wins.
+//! `RUNVIL_GATEWAY_CONFIG`, resolved by the binary) always wins.
 //! Without one, the discovery search looks beside the executable, then in
-//! the working directory, then in the user profile's `.promptforge`
+//! the working directory, then in the user profile's `.runvil`
 //! directory. When no location holds a `gateway.toml`, first-run
 //! generation writes the sidecar default - loopback on an OS-assigned
 //! port, a fresh random bearer key, the recommended STT pair unless the
@@ -21,11 +21,11 @@ const CONFIG_FILE_NAME: &str = "gateway.toml";
 const DEFAULT_PROFILE: &str = "default";
 
 /// The release artifact the cloud provider model sheet downloads from.
-pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/promptforge-cloud-providers/releases/download/models/cloud-provider-models.json";
+pub(crate) const DEFAULT_SHEET_URL: &str = "https://github.com/cppalliance/runvil-cloud-providers/releases/download/models/cloud-provider-models.json";
 
 /// The environment override for the sheet URL, matching the repo's
-/// `PROMPTFORGE_*` convention; there is no config-schema knob.
-pub(crate) const SHEET_URL_ENV: &str = "PROMPTFORGE_MODELS_SHEET_URL";
+/// `RUNVIL_*` convention; there is no config-schema knob.
+pub(crate) const SHEET_URL_ENV: &str = "RUNVIL_MODELS_SHEET_URL";
 
 /// The sheet cache file name inside the profile directory.
 pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
@@ -33,8 +33,8 @@ pub(crate) const CACHE_FILE_NAME: &str = "cloud-provider-models.json";
 /// The installer's STT choice for first-run generation.
 ///
 /// The NSIS components page records the choice as the `InstallSTT` DWORD
-/// under `HKCU\Software\PromptForge\PromptForge`; a bare
-/// `promptforge-gateway` run outside the installer finds no value and ships
+/// under `HKCU\Software\Runvil\Runvil`; a bare
+/// `runvil-gateway` run outside the installer finds no value and ships
 /// STT, as does every non-Windows machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InstallerStt {
@@ -227,11 +227,11 @@ fn discover_in(
     )
 }
 
-/// The profile candidate: `<home>/.promptforge/gateway.toml`. This is the
+/// The profile candidate: `<home>/.runvil/gateway.toml`. This is the
 /// one definition of the profile configuration's location, so first-run
 /// generation writes where discovery reads.
 fn profile_config_path(home: &Path) -> PathBuf {
-    home.join(".promptforge").join(CONFIG_FILE_NAME)
+    home.join(".runvil").join(CONFIG_FILE_NAME)
 }
 
 /// Builds the candidate list in search order from the three base
@@ -240,7 +240,7 @@ fn candidates_from(exe_dir: &Path, cwd: &Path, home: &Path) -> Vec<PathBuf> {
     vec![
         exe_dir.join(CONFIG_FILE_NAME),
         cwd.join(CONFIG_FILE_NAME),
-        home.join(".promptforge").join(CONFIG_FILE_NAME),
+        home.join(".runvil").join(CONFIG_FILE_NAME),
     ]
 }
 
@@ -352,10 +352,10 @@ fn default_boot_config(api_key: &str, stt: InstallerStt) -> String {
     format!(
         r#"config-version = 0
 
-# PromptForge gateway configuration
+# Runvil gateway configuration
 # Generated on first run. Edit as needed.
 # See: crates/gateway/app/README.md
-# Diagnostics: promptforge-gateway diagnostics
+# Diagnostics: runvil-gateway diagnostics
 
 [server]
 bind = "127.0.0.1:0"

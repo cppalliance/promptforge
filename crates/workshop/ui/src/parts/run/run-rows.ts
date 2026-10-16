@@ -1,7 +1,7 @@
 // The Run window's contract rows: one renderer per contract section,
 // pure DOM building over the narrowed RunContract. Every frontmatter
 // key present in the prompt except `plugins`, which has nothing to
-// bind, appears as exactly one row: name, description, and promptforge
+// bind, appears as exactly one row: name, description, and runvil
 // read-only; input a text field plus Browse; output a text field; one
 // control per arg by type with required markers and defaults (the
 // implicit declaration is the single prose box); model roles
@@ -145,8 +145,8 @@ export function renderContractRows(
   if (contract.description.length > 0) {
     rows.appendChild(row("description", [readOnly(contract.description)]));
   }
-  if (contract.promptforge !== null) {
-    rows.appendChild(row("promptforge", [readOnly(String(contract.promptforge))]));
+  if (contract.runvil !== null) {
+    rows.appendChild(row("runvil", [readOnly(String(contract.runvil))]));
   }
 
   const inputField = textField(contract.input?.path ?? "", contract.input?.description ?? "");

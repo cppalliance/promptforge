@@ -10,8 +10,8 @@
 // no always-false precondition, Duplicate gaining its ellipsis); a
 // cancelled picker performing no fetch; a successful open posting the
 // picked path to /workspace/file/open, firing the
-// promptforge:workspace-changed invalidation, emitting the
-// promptforge:workspace-opened Tauri event with the path, and recording
+// runvil:workspace-changed invalidation, emitting the
+// runvil:workspace-opened Tauri event with the path, and recording
 // the path in the recent-files store, with nothing painted on the status
 // bar; a run with a path argument (Open Recent, Ctrl+P; TWF-003) posting
 // that path without ever reaching the picker, a non-string or absent
@@ -20,7 +20,7 @@
 // unhandled rejection); a server refusal painting the error on the
 // status bar while emitting nothing, recording nothing, and
 // invalidating nothing; Save As and Duplicate seeding the save picker
-// with "<current name>.pfwork", appending .pfwork to a bare name exactly
+// with "<current name>.rvwork", appending .rvwork to a bare name exactly
 // once (never doubling an existing extension, any case), posting to
 // save-as or duplicate, then invalidating, emitting, and recording the
 // new path, with a cancel posting nothing and a refusal painting the
@@ -94,7 +94,7 @@ console.error = (...args) => {
   consoleErrors.push(args.join(" "));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-workspace-files-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-workspace-files-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   register,
@@ -184,7 +184,7 @@ function postsSince(count) {
 }
 
 let workspaceChanges = 0;
-window.addEventListener("promptforge:workspace-changed", () => {
+window.addEventListener("runvil:workspace-changed", () => {
   workspaceChanges += 1;
 });
 
@@ -193,7 +193,7 @@ window.__TAURI_DIALOG__ = { calls: [], answer: null };
 window.__TAURI_EVENTS__ = { emitted: [], fail: false };
 
 const OPENED = {
-  path: "C:\\work\\Alpha.pfwork",
+  path: "C:\\work\\Alpha.rvwork",
   name: "Alpha",
   grants: [{ path: "C:\\work\\src", exists: true }],
   window_state: { width: 1280, height: 800, x: 10, y: 20, maximized: false },
@@ -248,9 +248,9 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const pick = window.__TAURI_DIALOG__.calls.at(-1);
   check("Open Workspace opens the native file picker", pick?.kind === "open" && pick?.directory !== true);
   check(
-    "the picker filters to .pfwork files",
+    "the picker filters to .rvwork files",
     Array.isArray(pick?.filters) &&
-      pick.filters.some((f) => f.name === "PromptForge Workspace" && f.extensions.join(",") === "pfwork"),
+      pick.filters.some((f) => f.name === "Runvil Workspace" && f.extensions.join(",") === "rvwork"),
   );
   check("a cancelled picker performs no fetch", fetches.length === 0);
   check("a cancelled picker emits nothing", window.__TAURI_EVENTS__.emitted.length === 0);
@@ -270,9 +270,9 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   check("a successful open fires one workspace-changed invalidation", workspaceChanges === 1);
   const emitted = window.__TAURI_EVENTS__.emitted;
   check(
-    "a successful open emits promptforge:workspace-opened with the path",
+    "a successful open emits runvil:workspace-opened with the path",
     emitted.length === 1 &&
-      emitted[0].event === "promptforge:workspace-opened" &&
+      emitted[0].event === "runvil:workspace-opened" &&
       emitted[0].payload?.path === OPENED.path,
   );
   check("a successful open records the path as recent", recentStore.list[0] === OPENED.path);
@@ -286,10 +286,10 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const changesBefore = workspaceChanges;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
   const statusBefore = statusMessages.length;
-  const RECENT = "C:\\work\\Recent.pfwork";
+  const RECENT = "C:\\work\\Recent.rvwork";
   // A picker answer that must never be posted: a run with a path argument
   // never reaches the dialog.
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Wrong.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Wrong.rvwork";
   nextAnswer = { status: 200, body: { ...OPENED, path: RECENT, name: "Recent" } };
   await Commands.execute("workbench.action.openWorkspace", RECENT);
   await flush();
@@ -301,7 +301,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   );
   check("a run with a path argument fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
   check(
-    "a run with a path argument emits promptforge:workspace-opened with that path",
+    "a run with a path argument emits runvil:workspace-opened with that path",
     window.__TAURI_EVENTS__.emitted.length === emittedBefore + 1 && window.__TAURI_EVENTS__.emitted.at(-1).payload?.path === RECENT,
   );
   check("a run with a path argument records that path as recent", recentStore.list[0] === RECENT);
@@ -326,14 +326,14 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const picksBefore = window.__TAURI_DIALOG__.calls.length;
   const changesBefore = workspaceChanges;
   const recentBefore = recentStore.list.length;
-  const GONE = "C:\\work\\Gone.pfwork";
-  nextAnswer = { status: 404, body: { error: { code: "not_found", message: "workspace file not found: C:\\work\\Gone.pfwork" } } };
+  const GONE = "C:\\work\\Gone.rvwork";
+  nextAnswer = { status: 404, body: { error: { code: "not_found", message: "workspace file not found: C:\\work\\Gone.rvwork" } } };
   await Commands.execute("workbench.action.openWorkspace", GONE);
   await flush();
   check("a refused open by path never opens the picker", window.__TAURI_DIALOG__.calls.length === picksBefore);
   check(
     "a refused open by path paints the server's message naming the path",
-    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("Gone.pfwork"),
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("Gone.rvwork"),
   );
   check("a refused open by path records nothing", recentStore.list.length === recentBefore);
   check("a refused open by path invalidates nothing", workspaceChanges === changesBefore);
@@ -353,7 +353,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const rejections = [];
   const onRejection = (reason) => rejections.push(reason);
   process.on("unhandledRejection", onRejection);
-  const GAMMA = "C:\\work\\Gamma.pfwork";
+  const GAMMA = "C:\\work\\Gamma.rvwork";
   window.__TAURI_DIALOG__.answer = GAMMA;
   window.__TAURI_EVENTS__.fail = true;
   nextAnswer = { status: 200, body: { ...OPENED, path: GAMMA, name: "Gamma" } };
@@ -371,7 +371,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   check("a rejected emit records no event", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
   check(
     "a rejected emit is logged as a warning naming the event",
-    warnings.length === 1 && warnings[0].includes("promptforge:workspace-opened") && warnings[0].includes("not allowed"),
+    warnings.length === 1 && warnings[0].includes("runvil:workspace-opened") && warnings[0].includes("not allowed"),
   );
   check("a rejected emit paints nothing on the status bar", statusMessages.length === statusBefore);
   check("a rejected emit escapes as no unhandled rejection", rejections.length === 0);
@@ -386,13 +386,13 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   window.__TAURI_DIALOG__.answer = "C:\\elsewhere\\notes.txt";
   nextAnswer = {
     status: 400,
-    body: { error: { code: "refused", message: "not a PromptForge workspace: format 'sqlite' where 'promptforge-workspace' required" } },
+    body: { error: { code: "refused", message: "not a Runvil workspace: format 'sqlite' where 'runvil-workspace' required" } },
   };
   await Commands.execute("workbench.action.openWorkspace");
   await flush();
   check(
     "a refused open paints the server's message on the status bar as error",
-    statusMessages.some((m) => m.severity === "error" && m.label.includes("not a PromptForge workspace")),
+    statusMessages.some((m) => m.severity === "error" && m.label.includes("not a Runvil workspace")),
   );
   check("a refused open emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
   check("a refused open records nothing", recentStore.list.length === recentBefore);
@@ -403,13 +403,13 @@ check("the contribution registers without a malformed descriptor", consoleErrors
 
 {
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Beta.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Beta.rvwork";
   nextAnswer = null;
   await Commands.execute("workbench.action.openWorkspace");
   await flush();
   check(
     "a transport failure paints an error, never an unhandled rejection",
-    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("Beta.pfwork"),
+    statusMessages.at(-1)?.severity === "error" && statusMessages.at(-1)?.label.includes("Beta.rvwork"),
   );
   check("a transport failure emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
 }
@@ -427,11 +427,11 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   await flush();
   const pick = window.__TAURI_DIALOG__.calls.at(-1);
   check("Save Workspace As opens the native save picker", pick?.kind === "save");
-  check("the save picker is seeded with the current name plus .pfwork", pick?.defaultPath === "Alpha.pfwork");
+  check("the save picker is seeded with the current name plus .rvwork", pick?.defaultPath === "Alpha.rvwork");
   check(
-    "the save picker filters to .pfwork files",
+    "the save picker filters to .rvwork files",
     Array.isArray(pick?.filters) &&
-      pick.filters.some((f) => f.name === "PromptForge Workspace" && f.extensions.join(",") === "pfwork"),
+      pick.filters.some((f) => f.name === "Runvil Workspace" && f.extensions.join(",") === "rvwork"),
   );
   check("a cancelled save picker posts nothing", postsSince(fetchesBefore).length === 0);
   check("a cancelled save picker emits nothing", window.__TAURI_EVENTS__.emitted.length === emittedBefore);
@@ -439,7 +439,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   check("a cancelled save picker invalidates nothing", workspaceChanges === changesBefore);
 }
 
-// --- Save As: a bare name gains .pfwork once and switches ------------------------
+// --- Save As: a bare name gains .rvwork once and switches ------------------------
 
 {
   const fetchesBefore = fetches.length;
@@ -447,19 +447,19 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
   const statusBefore = statusMessages.length;
   const BARE = "C:\\work\\Beta";
-  const SAVED = `${BARE}.pfwork`;
+  const SAVED = `${BARE}.rvwork`;
   window.__TAURI_DIALOG__.answer = BARE;
   answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: SAVED, name: "Beta" } });
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
   const posts = postsSince(fetchesBefore);
   check("a picked name is posted once to /workspace/file/save-as", posts.length === 1 && posts[0].url === "/workspace/file/save-as");
-  check("a bare name is posted with .pfwork appended", posts[0]?.body?.path === SAVED);
+  check("a bare name is posted with .rvwork appended", posts[0]?.body?.path === SAVED);
   check("a successful save-as fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
   const emitted = window.__TAURI_EVENTS__.emitted;
   check(
-    "a successful save-as emits promptforge:workspace-opened with the new path",
-    emitted.length === emittedBefore + 1 && emitted.at(-1).event === "promptforge:workspace-opened" && emitted.at(-1).payload?.path === SAVED,
+    "a successful save-as emits runvil:workspace-opened with the new path",
+    emitted.length === emittedBefore + 1 && emitted.at(-1).event === "runvil:workspace-opened" && emitted.at(-1).payload?.path === SAVED,
   );
   check("a successful save-as records the new path as recent", recentStore.list[0] === SAVED);
   check("a successful save-as paints nothing on the status bar", statusMessages.length === statusBefore);
@@ -469,20 +469,20 @@ check("the contribution registers without a malformed descriptor", consoleErrors
 
 {
   const fetchesBefore = fetches.length;
-  const NAMED = "C:\\work\\Gamma.pfwork";
+  const NAMED = "C:\\work\\Gamma.rvwork";
   window.__TAURI_DIALOG__.answer = NAMED;
   answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: NAMED, name: "Gamma" } });
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
-  check("a name already ending in .pfwork is posted unchanged", postsSince(fetchesBefore)[0]?.body?.path === NAMED);
+  check("a name already ending in .rvwork is posted unchanged", postsSince(fetchesBefore)[0]?.body?.path === NAMED);
 
   const fetchesBeforeUpper = fetches.length;
-  const UPPER = "C:\\work\\Delta.PFWORK";
+  const UPPER = "C:\\work\\Delta.RVWORK";
   window.__TAURI_DIALOG__.answer = UPPER;
   answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: UPPER, name: "Delta" } });
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
-  check("an upper-case .PFWORK extension is recognized and not doubled", postsSince(fetchesBeforeUpper)[0]?.body?.path === UPPER);
+  check("an upper-case .RVWORK extension is recognized and not doubled", postsSince(fetchesBeforeUpper)[0]?.body?.path === UPPER);
 }
 
 // --- Save As: a refusal paints the error and switches nothing ----------------------
@@ -491,11 +491,11 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const changesBefore = workspaceChanges;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
   const recentBefore = recentStore.list.length;
-  const TAKEN = "C:\\work\\Alpha.pfwork";
+  const TAKEN = "C:\\work\\Alpha.rvwork";
   window.__TAURI_DIALOG__.answer = TAKEN;
   answerQueue.push(
     { status: 200, body: OPENED },
-    { status: 409, body: { error: { code: "conflict", message: "workspace file already exists: C:\\work\\Alpha.pfwork" } } },
+    { status: 409, body: { error: { code: "conflict", message: "workspace file already exists: C:\\work\\Alpha.rvwork" } } },
   );
   await Commands.execute("workbench.action.saveWorkspaceAs");
   await flush();
@@ -519,7 +519,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   await flush();
   const pick = window.__TAURI_DIALOG__.calls.at(-1);
   check("a failed current lookup still opens the save picker", pick?.kind === "save");
-  check("a failed current lookup seeds the picker with Untitled.pfwork", pick?.defaultPath === "Untitled.pfwork");
+  check("a failed current lookup seeds the picker with Untitled.rvwork", pick?.defaultPath === "Untitled.rvwork");
   check("a failed current lookup paints nothing by itself", statusMessages.length === statusBefore && postsSince(fetchesBefore).length === 0);
 }
 
@@ -530,20 +530,20 @@ check("the contribution registers without a malformed descriptor", consoleErrors
   const changesBefore = workspaceChanges;
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
   const statusBefore = statusMessages.length;
-  const COPY = "C:\\work\\Alpha copy.pfwork";
+  const COPY = "C:\\work\\Alpha copy.rvwork";
   window.__TAURI_DIALOG__.answer = "C:\\work\\Alpha copy";
   answerQueue.push({ status: 200, body: OPENED }, { status: 200, body: { ...OPENED, path: COPY, name: "Alpha copy" } });
   await Commands.execute("workbench.action.duplicateWorkspace");
   await flush();
   const pick = window.__TAURI_DIALOG__.calls.at(-1);
-  check("Duplicate Workspace opens the native save picker seeded with the current name", pick?.kind === "save" && pick?.defaultPath === "Alpha.pfwork");
+  check("Duplicate Workspace opens the native save picker seeded with the current name", pick?.kind === "save" && pick?.defaultPath === "Alpha.rvwork");
   const posts = postsSince(fetchesBefore);
   check("a picked name is posted once to /workspace/file/duplicate", posts.length === 1 && posts[0].url === "/workspace/file/duplicate");
-  check("duplicate appends .pfwork to a bare name", posts[0]?.body?.path === COPY);
+  check("duplicate appends .rvwork to a bare name", posts[0]?.body?.path === COPY);
   check("a successful duplicate fires one workspace-changed invalidation", workspaceChanges === changesBefore + 1);
   const emitted = window.__TAURI_EVENTS__.emitted;
   check(
-    "a successful duplicate emits promptforge:workspace-opened with the copy's path",
+    "a successful duplicate emits runvil:workspace-opened with the copy's path",
     emitted.length === emittedBefore + 1 && emitted.at(-1).payload?.path === COPY,
   );
   check("a successful duplicate records the copy's path as recent", recentStore.list[0] === COPY);
@@ -555,7 +555,7 @@ check("the contribution registers without a malformed descriptor", consoleErrors
 {
   const emittedBefore = window.__TAURI_EVENTS__.emitted.length;
   const recentBefore = recentStore.list.length;
-  window.__TAURI_DIALOG__.answer = "C:\\work\\Nothing.pfwork";
+  window.__TAURI_DIALOG__.answer = "C:\\work\\Nothing.rvwork";
   answerQueue.push(
     { status: 200, body: { path: null, name: "Untitled", grants: [], window_state: null } },
     { status: 400, body: { error: { code: "refused", message: "no workspace file to duplicate: the workspace is ephemeral" } } },

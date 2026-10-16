@@ -62,7 +62,7 @@ globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
 globalThis.Node = window.Node;
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-disposable-adoption-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-disposable-adoption-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   DisposableStore,

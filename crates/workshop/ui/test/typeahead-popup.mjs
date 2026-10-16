@@ -83,7 +83,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 dom.window.Range.prototype.getClientRects = () => [];
 dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-typeahead-popup-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-typeahead-popup-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, ChatBox } = await import(pathToFileURL(bundlePath).href);
 

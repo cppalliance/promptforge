@@ -2,7 +2,7 @@
 //! phrase, per token-count form, the in-stream envelope, and a body that
 //! matches nothing.
 
-use promptforge::model::CompletionErrorKind;
+use runvil::model::CompletionErrorKind;
 
 use super::{classify_http_failure, classify_stream_error};
 

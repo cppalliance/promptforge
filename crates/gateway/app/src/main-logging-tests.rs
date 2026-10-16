@@ -31,7 +31,7 @@ type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 #[cfg(feature = "stt")]
-const CHILD_STATE_DIR: &str = "PROMPTFORGE_ALIGNMENT_LOG_CHILD_STATE_DIR";
+const CHILD_STATE_DIR: &str = "RUNVIL_ALIGNMENT_LOG_CHILD_STATE_DIR";
 #[cfg(feature = "stt")]
 const CHILD_TEST: &str = "logging_tests::gateway_no_alignment_uses_production_logging_child";
 #[cfg(feature = "stt")]
@@ -115,7 +115,7 @@ fn mounted_no_alignment_is_drained_through_production_logging() {
 #[test]
 fn a_process_lease_loser_leaves_the_canonical_log_untouched() {
     let temp = tempfile::tempdir().expect("temporary Gateway state");
-    let state_dir = temp.path().join(".promptforge");
+    let state_dir = temp.path().join(".runvil");
     let run_dir = state_dir.join("run");
     let logs = state_dir.join("logs");
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
@@ -154,7 +154,7 @@ fn a_process_lease_loser_leaves_the_canonical_log_untouched() {
 #[test]
 fn a_lease_holder_resolution_failure_leaves_the_canonical_log_untouched() {
     let temp = tempfile::tempdir().expect("temporary Gateway state");
-    let state_dir = temp.path().join(".promptforge");
+    let state_dir = temp.path().join(".runvil");
     let run_dir = state_dir.join("run");
     let logs = state_dir.join("logs");
     std::fs::create_dir_all(&logs).expect("create seeded log directory");

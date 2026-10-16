@@ -39,7 +39,7 @@ isProject: false
 
 ## Goal
 
-Three coordinated changes to `promptforge-core`:
+Three coordinated changes to `runvil-core`:
 
 1. **RunContext seed**: a single ambient-state object for the execute subtree, passed as parameter one (`ctx: &RunContext`). Starts with one field, `Arc<Prompt>`; the `nonce` field arrives in Phase 2 together with its readers (a never-read field trips dead_code in non-test builds).
 2. **Per-run guard nonce**: `untrusted::wrap` uses one nonce minted at run start instead of a fresh nonce per call, so identical untrusted content produces byte-identical envelopes - preserving KV-cache prefix sharing across fanout arms and tool-loop rounds.
@@ -156,10 +156,10 @@ New module `execute/context.rs`:
 
 Wire-up:
 
-- `mod context;` + `pub(crate) use context::RunContext;` in [execute.rs](promptforge/crates/promptforge-core/src/execute.rs); add `context` to the module-layout doc comment (lines 45-56).
-- In `run` ([execute.rs:207](promptforge/crates/promptforge-core/src/execute.rs)): `let ctx = RunContext::new(prompt);` after the version gate (after line 224). SCAN NOTE: `prompt` is used again AFTER `run_body` completes (`prompt.title` at execute.rs:321), and throughout the body (`prompt.replay` :263, `prompt.frontmatter` :286-289, `prompt.sections` :291/:298) - pass `&ctx` into `run_body`; never move it.
-- `execute_live_h1` ([h1.rs:28](promptforge/crates/promptforge-core/src/execute/h1.rs)): replace `prompt: &Prompt` with `ctx: &RunContext` as parameter one. SCAN NOTE: the body uses `prompt.title` 8+ times (:51,:53,:55,:62,:74,:82,:96,:111,:117), `prompt.sections.len()` (:53), `prompt.h1_blocks` (:97) - all become `ctx.prompt()`-based. Its RunFrame destructure at h1.rs:35-44 uses `..`, so the Phase-2 frame field is safe there.
-- `run_sections` ([engine.rs:152](promptforge/crates/promptforge-core/src/execute/engine.rs)): same replacement; the walk's `RunFrame` picks up `nonce: ctx.nonce()` (see phase 2). SCAN NOTE - NAMING COLLISION: the rebuilt frame is bound as `let ctx` at engine.rs:164, and `walk_siblings` (:228) / `run_one_section` (:329) already take `ctx: &RunFrame`. Convention is `ctx` = `&RunContext`; rename the RunFrame bindings/params to `frame` in this file.
+- `mod context;` + `pub(crate) use context::RunContext;` in [execute.rs](runvil/crates/runvil-core/src/execute.rs); add `context` to the module-layout doc comment (lines 45-56).
+- In `run` ([execute.rs:207](runvil/crates/runvil-core/src/execute.rs)): `let ctx = RunContext::new(prompt);` after the version gate (after line 224). SCAN NOTE: `prompt` is used again AFTER `run_body` completes (`prompt.title` at execute.rs:321), and throughout the body (`prompt.replay` :263, `prompt.frontmatter` :286-289, `prompt.sections` :291/:298) - pass `&ctx` into `run_body`; never move it.
+- `execute_live_h1` ([h1.rs:28](runvil/crates/runvil-core/src/execute/h1.rs)): replace `prompt: &Prompt` with `ctx: &RunContext` as parameter one. SCAN NOTE: the body uses `prompt.title` 8+ times (:51,:53,:55,:62,:74,:82,:96,:111,:117), `prompt.sections.len()` (:53), `prompt.h1_blocks` (:97) - all become `ctx.prompt()`-based. Its RunFrame destructure at h1.rs:35-44 uses `..`, so the Phase-2 frame field is safe there.
+- `run_sections` ([engine.rs:152](runvil/crates/runvil-core/src/execute/engine.rs)): same replacement; the walk's `RunFrame` picks up `nonce: ctx.nonce()` (see phase 2). SCAN NOTE - NAMING COLLISION: the rebuilt frame is bound as `let ctx` at engine.rs:164, and `walk_siblings` (:228) / `run_one_section` (:329) already take `ctx: &RunFrame`. Convention is `ctx` = `&RunContext`; rename the RunFrame bindings/params to `frame` in this file.
 - Update the two call sites in `run` (lines 294, 302).
 
 ### Phase 2: per-run nonce
@@ -174,18 +174,18 @@ ONE ATOMIC COMMIT: `nonce-signature` + `nonce-thread-tool-loop` + `nonce-thread-
 
 `RunContext` gains its second field: `nonce: GuardNonce` - `new()` mints via `GuardNonce::fresh()`, accessor `nonce(&self) -> &GuardNonce`. The field and its readers land in the same commit, so no dead_code hazard.
 
-Threading to the tool-loop wrap site ([tool_loop.rs:285](promptforge/crates/promptforge-core/src/execute/tool_loop.rs)):
+Threading to the tool-loop wrap site ([tool_loop.rs:285](runvil/crates/runvil-core/src/execute/tool_loop.rs)):
 
-- `RunFrame` gains `nonce: &'a GuardNonce` ([engine.rs:103](promptforge/crates/promptforge-core/src/execute/engine.rs)); built in `run` from the RunContext, carried over by the `run_sections` fork (`..*frame`). RunFrame is `#[derive(Clone, Copy)]` (engine.rs:102) - a `&'a GuardNonce` field keeps Copy.
-- `ControlContext` gains `nonce: GuardNonce` ([engine.rs:546](promptforge/crates/promptforge-core/src/execute/engine.rs)). SCAN NOTE: add the field + one parameter to `from_run_fields` (engine.rs:579, literal at 597-614) - both `from_walk` (:619) and `from_fanout` (:645) delegate to it, so one parameter covers both paths. `walk_context` (:676, literal 677-695) re-borrows `nonce: &self.nonce`.
+- `RunFrame` gains `nonce: &'a GuardNonce` ([engine.rs:103](runvil/crates/runvil-core/src/execute/engine.rs)); built in `run` from the RunContext, carried over by the `run_sections` fork (`..*frame`). RunFrame is `#[derive(Clone, Copy)]` (engine.rs:102) - a `&'a GuardNonce` field keeps Copy.
+- `ControlContext` gains `nonce: GuardNonce` ([engine.rs:546](runvil/crates/runvil-core/src/execute/engine.rs)). SCAN NOTE: add the field + one parameter to `from_run_fields` (engine.rs:579, literal at 597-614) - both `from_walk` (:619) and `from_fanout` (:645) delegate to it, so one parameter covers both paths. `walk_context` (:676, literal 677-695) re-borrows `nonce: &self.nonce`.
 - SCAN NOTE - FanoutContext is the missing link: the arm's nonce chain is ControlContext -> `FanoutContext` (fanout/mod.rs:213, built by the `fanout_context` builder literal at engine.rs:716-737) -> `ArmInputs::from_context` -> `ControlContext::from_fanout`. `FanoutContext` gains `nonce: &'a GuardNonce`; the builder literal sets `nonce: &self.nonce`. ArmInputs needs NO change (it holds `Arc<ControlContext>`; the nonce rides inside).
-- `SectionProgress` gains `nonce: &'a GuardNonce` ([tool_loop.rs:34](promptforge/crates/promptforge-core/src/execute/tool_loop.rs)); the wrap site calls `untrusted::wrap(progress.nonce, output.text())`. `run_prose_inference` destructures SectionProgress at tool_loop.rs:101-108 - bind `nonce` there; no signature change.
+- `SectionProgress` gains `nonce: &'a GuardNonce` ([tool_loop.rs:34](runvil/crates/runvil-core/src/execute/tool_loop.rs)); the wrap site calls `untrusted::wrap(progress.nonce, output.text())`. `run_prose_inference` destructures SectionProgress at tool_loop.rs:101-108 - bind `nonce` there; no signature change.
 - SCAN NOTE - six TEST constructors of SectionProgress need the field: `silent_progress` helper (execute/tests/mod.rs:795-807) plus execute/tests/tool_loop.rs:156,227, tests/mod.rs:1194, debug_and_counts.rs:278, observations.rs:357. Production constructors are block_walk.rs:239 and :340 (both build from the walk's ctx - one frame field serves both).
 - Rewrite the stale comment at tool_loop.rs:279-283 (it argues for per-call freshness on a threat the escaping already prevents).
 
-Threading to the Lua wrap site ([host.rs:97-99](promptforge/crates/promptforge-core/src/lua/host.rs)):
+Threading to the Lua wrap site ([host.rs:97-99](runvil/crates/runvil-core/src/lua/host.rs)):
 
-- `SectionVm::new` and `SectionVm::new_for_section` ([vm.rs:212, 263](promptforge/crates/promptforge-core/src/lua/vm.rs)) gain a `nonce: &GuardNonce` parameter; `install_untrusted` (called only at vm.rs:245; `new_for_section` delegates to `new` at vm.rs:270) captures an OWNED clone (mlua `Fn + Send + 'static` bound - verified by scan).
+- `SectionVm::new` and `SectionVm::new_for_section` ([vm.rs:212, 263](runvil/crates/runvil-core/src/lua/vm.rs)) gain a `nonce: &GuardNonce` parameter; `install_untrusted` (called only at vm.rs:245; `new_for_section` delegates to `new` at vm.rs:270) captures an OWNED clone (mlua `Fn + Send + 'static` bound - verified by scan).
 - SCAN NOTE - complete construction-site list: h1.rs:55 (from RunContext), engine.rs:345 (walk, from RunFrame), arm.rs:214-220 (from ControlContext via the ArmInputs Arc), vm.rs:1037 (`#[cfg(test)] run_chunk` helper - the single mint point for lua/tests.rs `run()`-based tests), execute/tests/mod.rs:897 and :969, model/tests/mod.rs:98, and 25 inline sites in lua/tests.rs (21 `new` + 4 `new_for_section`, no shared helper - add a small test helper that mints one nonce and use it at every site).
 
 Tests (the inversions):
@@ -198,7 +198,7 @@ Tests (the inversions):
 ### Phase 3: H1 control-global stubs
 
 - Add a `SectionVm` method (e.g. `install_h1_control_stubs`) in the lua layer that installs `execute`, `jump`, `fanout`, `list_from_section` as functions raising a clear Lua error: `"<name> is only available in sections (## headings); H1 runs before sections exist"`.
-- Call it in `execute_live_h1` after `install_host_apis` ([h1.rs:74](promptforge/crates/promptforge-core/src/execute/h1.rs)).
+- Call it in `execute_live_h1` after `install_host_apis` ([h1.rs:74](runvil/crates/runvil-core/src/execute/h1.rs)).
 - The defensive recorded-jump path in `run_live_h1_block` stays (belt and suspenders).
 - Tests (execute/tests): one per global - an H1 block calling it fails the run with the clear message in the error text.
 
@@ -234,7 +234,7 @@ LANDED 2026-08-22: step 8 = ef86da3 (need->bind rename, 52 files), step 9 = 8361
 
 Implements the remaining recorded decisions. Each step is one commit, compile-green, suite as oracle. Order chosen so new code lands on final names and fat bindings before the container holds them.
 
-8. **Rename `tools.need` -> `tools.bind`, `models.need` -> `models.bind`.** Mechanical, breaking the prompt language on purpose: Engine function registration and validation, error messages ("was not declared by tools.need" etc.), every test fixture, every prompt file under promptforge/local/prompts (and any other in-tree consumer), the user guide. No behavior change. Suite green.
+8. **Rename `tools.need` -> `tools.bind`, `models.need` -> `models.bind`.** Mechanical, breaking the prompt language on purpose: Engine function registration and validation, error messages ("was not declared by tools.need" etc.), every test fixture, every prompt file under runvil/local/prompts (and any other in-tree consumer), the user guide. No behavior change. Suite green.
 9. **`ToolBinding` carries `Arc<dyn Tool>`.** Resolution attaches the implementation at bind time (the registry/catalog is consulted then, H1-phase). `prepare_scoped_tools` reads description fallback and parameters schema from the binding's Arc; dispatch goes through the binding (dispatch map becomes alias -> binding); `Error::UnknownScopedTool` is deleted (unavailable implementations fail at bind time). Hand-implemented `PartialEq`/`Eq`/`Debug` on ToolBinding keyed on id; test fixtures get dummy Arc<dyn Tool>s. Suite green.
 10. **`SharedTools` -> `ToolCatalog`, caller-provided.** The harness builds and validates the catalog once and passes it in (mirroring ModelCatalog); `ToolRegistry` folds into it (only H1-phase validation/lookup remains after step 9); `run`'s signature changes (acceptable at 0.1). Open detail to settle at implementation: whether the tool catalog folds into ResolutionContext. Public error type for catalog construction gets real docs. Suite green; in-tree callers of run() updated.
 11. **`ToolSet`/`ToolView` + bind-time conflicts + delete `ToolAnalysis`.** `ToolSet` is the container (today's ToolBindings); `ToolView` is the read-only trait implemented directly on `Mutex<ToolSet>`; `RunContext.tools: Arc<dyn ToolView>` is created empty at run start (killing the with_walk_state fork for bindings). On each tools.bind, the new description is compared against existing bindings via the picker and clashes are recorded SYMMETRICALLY as `conflicts: Vec<Conflict>` with `Conflict { alias, similarity }` (bind records, never fails). The scope check reads the entering binding's conflicts (decide scope-rebuild vs add-time at implementation; verify always-scope and local-tool paths). `ToolAnalysis` deletes; alias maps derive on demand. Check ToolPicker::build/rebuild cost per bind first. Suite green.
@@ -254,7 +254,7 @@ Per rust-rulebook section 12, before EVERY commit (not just at the end):
 
 - `cargo fmt --all --check`
 - `cargo clippy --all-targets --all-features -- -D warnings` (the bare form skips tests/benches - where most of this plan's churn lands)
-- `cargo test --locked -p promptforge-core`
+- `cargo test --locked -p runvil-core`
 - Full workspace suite at the end: `cargo test --locked --workspace --all-features`
 
 House conventions for the executor (rust-rulebook, matching existing code): any new lint suppression is `#[expect(lint, reason = "...")]`, never bare `#[allow]`; comments state the invariant and the reason, never narrate the next line; new tests land in the same commit as the code they cover.

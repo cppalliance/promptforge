@@ -9,8 +9,8 @@ use std::time::Duration;
 use harness_runner::display_chain;
 use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::recorder::{RecordKind, RunRecorder};
-use promptforge::cancel::CancelHandle;
-use promptforge::vfs::VfsRef;
+use runvil::cancel::CancelHandle;
+use runvil::vfs::VfsRef;
 
 use super::{answers, await_raised, cancel_after, meta};
 use crate::support::{
@@ -19,7 +19,7 @@ use crate::support::{
 
 /// A run of one store write and one read, over a fresh memory store: its
 /// every effect is a Vfs effect, so no performer is ever out.
-fn store_round_trip() -> promptforge::Run {
+fn store_round_trip() -> runvil::Run {
     run_over(
         "store.write('a.md', '1')\nreturn store.read('a.md')",
         VfsRef::default(),

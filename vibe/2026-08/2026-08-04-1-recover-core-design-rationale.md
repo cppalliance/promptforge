@@ -1,6 +1,6 @@
 ---
 name: recover core design rationale
-overview: Recover the design rationale of `promptforge-core` from the code alone by generating competing explanations for each design element and killing the ones the evidence refutes, then let the repository's documents and history propose further collapses as a measure of what a human could confirm, applying none of them, and write a design document from what the code forces. Runs start to finish with no user interaction.
+overview: Recover the design rationale of `runvil-core` from the code alone by generating competing explanations for each design element and killing the ones the evidence refutes, then let the repository's documents and history propose further collapses as a measure of what a human could confirm, applying none of them, and write a design document from what the code forces. Runs start to finish with no user interaction.
 todos:
   - id: step-1
     content: "Step 1: create the ledger with the method and the two worked example records"
@@ -32,16 +32,16 @@ todos:
 isProject: false
 ---
 
-# Recovering the design of promptforge-core from its code
+# Recovering the design of runvil-core from its code
 
 ## 0. Paths
 
 Every relative path below is relative to the code repository. Nothing in this plan depends on anything said in the conversation that produced it.
 
-- Code repository, and the only git repository this plan commits to: `c:\Users\Vinnie\src\cursor\promptforge`
-- The crate under study: `crates/promptforge-core`
-- The ledger: `research/2026-08-03-recover-rationale-promptforge-core.md`, inside the code repository, so each step is a real commit with a real diff
-- The archive repository, opened only in pass 2: `c:\Users\Vinnie\src\cursor\promptforge-design`
+- Code repository, and the only git repository this plan commits to: `c:\Users\Vinnie\src\cursor\runvil`
+- The crate under study: `crates/runvil-core`
+- The ledger: `research/2026-08-03-recover-rationale-runvil-core.md`, inside the code repository, so each step is a real commit with a real diff
+- The archive repository, opened only in pass 2: `c:\Users\Vinnie\src\cursor\runvil-design`
 - Review findings, overwritten each cycle: `c:\Users\Vinnie\src\cursor\cabinet\_scratch\recover-rationale\vibe-review.md`
 - Pass 1 group files, one per extraction step: `c:\Users\Vinnie\src\cursor\cabinet\_scratch\recover-rationale\group-<n>.md`
 
@@ -85,9 +85,9 @@ An element whose hypotheses were never seriously competing is a failure of the m
 
 ## 3. Pass 1 is blind, and the isolation is the experiment
 
-Pass 1 may read: everything under `crates/promptforge-core/src` and its tests; `crates/promptforge-core/Cargo.toml`; the workspace `Cargo.toml`, `clippy.toml`, and `rustfmt.toml`; and the `src` of sibling crates, but only to see how core's API is *used*, since call sites are legitimate structural evidence.
+Pass 1 may read: everything under `crates/runvil-core/src` and its tests; `crates/runvil-core/Cargo.toml`; the workspace `Cargo.toml`, `clippy.toml`, and `rustfmt.toml`; and the `src` of sibling crates, but only to see how core's API is *used*, since call sites are legitimate structural evidence.
 
-Pass 1 may not read: `crates/promptforge-core/design-core.md`; any other `design-*.md` in any crate; anything in the `promptforge-design` repository; `README.md`, `STATUS.md`, or `AGENTS.md`, all of which carry rationale; and any git history - no `log`, `show`, `blame`, or commit message.
+Pass 1 may not read: `crates/runvil-core/design-core.md`; any other `design-*.md` in any crate; anything in the `runvil-design` repository; `README.md`, `STATUS.md`, or `AGENTS.md`, all of which carry rationale; and any git history - no `log`, `show`, `blame`, or commit message.
 
 One practical guard, because the forbidden files sit next to the permitted ones and a careless search walks straight into them. Every crate keeps its design document beside its `src` directory, so an unscoped grep across `crates/` prints rationale from `design-core.md` into the very context that is supposed not to have it, and once printed it cannot be unread. Scope every search to source: `rg <pattern> --glob 'crates/*/src/**' --glob '!*.md'`, or name the file directly. A pass 1 step that has already seen a forbidden line says so in its report rather than pretending otherwise, because a contaminated record dressed as a clean one is worse than a missing one.
 
@@ -97,7 +97,7 @@ The cost is real and worth accepting. This crate's comments are unusually good, 
 
 ## 4. Pass 2 opens the archive to measure what it could add
 
-Everything forbidden above becomes available: the design documents and residues in `promptforge-design`, the crate's existing `design-core.md`, `README.md`, `STATUS.md`, `AGENTS.md`, and the full git history.
+Everything forbidden above becomes available: the design documents and residues in `runvil-design`, the crate's existing `design-core.md`, `README.md`, `STATUS.md`, `AGENTS.md`, and the full git history.
 
 For every element that came out narrowed or open, search that material for anything bearing on it and write a **proposal**: the collapse it would justify, the evidence, and the evidence's provenance - a file and line, or a commit hash and its date.
 
@@ -117,11 +117,11 @@ flowchart TD
 
 ## 5. The ledger, and its record format
 
-One file, `research/2026-08-03-recover-rationale-promptforge-core.md` in the code repository, holding one record per element in this shape:
+One file, `research/2026-08-03-recover-rationale-runvil-core.md` in the code repository, holding one record per element in this shape:
 
 ```
 ### E-014  The gateway client is passed in, never read from the environment
-Element:    RunOptions::client, crates/promptforge-core/src/execute.rs
+Element:    RunOptions::client, crates/runvil-core/src/execute.rs
 Kind:       public API
 Hypotheses: H1 injection for testability
             H2 a file-configured caller cannot set the environment
@@ -155,7 +155,7 @@ These four steps carry no commit of their own. The group files are scratch and l
 
    Pass 1 leaves most records narrowed or open - on the order of four dozen - and each one needs the whole archive searched against it, so this runs as three agents over disjoint thirds of the record list rather than one agent over all of them. Splitting by record cannot produce two proposals for one element the way splitting by archive source would, since no two agents share a record. Each writes to its own proposal file in the scratch directory from section 0 and none touches the ledger; a fourth agent then appends all three into the ledger, which is also the only place a proposal that bears on two records can be noticed. The commit is still one commit.
 
-8. **Write `crates/promptforge-core/design-core-recovered.md` as a design document, organized by the system rather than by the ledger.** Follow the `design-doc` block at the end of `c:\Users\Vinnie\src\cursor\tools-public\tools\architect.md`: it is the authority on the document's shape - three fixed opening sections, ten to fifteen headline choices with the rest demoted to a line, headings that state a point, ordered by importance, naming no source document. The ledger is the evidence behind the document, not its outline: consult it, never transcribe it. A document a reader could rebuild by rewording the ledger one record at a time has failed, however clean its sentences, because the reader wanted the crate and got the audit trail. Stay blind to the existing `design-core.md` - do not read it - so the recovered document is an independent artifact the two can be compared against; leave it untouched.
+8. **Write `crates/runvil-core/design-core-recovered.md` as a design document, organized by the system rather than by the ledger.** Follow the `design-doc` block at the end of `c:\Users\Vinnie\src\cursor\tools-public\tools\architect.md`: it is the authority on the document's shape - three fixed opening sections, ten to fifteen headline choices with the rest demoted to a line, headings that state a point, ordered by importance, naming no source document. The ledger is the evidence behind the document, not its outline: consult it, never transcribe it. A document a reader could rebuild by rewording the ledger one record at a time has failed, however clean its sentences, because the reader wanted the crate and got the audit trail. Stay blind to the existing `design-core.md` - do not read it - so the recovered document is an independent artifact the two can be compared against; leave it untouched.
 
    The block covers the document's shape and its "why"; the one thing it does not cover is how to be honest about what code alone could not establish, which is this method's whole point and its trap. The rule: the audience is a reader learning the crate, not an auditor of the recovery.
    - Where the code forced the reason, state it as fact, which is the block's own "why".

@@ -1,4 +1,4 @@
-//! The relaunch handoff: a second `promptforge-gateway` launch while one is
+//! The relaunch handoff: a second `runvil-gateway` launch while one is
 //! running opens the running gateway's Settings page instead of booting a
 //! duplicate server.
 //!

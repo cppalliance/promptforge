@@ -33,7 +33,7 @@ function dirtyReport() {
 
 /**
  * A scripted workshop parent: records every message the frame posts,
- * answers pf-bridge-ready with a context message, and forwards pf-api
+ * answers rv-bridge-ready with a context message, and forwards rv-api
  * requests to a gatewayStub the way the real workshop's server proxy
  * would - unless `mute(message)` says to stay silent (for timeout
  * staging). Messages sent before the jsdom window exists queue until
@@ -52,11 +52,11 @@ function makeParent(stub, { context = { theme: "dark", route: "#/local" }, mute 
   };
   const bridgePost = (message) => {
     posted.push(message);
-    if (message.type === "pf-bridge-ready") {
-      send({ type: "pf-context", ...context });
+    if (message.type === "rv-bridge-ready") {
+      send({ type: "rv-context", ...context });
       return;
     }
-    if (message.type === "pf-api" && !(mute && mute(message))) {
+    if (message.type === "rv-api" && !(mute && mute(message))) {
       void stub
         .fetchFn(message.path, {
           method: message.method,
@@ -65,7 +65,7 @@ function makeParent(stub, { context = { theme: "dark", route: "#/local" }, mute 
         })
         .then(async (response) => {
           send({
-            type: "pf-api-result",
+            type: "rv-api-result",
             id: message.id,
             status: response.status,
             contentType: response.headers.get("content-type"),
@@ -90,8 +90,8 @@ function makeParent(stub, { context = { theme: "dark", route: "#/local" }, mute 
     spoof(dom, data, origin) {
       dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data, origin }));
     },
-    actions: () => posted.filter((m) => m.type === "pf-action").map((m) => m.action),
-    apiPaths: () => posted.filter((m) => m.type === "pf-api").map((m) => m.path),
+    actions: () => posted.filter((m) => m.type === "rv-action").map((m) => m.action),
+    apiPaths: () => posted.filter((m) => m.type === "rv-api").map((m) => m.path),
   };
 }
 
@@ -189,7 +189,7 @@ test("a context message from a foreign origin is ignored", async () => {
     stub: { fetchFn: () => Promise.reject(new TypeError("no direct fetch")) },
     options: { bridgePost: parent.bridgePost },
   });
-  parent.spoof(dom, { type: "pf-context", theme: "dark", route: "#/local" }, "https://evil.example");
+  parent.spoof(dom, { type: "rv-context", theme: "dark", route: "#/local" }, "https://evil.example");
   await settle();
   assert.match(
     root.querySelector(".banner")?.textContent ?? "",
@@ -268,7 +268,7 @@ test("a profile pick goes through the Workshop bridge to POST /admin/switch-prof
   await settle();
 
   const pick = parent.posted.find(
-    (message) => message.type === "pf-api" && message.path === "/admin/switch-profile",
+    (message) => message.type === "rv-api" && message.path === "/admin/switch-profile",
   );
   assert.ok(pick, "the switch went through the bridge");
   assert.equal(pick.method, "POST");

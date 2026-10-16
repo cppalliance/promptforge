@@ -1,6 +1,6 @@
 ---
-name: Promptforge Vfs Foundation
-overview: "Focused foundation layer: a Vfs/VfsAccess trait pair with a claims model (ExecId-attributed access via an RAII Access capability; concurrent write conflicts are fatal), a mount router with universal cross-platform path handling that subsumes Bashkit's filesystem needs, a Policy layer with reason-carrying verdicts (AllowAll v1, modes in promptforge-vfs), a real-filesystem backend, the Store rewritten as a public concrete facade (no trait) over Vfs mounted at /_promptforge/store with the Lua store table unchanged, and executor::run() taking VfsRef instead of StoreRef."
+name: Runvil Vfs Foundation
+overview: "Focused foundation layer: a Vfs/VfsAccess trait pair with a claims model (ExecId-attributed access via an RAII Access capability; concurrent write conflicts are fatal), a mount router with universal cross-platform path handling that subsumes Bashkit's filesystem needs, a Policy layer with reason-carrying verdicts (AllowAll v1, modes in runvil-vfs), a real-filesystem backend, the Store rewritten as a public concrete facade (no trait) over Vfs mounted at /_runvil/store with the Lua store table unchanged, and executor::run() taking VfsRef instead of StoreRef."
 todos:
   - id: vfs-trait
     content: "Design the Vfs/VfsAccess trait pair and VfsRef handle: sync, bytes-based, Store-derived semantics plus stat/list/grep, acquire/release on the backend trait"
@@ -15,10 +15,10 @@ todos:
     content: "IN SCOPE (without it the Vfs is useless): real-filesystem backend in shared-vfs (std::fs is std - the zero-dependency rule holds) with `HostBackend::identity()` and `HostBackend::rooted(dir)`. Stage 1 thin: direct std::fs ops, lexical+canonicalize containment, failure-atomic writes (sibling temp + rename). Stage 2 hardening toward the Bashkit RealFs oracle (resolver trio, symlink policies, Windows long paths and device names) as the threat model demands"
     status: completed
   - id: policy
-    content: "Implement the Policy layer: Op and Verdict (Deny/Ask carry reason strings), per-op check in Access before the claims check, AllowAll in shared-vfs, ModePolicy (Ask/Plan/Agent) in promptforge-vfs with a UI-flippable shared mode"
+    content: "Implement the Policy layer: Op and Verdict (Deny/Ask carry reason strings), per-op check in Access before the claims check, AllowAll in shared-vfs, ModePolicy (Ask/Plan/Agent) in runvil-vfs with a UI-flippable shared mode"
     status: completed
   - id: store-rewrite
-    content: Rewrite Store as a public concrete facade (no trait) over Vfs mounted at /_promptforge/store; Lua store table unchanged; WriteScope registry deleted in favor of the claims model; the Harness seeds/extracts declared input/output keys through it
+    content: Rewrite Store as a public concrete facade (no trait) over Vfs mounted at /_runvil/store; Lua store table unchanged; WriteScope registry deleted in favor of the claims model; the Harness seeds/extracts declared input/output keys through it
     status: completed
   - id: executor-api
     content: Change executor::run() to take VfsRef instead of StoreRef; RunContext builds the Store facade internally
@@ -33,12 +33,12 @@ todos:
     content: "Implement the claims model: ExecId vending, Access RAII capability (acquire/spawn/borrow/move/drop), readers/writers claims tables keyed by interned canonical paths, canonicalize (stub-to-intern acceptable in v1), fatal determinism RunErrorKind, scheduler installation of the current access per chain step"
     status: completed
   - id: tests
-    content: Port the promptforge-store test suite onto the rewritten Store; add router and path-canonicalization matrices
+    content: Port the runvil-store test suite onto the rewritten Store; add router and path-canonicalization matrices
     status: completed
 isProject: false
 ---
 
-# Promptforge Vfs Foundation
+# Runvil Vfs Foundation
 
 <product-contract>
 
@@ -46,15 +46,15 @@ isProject: false
 
 One filesystem abstraction replaces the run-scoped Store trait and serves every future consumer: Lua, the model's tools, and the Bashkit engine. The Store survives as a public concrete facade with an unchanged Lua surface, mounted inside the namespace it used to stand apart from. The executor's public API pivots from StoreRef to VfsRef. Everything outside this foundation layer is explicitly deferred.
 
-- Problem and users: the harness needs one filesystem abstraction. Today the Store is a run-scoped, text-only trait; Bashkit needs a filesystem backend; run records and terminals need a virtual namespace; Windows path handling is a documented model-failure source. Users are promptforge authors and, downstream, the model inside every run.
+- Problem and users: the harness needs one filesystem abstraction. Today the Store is a run-scoped, text-only trait; Bashkit needs a filesystem backend; run records and terminals need a virtual namespace; Windows path handling is a documented model-failure source. Users are runvil authors and, downstream, the model inside every run.
 - Goals:
   - One `Vfs` trait plus a cloneable `VfsRef` handle, shaped like the proven Store/StoreRef pattern.
   - The trait subsumes Bashkit's filesystem needs so the adapter is mechanical.
   - A router installs multiple overlays into one namespace and behaves identically on Windows, macOS, and Linux.
-  - The Store becomes a public concrete facade (no trait) over Vfs, mounted at `/_promptforge/store`; the Lua `store` table is behaviorally unchanged, and the Harness seeds declared inputs and extracts declared outputs through it.
+  - The Store becomes a public concrete facade (no trait) over Vfs, mounted at `/_runvil/store`; the Lua `store` table is behaviorally unchanged, and the Harness seeds declared inputs and extracts declared outputs through it.
   - `executor::run()` takes `VfsRef` in place of `StoreRef`.
 - Non-goals: the do_shell dispatcher, git builtins, approval policy, the SQLite run-record backend, terminal mirrors, and the Bashkit integration itself (adapter readiness only).
-- Success criteria: the existing promptforge-store test suite passes against the rewritten Store; the executor's doc example compiles and runs with VfsRef; a Bashkit script can ls/cat/grep across mounted backends through the adapter.
+- Success criteria: the existing runvil-store test suite passes against the rewritten Store; the executor's doc example compiles and runs with VfsRef; a Bashkit script can ls/cat/grep across mounted backends through the adapter.
 - Constraints: sync trait (the backends are sync-native; the executor provides asynchrony at the yield boundary); bytes at the trait level with text conveniences above; existing Store semantics preserved exactly (error kinds, anchor-edit rules, numbered reads, write-conflict detection - now via the claims model); no loose files; shared-vfs is std-only with zero dependencies.
 - Open questions:
   - Where the Store's bytes physically live at rest (memory backend vs SQLite-backed) - memory for this phase.
@@ -94,7 +94,7 @@ Three actors share one handle with three different views: Lua through the unchan
 
 ## Technical Design
 
-The design mirrors the proven Store/StoreRef shape one level down: a sync trait behind a poison-safe cloneable handle, with a router that is itself an implementation so overlays nest. The Store inverts from public trait to public concrete facade over a prefix-scoped capability. All operating-system path complexity is confined to the real-filesystem backend; the internal namespace is POSIX-shaped everywhere. Four crates are touched: shared-vfs and promptforge-vfs are new; promptforge-store and promptforge-core change.
+The design mirrors the proven Store/StoreRef shape one level down: a sync trait behind a poison-safe cloneable handle, with a router that is itself an implementation so overlays nest. The Store inverts from public trait to public concrete facade over a prefix-scoped capability. All operating-system path complexity is confined to the real-filesystem backend; the internal namespace is POSIX-shaped everywhere. Four crates are touched: shared-vfs and runvil-vfs are new; runvil-store and runvil-core change.
 
 - Architecture:
   - Vfs is a sync trait; VfsRef is the Arc-plus-mutex cloneable handle mirroring StoreRef's proven pattern, including poison-safe locking.
@@ -102,9 +102,9 @@ The design mirrors the proven Store/StoreRef shape one level down: a sync trait 
   - The Store inverts: from public trait with pluggable backends to a public concrete facade (no trait) over a prefix-scoped VfsRef, exposed as vfs.store().
   - All access is capability-based: the backend trait Vfs has only acquire/release/read_only; every operation lives on the backend's VfsAccess trait object, and the public RAII capability Access wraps it with the ExecId, the claims check, and per-call locking. Drop releases the identity and its claims - cancellation, panics, and early returns cannot leak claims.
 - Modules and interfaces:
-  - Two crates, split generic machinery from promptforge policy:
-    - `shared-vfs` (new crate at promptforge/crates/shared-vfs, matching the shared-* family conventions: plain shared-* package name, version.workspace, publish = false; the workspace globs crates/* so no members edit is needed). It depends on nothing: std only, no workspace crates, no external crates - yours: "shared-vfs must not depend on anything else." The interner, claims tables, and locking are all hand-rolled on std. It holds only generic machinery: the traits, the types, the Router, the claims, the handle, a generic memory backend. Nothing in it knows the string "/_promptforge" exists. It is the permanent bottom of the dependency stack.
-    - `promptforge-vfs` (new crate at promptforge/crates/promptforge-vfs): the promptforge policy layer - the /_promptforge mount layout, the stock constructors (empty() with the store mount preinstalled), and the Store-facing conventions. It depends on shared-vfs; promptforge-store and promptforge-core sit above it.
+  - Two crates, split generic machinery from runvil policy:
+    - `shared-vfs` (new crate at runvil/crates/shared-vfs, matching the shared-* family conventions: plain shared-* package name, version.workspace, publish = false; the workspace globs crates/* so no members edit is needed). It depends on nothing: std only, no workspace crates, no external crates - yours: "shared-vfs must not depend on anything else." The interner, claims tables, and locking are all hand-rolled on std. It holds only generic machinery: the traits, the types, the Router, the claims, the handle, a generic memory backend. Nothing in it knows the string "/_runvil" exists. It is the permanent bottom of the dependency stack.
+    - `runvil-vfs` (new crate at runvil/crates/runvil-vfs): the runvil policy layer - the /_runvil mount layout, the stock constructors (empty() with the store mount preinstalled), and the Store-facing conventions. It depends on shared-vfs; runvil-store and runvil-core sit above it.
   - The manifest expresses the zero-dependency rule: an empty `[dependencies]` table with a comment stating the rule, and nothing else. Fast builds are designed in, not hoped for: zero dependencies means the crate compiles alone and never rebuilds for a dependency rev; dyn at every boundary (Box<dyn Vfs>, Box<dyn VfsAccess>) keeps our code out of dependents' codegen units; profile knobs stay in the workspace root manifest. The named cost: editing shared-vfs rebuilds everything above it, so its surface must stay stable - which this plan's inlined declarations serve.
   - The complete public surface of shared-vfs: traits `Vfs` and `VfsAccess` (backend authors) and `Policy`; types `VfsRef`, `VfsRefBuilder`, `Access`, `ExecId` (opaque: no public constructor - it appears in the `Vfs::acquire` signature, so it must be nameable, but only the handle vends them), `VfsPath`, `VfsPathBuf`, `Entry`, `Stat`, `FileType`, `GrepQuery`, `GrepMatch`, `GrepResults`, `Op`, `Verdict`, `AllowAll`, `VfsError` and its kinds; the memory backend; the real-filesystem backend (`HostBackend::identity` / `HostBackend::rooted`). Everything else is crate-private: `Router` (mounts are installed via VfsRefBuilder), `Volume`, `Claims`, the interner, canonicalize (called inside Access methods, which take &str), and the claims-checking wrapper.
 ### Public declarations
@@ -221,7 +221,7 @@ pub enum FileType {
 pub struct Entry {
     pub name: String,
     pub stat: Stat,
-    pub description: Option<String>,      // annotation column; None outside /_promptforge;
+    pub description: Option<String>,      // annotation column; None outside /_runvil;
                                           // the engine adapter drops it
 }
 
@@ -299,11 +299,11 @@ impl VfsRefBuilder {
 //                  - virtual C:/Users/x/y IS host C:\Users\x\y
 // chroot mount:    VfsRef::builder().mount("/", HostBackend::rooted("C:/work")).build()
 //                  - virtual /a/b IS host C:/work/a/b, containment rejects escape
-// overlay:         base.overlay("/_promptforge/runs", runs_backend)
+// overlay:         base.overlay("/_runvil/runs", runs_backend)
 //                  - shares the base's claims table, swaps only the backend view
-// stock handle:    promptforge_vfs::empty() - VfsRef plus the /_promptforge/store
+// stock handle:    runvil_vfs::empty() - VfsRef plus the /_runvil/store
 //                  memory mount; lives in the policy crate because the mount
-//                  layout is promptforge policy, not shared-vfs machinery
+//                  layout is runvil policy, not shared-vfs machinery
 
 /// The public capability. Holds an ExecId and the backend's access
 /// object; every operation canonicalizes the path, checks the claims
@@ -357,7 +357,7 @@ pub trait Policy: Send {
 }
 
 /// v1 ships AllowAll. ModePolicy (Ask / Plan / Agent, markdown-only
-/// in Plan) lives in promptforge-vfs - editor policy, not VFS machinery.
+/// in Plan) lives in runvil-vfs - editor policy, not VFS machinery.
 pub struct AllowAll;
 ```
 
@@ -392,13 +392,13 @@ impl RealFs {
 // Our equivalents: Router::mount(prefix, HostBackend::rooted(dir)) plus the
 // Policy layer; the mode maps to our read_only() backend flag.
 ```
-  - `promptforge-store`: the Store facade becomes a public concrete struct (no trait) over a prefix-scoped Access, used by the Lua bindings and by the Harness for seeding/extraction; StoreError stays; MemStore/FileStore as public backend types disappear into Vfs backends.
-  - `promptforge-core`: run() signature change; RunContext::new takes the VfsRef and builds the Store facade for section VMs (see promptforge/crates/promptforge-core/src/execute.rs).
+  - `runvil-store`: the Store facade becomes a public concrete struct (no trait) over a prefix-scoped Access, used by the Lua bindings and by the Harness for seeding/extraction; StoreError stays; MemStore/FileStore as public backend types disappear into Vfs backends.
+  - `runvil-core`: run() signature change; RunContext::new takes the VfsRef and builds the Store facade for section VMs (see runvil/crates/runvil-core/src/execute.rs).
   - Bashkit adapter (lives near the future integration crate): implements bashkit::FsBackend over VfsRef; whole-file reads served from read; unsupported operations (symlink, chmod) return the engine's unsupported error.
 - File and public API changes:
   - `execute::run(prompt, args, resolution, vfs: &VfsRef, config)` replaces the `store: &StoreRef` parameter.
-  - promptforge-store's public surface stays source-compatible for Lua-facing behavior; the Store trait is removed from the public API.
-  - Caller migration is one line: `StoreRef::memory()` becomes `promptforge_vfs::empty()`. The stock handle always carries the store mount: empty() means empty of content, not of mounts - a router with a fresh memory backend at `/_promptforge/store`, so callers can seed before run() and extract after. `vfs.store()` returns the public Store facade scoped to the mount; the Harness and Lua bindings share it, and callers never hardcode the mount path. run() uses the existing mount; the child-router overlay remains only as a defensive fallback for hand-built routers lacking one. Per-run freshness is caller discipline (one VfsRef per run, or clear between runs), matching papergate's fresh-temp-dir-per-run pattern today. Caller census (this workspace): every external caller uses `StoreRef::memory()` (workshop-server session_agents.rs, promptforge-lua vm.rs and benches, executor tests); `with_files` has no callers outside the store crate's own tests and doc examples, so no convenience constructor is carried over.
+  - runvil-store's public surface stays source-compatible for Lua-facing behavior; the Store trait is removed from the public API.
+  - Caller migration is one line: `StoreRef::memory()` becomes `runvil_vfs::empty()`. The stock handle always carries the store mount: empty() means empty of content, not of mounts - a router with a fresh memory backend at `/_runvil/store`, so callers can seed before run() and extract after. `vfs.store()` returns the public Store facade scoped to the mount; the Harness and Lua bindings share it, and callers never hardcode the mount path. run() uses the existing mount; the child-router overlay remains only as a defensive fallback for hand-built routers lacking one. Per-run freshness is caller discipline (one VfsRef per run, or clear between runs), matching papergate's fresh-temp-dir-per-run pattern today. Caller census (this workspace): every external caller uses `StoreRef::memory()` (workshop-server session_agents.rs, runvil-lua vm.rs and benches, executor tests); `with_files` has no callers outside the store crate's own tests and doc examples, so no convenience constructor is carried over.
 - Data, persistence, failure, security, and privacy constraints:
   - The trait is bytes-based (`Vec<u8>`) so binary content and Bashkit both fit; text helpers (read_string, numbered ranges) live at the VfsRef layer and error on non-UTF-8 where text is required.
   - Internal namespace is POSIX-shaped (rooted, forward slashes, strict); all operating-system translation (drive letters, case-insensitive comparison, long-path prefixing, device names) lives only in the future real-FS backend, never in the router or virtual paths.
@@ -406,13 +406,13 @@ impl RealFs {
   - Consistency rule: every store op takes the yield path uniformly, including memory-backed ones. No inline fast path - answering differently by backend makes interleaving behavior backend-dependent, which is exactly the semantic drift the claims model exists to prevent. The channel hop is the price of that invariance, and it is cheap.
   - Concurrency model, three separate mechanisms for three separate properties: the mutex gives exclusion (uncontended on the executor's single driver thread; operations never hold it across an await), the ExecId gives attribution (no access object, no operations), and the claims table gives correctness.
   - The claims model: the handle holds two maps (readers and writers: interned canonical path to live ExecIds) plus a live-identity set. Every entry is a live, conflict-eligible claim - retired or released claims are deleted, never stored. The conflict rule: a write booms if another live identity appears in the path's readers or writers; a read booms if another live identity appears in its writers; read-read never conflicts. A violation is a fatal RunErrorKind terminating the run on the spot, naming the path, both identities, and both claim kinds. spawn() deletes the parent's claims (the spawn is the happens-before edge); Drop releases the child's.
-  - Claims are keyed by interned canonical paths produced at API receipt - yours: "it should be calculated / canonicalized at the time the API receives a path. This guarantees we catch aliases." Canonicalization includes the facade's mount-prefix resolution (Lua's `paper.md` and the Harness's `/_promptforge/store/paper.md` are one key), lexical normalization of the virtual namespace, and the case rule; symlink aliases do not exist in v1. Per your rabbithole caution, v1 may stub canonicalize to interning the passed string; multi-platform real-path canonicalization lives in the deferred real-FS backend.
+  - Claims are keyed by interned canonical paths produced at API receipt - yours: "it should be calculated / canonicalized at the time the API receives a path. This guarantees we catch aliases." Canonicalization includes the facade's mount-prefix resolution (Lua's `paper.md` and the Harness's `/_runvil/store/paper.md` are one key), lexical normalization of the virtual namespace, and the case rule; symlink aliases do not exist in v1. Per your rabbithole caution, v1 may stub canonicalize to interning the passed string; multi-platform real-path canonicalization lives in the deferred real-FS backend.
   - The model is primitive-agnostic: it sees spawn and drop events only, so a fanout implemented in Lua over call_async is enforced identically to any executor-level primitive - which the WriteScope registry (fanout-specific) could never have survived. Claims cover plain writes and appends, which WriteScope never did: papergate's cross-arm appends to evidence.md are caught.
   - The prevention pattern the boom teaches: arms write arm-scoped paths and the join merges in arm order - deterministic by construction.
   - Failure-atomicity contract (from Bashkit's TM-FS-014): a failed write, copy, or rename leaves source, destination, and accounting unchanged. Append is one lock acquisition, so read-check-write TOCTOU cannot arise (their TM-DOS-034 lesson).
   - The policy layer: one Policy object per VfsRef (global, not per-mount; a Host wanting per-mount rules multiplexes inside its implementation - yours: "I suppose if the host wants a more rich system they can multiplex it into a single Policy object"). Access consults the policy on every operation, before the claims check (a denied operation never registers a claim). The policy is dynamic through shared state: the UI holds the same Arc and flips modes mid-run (e.g. during user_input), and the next operation sees it - no executor involvement.
   - Verdicts carry reasons - yours: "Deny and Ask should have an attached string." Deny's string is the model's recovery path (read-only vs locked vs mode-restricted produce different corrections); Ask's string is what the user sees in the approval dialog (what is being asked, which rule fired).
-  - Modes are a policy implementation, not VFS machinery: ModePolicy with Ask (deny all mutations), Plan (mutations only to markdown paths), Agent (allow all) lives in promptforge-vfs; modes gate mutations, never reads. The mode policy absorbs the seal: one-way vs reversible is just who still holds the mode handle. The static read_only() backend flag stays - a property of the mount, orthogonal to policy.
+  - Modes are a policy implementation, not VFS machinery: ModePolicy with Ask (deny all mutations), Plan (mutations only to markdown paths), Agent (allow all) lives in runvil-vfs; modes gate mutations, never reads. The mode policy absorbs the seal: one-way vs reversible is just who still holds the mode handle. The static read_only() backend flag stays - a property of the mount, orthogonal to policy.
   - Rust API mechanics: #[non_exhaustive] on Entry, Stat, GrepQuery, FileType, and the error enum (Entry is designed to grow - annotations live there); #[must_use] on Access (an acquire dropped immediately is a bug the compiler can catch); Default where a zero value is meaningful (memory backend); private fields with accessors on every public struct that carries invariants.
   - Conscious deviation: VfsAccess has sixteen methods against the one-to-three-methods guideline. The methods are one cohesive capability, not unrelated surface; defaulted methods (read_range, str_replace, grep) keep the required set at eleven; the engine's own FsBackend makes the same choice. Recorded so it is a decision, not a discovery.
 
@@ -424,7 +424,7 @@ impl RealFs {
 /// normalization of the virtual namespace only (dot segments, duplicate
 /// separators, trailing slash, case rule) plus the facade's mount-prefix
 /// resolution, so Lua's `paper.md` and the host's
-/// `/_promptforge/store/paper.md` are one key. Multi-platform host
+/// `/_runvil/store/paper.md` are one key. Multi-platform host
 /// canonicalization is a rabbithole that lives in the deferred
 /// real-FS backend, not here.
 ///
@@ -469,7 +469,7 @@ impl Router {
 
 ## Testing Plan
 
-Parity is the gate: the existing store suite must pass against the rewritten facade unchanged in intent. Around that, new matrices cover the router and the cross-platform path layer, and a smoke test proves the Bashkit adapter end to end. Mount-escape attempts are rejected at the router. No public API outside the four named crates (shared-vfs, promptforge-vfs, promptforge-store, promptforge-core) may change.
+Parity is the gate: the existing store suite must pass against the rewritten facade unchanged in intent. Around that, new matrices cover the router and the cross-platform path layer, and a smoke test proves the Bashkit adapter end to end. Mount-escape attempts are rejected at the router. No public API outside the four named crates (shared-vfs, runvil-vfs, runvil-store, runvil-core) may change.
 
 - Unit:
   - Path canonicalization matrix per OS convention, including dot segments, mixed separators, casing rules, and traversal rejection.
@@ -480,7 +480,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
   - Executor run end-to-end with VfsRef, including a fanout whose cross-arm append to one path terminates the run with a determinism violation naming both arms.
   - Bashkit adapter smoke: mount memory plus store backends, run an ls/cat/grep script, verify output and exit codes.
 - Regression, security, and performance:
-  - The full existing promptforge-store test suite runs against the rewritten Store unmodified in intent: anchor edits, numbered ranges, idempotent delete, glob grammar, poison handling, write-race detection (now expressed through the claims model).
+  - The full existing runvil-store test suite runs against the rewritten Store unmodified in intent: anchor edits, numbered ranges, idempotent delete, glob grammar, poison handling, write-race detection (now expressed through the claims model).
   - Compile-time Send/Sync assertions for VfsRef and Access (both hold dyn and interior mutability; losing either is a major, invisible break).
   - Claims lifecycle: borrow-vs-spawn semantics, transfer moves claims, drop releases them, spawn deletes the parent's claims (sequential fanouts stay legal), and alias attempts (facade-relative vs mount-absolute spellings of one file) collide on one interned key.
   - Mount-escape attempts (dot segments, absolute re-rooting) rejected at the router.
@@ -498,7 +498,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
   - Bytes at the trait level - Bashkit and future binary content require it; text semantics layer above.
   - Borrowed write, with write_owned noted but not implemented - yours: "for the memory vfs overlay, taking ownership of the contents string is a natural fit," tempered by "note the signature but leave it out of the implementation"; the trait documents the defaulted `write_owned(Vec<u8>)` hatch for the memory overlay's zero-copy move, to be added only when profiling calls for it.
   - Store becomes a concrete facade, not a trait - yours: "it is no longer a trait it is just a regular, private implementation which is exposed to Lua." Refined to public-concrete (not private) because production Hosts seed declared inputs and extract declared outputs through it (the papergate pattern).
-  - Store mounts at `/_promptforge/store` - yours: 'it installs into the overlay: "/_promptforge/store"'.
+  - Store mounts at `/_runvil/store` - yours: 'it installs into the overlay: "/_runvil/store"'.
   - grep is a first-class Vfs operation with a default scan implementation - yours: "the Store implementation now calls into the Vfs to read, grep, etc"; the default keeps simple backends free of index work while SQLite/FTS backends can override later.
   - Router uses a POSIX-shaped internal namespace on every OS - one canonical form, operating-system path translation confined to the real-FS backend.
   - Mounts fixed at construction - matches both engines' models and keeps routing immutable and cheap to clone per run.
@@ -511,19 +511,19 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
   - Builder-style mount installation with lazy per-mount acquire - mounts are declared in one place and immutable after construction; backends learn about identities only when a path under their prefix is first touched.
   - Router crate-private, VfsRefBuilder public - yours: "I dont quite understand why Router is public." The public concept is "a VfsRef with these mounts"; privacy enforces mounts-fixed-at-construction because nobody outside the crate can hold a Router.
   - ExecId public but opaque - it must be nameable (it appears in the Vfs::acquire signature and Access::id), but no public constructor; only the handle vends identities.
-  - Two-crate split, generic machinery vs promptforge policy - shared-vfs holds only generic VFS machinery and never names /_promptforge; promptforge-vfs holds the mount layout and stock constructors. Approved: "Yes. That sounds good."
+  - Two-crate split, generic machinery vs runvil policy - shared-vfs holds only generic VFS machinery and never names /_runvil; runvil-vfs holds the mount layout and stock constructors. Approved: "Yes. That sounds good."
   - overlay() shares the claims table - two handles over the same storage with two claims tables would blind the determinism check exactly where two views coexist; Volume therefore holds backend and claims as separately shareable Arcs. VfsRef itself implements Vfs (forwarding acquire with the given ExecId) so a base handle mounts under a child router.
   - WriteScope registry deleted - yours: "I never liked the WriteScope registry anyway." The claims table is the single mechanism and covers plain writes and appends, which WriteScope never did.
   - Uniform yield path for all store ops - yours: "I agree with all of that, and make a note about consistency." No inline fast path for memory backends, because backend-dependent answer paths make interleaving behavior backend-dependent; the channel hop is the price of the invariance.
   - Wide access trait as a conscious deviation - the filesystem capability is cohesive, defaulted methods keep the required surface at eleven, and the engine's own backend trait makes the same choice; recorded against the small-trait guideline so it is a decision, not a discovery.
   - The stock VfsRef always carries the store mount - yours: "The empty Vfs should still support a store"; empty() means empty of content, not of mounts, because the seeding contract requires the store to exist before run() is called.
   - vfs.store() as the seeding/extraction handle - the production workflow (stock Vfs, seed declared inputs at known filenames, run, extract declared outputs, no real files) needs a public facade available before run(); the Harness and Lua bindings share it. Confirmed: "vfs.store() looks like the correct model."
-  - vfs.store() ships as an extension trait in promptforge-store, not an inherent method on VfsRef - the Store facade type lives in promptforge-store, which sits above promptforge-vfs and shared-vfs in the dependency stack, so shared-vfs cannot name the type. A prelude-exported extension trait preserves the declared vfs.store(&access) call shape without inverting the stack.
+  - vfs.store() ships as an extension trait in runvil-store, not an inherent method on VfsRef - the Store facade type lives in runvil-store, which sits above runvil-vfs and shared-vfs in the dependency stack, so shared-vfs cannot name the type. A prelude-exported extension trait preserves the declared vfs.store(&access) call shape without inverting the stack.
   - API symmetry as a deliberate property - yours: "on the Rust side the API is essentially the same which means no new learning surface for integrators." The Store is the scratchpad that survives the context reset when control transfers between sections; Lua's store table and the Rust facade are the same interface in two languages, documented once, and the model's later file tools become a third consumer of the same verbs.
   - Real-filesystem backend in scope in shared-vfs - yours: "without it, this is fucking useless." std::fs is std, so the zero-dependency rule holds; stage 1 thin with atomic writes, stage 2 hardening toward the RealFs oracle. (Supersedes the earlier deferral, which treated papergate's FileStore use as diagnostics-only.)
   - Real-filesystem backend will be ported, not adapted - source exploration of Bashkit's RealFs shows it is tokio::fs throughout (adapting means block_on per call plus their Tokio dependency) and leaves two Windows gaps we require (long-path prefixing, device names); its value is the hardened algorithms and the realfs test suite as a behavioral oracle, not the type.
 - Rejected alternatives:
-  - Co-locating Vfs with run()'s other traits in promptforge-core-support - rejected: that crate holds small run-support primitives (cancel, observe, untrusted guards) while Vfs is a subsystem (router, paths, glob, grep, backends) with consumers well beyond the executor (Lua, Hosts, workshop-server, the future engine adapter); the workspace has no run()-traits crate to join, since Tool, ModelResolver, and ToolResolver each live in their domain crates. Revisit: only as an additive umbrella re-export crate for integrator ergonomics, never as a move.
+  - Co-locating Vfs with run()'s other traits in runvil-core-support - rejected: that crate holds small run-support primitives (cancel, observe, untrusted guards) while Vfs is a subsystem (router, paths, glob, grep, backends) with consumers well beyond the executor (Lua, Hosts, workshop-server, the future engine adapter); the workspace has no run()-traits crate to join, since Tool, ModelResolver, and ToolResolver each live in their domain crates. Revisit: only as an additive umbrella re-export crate for integrator ergonomics, never as a move.
   - Async trait - rejected: block_on inside a current-thread driver is a deadlock hazard; revisit only if a backend genuinely needs async I/O.
   - Adopting bashkit::FsBackend as the core trait - rejected: whole-file-only reads, five-field metadata, pre-1.0 dependency direction; the adapter isolates it instead.
   - Keeping Store as a public trait with pluggable backends - rejected: two filesystem abstractions is the incoherence this plan exists to remove.
@@ -536,7 +536,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 ### Deferred and Out of Scope
 
-- do_shell dispatcher and argv pattern, git builtins and commit path, SQLite run-record backend and /_promptforge renderers, terminal mirrors, annotated listings, Bashkit integration proper (hooks, TraceMode, analyze), kaish fallback, stage-2 real-filesystem-backend hardening.
+- do_shell dispatcher and argv pattern, git builtins and commit path, SQLite run-record backend and /_runvil renderers, terminal mirrors, annotated listings, Bashkit integration proper (hooks, TraceMode, analyze), kaish fallback, stage-2 real-filesystem-backend hardening.
 
 </decision-record>
 <project-survey>
@@ -551,9 +551,9 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (workshop crates: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`). Supply chain: `cargo deny check` and `cargo audit`.
 - Formatter check command: `cargo fmt --all --check`.
 - Docs command: `mdbook build guide` for the user guide; `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server` for API docs (CI runs it with `RUSTDOCFLAGS: -D warnings`).
-- Test placement and naming conventions: unit tests live in `src/` modules; integration tests live in `crates/<crate>/tests/`. Multi-file suites use one target with a `main.rs` entry plus sibling module files (e.g. `crates/promptforge-core/tests/suite/{main,execution,fanout,parsing,shipped,support}.rs`); gateway and workshop-server use a `tests/it/` target. Fixtures sit beside tests (e.g. `tests/prompts/{valid,invalid,execution}`, `workshop-server/tests/fixtures`). Test names are long descriptive snake_case sentences (e.g. `a_process_lifetime_lease_recovers_after_its_owner_is_terminated`). Benches use criterion (`crates/promptforge-core/benches`). Node helper scripts in `tools/` have sibling `.test.mjs` files.
-- Directory map: `crates/` holds all 36 workspace crates grouped by product prefix (`promptforge-*` executor/language, `gateway*` inference server, `workshop*` desktop app, `shared-*` cross-product substrate, `build-*` build tooling, `product-integration-tests`); `crates/shared-ui` is a TypeScript+CSS package excluded from the Cargo workspace. `guide/` is the mdbook user guide (four doc sets: Workshop, gateway, prompt language, agent programs). `prompts/` holds example prompt programs. `design/` holds design notes. `tools/` holds Node.js helper scripts (gateway sidecar staging, TTS live checks). `vibe/` holds project governance records: `archdoc.md`, dated decision logs, `ACTIVE`. `.config/nextest.toml` configures nextest; `.cargo/config.toml` sets the static-CRT Windows target and the `workshop` alias; `.github/workflows/` holds CI and release packaging; `images/` holds README assets.
-- Component boundaries (per `vibe/archdoc.md`): executor (`promptforge-core` and supporting `promptforge-*` crates) parses and runs prompt pipelines and Lua agent programs; gateway (`gateway*` crates) is an independent server owning model routing, provider credentials, and local inference; CLI (`promptforge` crate) is a thin shell adapter over the executor; Workshop UI (`workshop`, `workshop-server`) is the Tauri desktop shell embedding the executor in-process; store (`promptforge-store`) is the run-scoped virtual filesystem; the Lua VM boundary (`promptforge-lua`) sandboxes prompt code; shared substrate (`shared-*`) carries progress, loopback discovery, protocol, and sidecar facilities. Dependency directions: executor depends on gateway protocol, store, Lua boundary, shared substrate; CLI and Workshop depend on executor, gateway, store, substrate; store and substrate depend on nothing. AGENTS.md enforces four cross-product rules: Gateway crates cannot depend on Workshop or PromptForge product crates; PromptForge crates cannot depend on Gateway or Workshop crates; Workshop crates cannot depend on Gateway crates.
+- Test placement and naming conventions: unit tests live in `src/` modules; integration tests live in `crates/<crate>/tests/`. Multi-file suites use one target with a `main.rs` entry plus sibling module files (e.g. `crates/runvil-core/tests/suite/{main,execution,fanout,parsing,shipped,support}.rs`); gateway and workshop-server use a `tests/it/` target. Fixtures sit beside tests (e.g. `tests/prompts/{valid,invalid,execution}`, `workshop-server/tests/fixtures`). Test names are long descriptive snake_case sentences (e.g. `a_process_lifetime_lease_recovers_after_its_owner_is_terminated`). Benches use criterion (`crates/runvil-core/benches`). Node helper scripts in `tools/` have sibling `.test.mjs` files.
+- Directory map: `crates/` holds all 36 workspace crates grouped by product prefix (`runvil-*` executor/language, `gateway*` inference server, `workshop*` desktop app, `shared-*` cross-product substrate, `build-*` build tooling, `product-integration-tests`); `crates/shared-ui` is a TypeScript+CSS package excluded from the Cargo workspace. `guide/` is the mdbook user guide (four doc sets: Workshop, gateway, prompt language, agent programs). `prompts/` holds example prompt programs. `design/` holds design notes. `tools/` holds Node.js helper scripts (gateway sidecar staging, TTS live checks). `vibe/` holds project governance records: `archdoc.md`, dated decision logs, `ACTIVE`. `.config/nextest.toml` configures nextest; `.cargo/config.toml` sets the static-CRT Windows target and the `workshop` alias; `.github/workflows/` holds CI and release packaging; `images/` holds README assets.
+- Component boundaries (per `vibe/archdoc.md`): executor (`runvil-core` and supporting `runvil-*` crates) parses and runs prompt pipelines and Lua agent programs; gateway (`gateway*` crates) is an independent server owning model routing, provider credentials, and local inference; CLI (`runvil` crate) is a thin shell adapter over the executor; Workshop UI (`workshop`, `workshop-server`) is the Tauri desktop shell embedding the executor in-process; store (`runvil-store`) is the run-scoped virtual filesystem; the Lua VM boundary (`runvil-lua`) sandboxes prompt code; shared substrate (`shared-*`) carries progress, loopback discovery, protocol, and sidecar facilities. Dependency directions: executor depends on gateway protocol, store, Lua boundary, shared substrate; CLI and Workshop depend on executor, gateway, store, substrate; store and substrate depend on nothing. AGENTS.md enforces four cross-product rules: Gateway crates cannot depend on Workshop or Runvil product crates; Runvil crates cannot depend on Gateway or Workshop crates; Workshop crates cannot depend on Gateway crates.
 - Conventions summary: Rust edition 2024 on the stable toolchain (`rust-toolchain.toml`), resolver 3, workspace version 0.3.0. Workspace lints forbid `unsafe_code`, deny `clippy::all` plus `unwrap_used`/`expect_used`, and warn on missing docs. Comments explain non-obvious constraints and cite upstream issue URLs for platform workarounds. Behavior changes ship with tests in the same change; structural enforcement (parsers, snapshots, allowlists, topology checks) requires explicit user approval. Cargo features gate real constraints (toolchain or native build), never product shape. Runtime and serve paths never compile native dependencies, exit the process, or install process-global state. Long-running work reports through `shared-progress`. The two web UIs are TypeScript bundled by esbuild through Cargo build scripts, with Node.js 22 required.
 
 </project-survey>
@@ -567,7 +567,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 - Component: shared-vfs core
 - Create `crates/shared-vfs` (package `shared-vfs`, version.workspace, publish = false, empty `[dependencies]` table carrying the zero-dependency comment; the workspace `crates/*` glob needs no members edit) with the `src/lib.rs` module layout.
-- Write `crates/shared-vfs/AGENTS.md` following the per-crate convention (every workspace crate has one), with exactly these three rules: "std only. No dependencies, workspace or external. The manifest test enforces this; never weaken it." / "No promptforge policy: no /_promptforge paths, no Store, no run concepts." / "The public surface is load-bearing: add defaulted methods, never change existing signatures. Every edit rebuilds the whole stack."
+- Write `crates/shared-vfs/AGENTS.md` following the per-crate convention (every workspace crate has one), with exactly these three rules: "std only. No dependencies, workspace or external. The manifest test enforces this; never weaken it." / "No runvil policy: no /_runvil paths, no Store, no run concepts." / "The public surface is load-bearing: add defaulted methods, never change existing signatures. Every edit rebuilds the whole stack."
 - Define `VfsError` and its kinds (#[non_exhaustive]), `FileType` (seven POSIX kinds), `Entry` (name, stat, description annotation column), `Stat` (honest Option fields), `GrepQuery`, `GrepMatch`, `GrepResults` (#[non_exhaustive], private fields with accessors where invariants exist).
 - Implement the hand-rolled interner, `VfsPath`/`VfsPathBuf`, and crate-private `canonicalize()` (lexical normalization of the POSIX-shaped namespace: dot segments, duplicate separators, trailing slash, case rule; stub-to-intern acceptable in v1).
 - Tests: the self-policing manifest test (reads the crate's own Cargo.toml via CARGO_MANIFEST_DIR and asserts the dependency tables are empty) and the path canonicalization matrix (dot segments, mixed separators, casing rules, traversal rejection).
@@ -628,10 +628,10 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 <step-7>
 
-### Step 7: promptforge-vfs policy crate [completed]
+### Step 7: runvil-vfs policy crate [completed]
 
-- Component: promptforge-vfs
-- Create `crates/promptforge-vfs` (depends on shared-vfs only): the `/_promptforge/store` mount layout, the `empty()` stock constructor (a router with a fresh memory backend at the store mount; empty of content, not of mounts), and `ModePolicy` (Ask denies all mutations, Plan allows mutations only to markdown paths, Agent allows all; modes gate mutations, never reads) behind a UI-flippable shared Arc so a mode change mid-run takes effect on the next operation.
+- Component: runvil-vfs
+- Create `crates/runvil-vfs` (depends on shared-vfs only): the `/_runvil/store` mount layout, the `empty()` stock constructor (a router with a fresh memory backend at the store mount; empty of content, not of mounts), and `ModePolicy` (Ask denies all mutations, Plan allows mutations only to markdown paths, Agent allows all; modes gate mutations, never reads) behind a UI-flippable shared Arc so a mode change mid-run takes effect on the next operation.
 - Tests: mode flip visibility through the shared handle, Plan markdown-only enforcement, and empty() carrying the store mount.
 
 </step-7>
@@ -640,9 +640,9 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 ### Step 8: Store facade rewrite and parity suite [completed]
 
-- Component: promptforge-store
-- Rewrite `promptforge-store`: the Store trait, MemStore, and FileStore disappear from the public API; a public concrete `Store` facade wraps a prefix-scoped Access and is exposed as `vfs.store(&access)` via a prelude-exported extension trait (see decision record). Preserve the StoreError vocabulary exactly with a total VfsError-to-StoreError mapping, anchor-edit rules, numbered reads, idempotent delete (NotFound maps to Ok), and the glob grammar (port one glob implementation, delete the other). Delete the WriteScope registry.
-- Tests: the full existing promptforge-store suite ported onto the facade unmodified in intent (anchor edits, numbered ranges, idempotent delete, glob grammar, poison handling, write-race detection now expressed through the claims model). This suite is the parity gate.
+- Component: runvil-store
+- Rewrite `runvil-store`: the Store trait, MemStore, and FileStore disappear from the public API; a public concrete `Store` facade wraps a prefix-scoped Access and is exposed as `vfs.store(&access)` via a prelude-exported extension trait (see decision record). Preserve the StoreError vocabulary exactly with a total VfsError-to-StoreError mapping, anchor-edit rules, numbered reads, idempotent delete (NotFound maps to Ok), and the glob grammar (port one glob implementation, delete the other). Delete the WriteScope registry.
+- Tests: the full existing runvil-store suite ported onto the facade unmodified in intent (anchor edits, numbered ranges, idempotent delete, glob grammar, poison handling, write-race detection now expressed through the claims model). This suite is the parity gate.
 
 </step-8>
 
@@ -650,9 +650,9 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 ### Step 9: executor API pivot to VfsRef [completed]
 
-- Component: promptforge-core
+- Component: runvil-core
 - Change `execute::run(prompt, args, resolution, vfs: &VfsRef, config)`; `RunContext::new` takes the VfsRef and builds the Store facade internally; run() overlays a fresh memory store only as a defensive fallback for hand-built routers lacking the mount; the scheduler installs the current Access per chain step.
-- Migrate callers: `StoreRef::memory()` becomes `promptforge_vfs::empty()` in workshop-server session_agents.rs, promptforge-lua vm.rs and benches, and executor tests; `with_files` is not carried over. The executor doc example compiles and runs with VfsRef.
+- Migrate callers: `StoreRef::memory()` becomes `runvil_vfs::empty()` in workshop-server session_agents.rs, runvil-lua vm.rs and benches, and executor tests; `with_files` is not carried over. The executor doc example compiles and runs with VfsRef.
 - Tests: executor run end-to-end with VfsRef, and the papergate-shaped seed-run-extract round trip on a stock VfsRef with no real files (a missing declared output is an explicit contract error naming the prompt's promise).
 
 </step-9>
@@ -661,7 +661,7 @@ Parity is the gate: the existing store suite must pass against the rewritten fac
 
 ### Step 10: store operations as leaf yields [completed]
 
-- Component: promptforge-core
+- Component: runvil-core
 - Add the new Request/Answer variants and one dispatch arm (the proven tools.call pattern) so every Lua store operation becomes a leaf yield answered via spawn_blocking against the sync Vfs: uniform for all backends, no inline fast path. Map the claims-violation VfsError to the fatal determinism RunErrorKind that terminates the run instantly and is not catchable from Lua.
 - Tests: a fanout whose cross-arm append to one path terminates the run with a determinism violation naming both arms, the arm-scoped-writes plus ordered-merge fixture passing, and interleaving invariance across memory and real-filesystem backends.
 

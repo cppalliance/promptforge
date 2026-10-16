@@ -22,9 +22,9 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use futures_util::future::{Either, join_all, select};
-use promptforge::cancel::CancelHandle;
-use promptforge::{Prompt, Requirements};
-use promptforge_plugin::{HostServices, Package, Plugin, PluginId};
+use runvil::cancel::CancelHandle;
+use runvil::{Prompt, Requirements};
+use runvil_plugin::{HostServices, Package, Plugin, PluginId};
 
 use crate::packages::{PackageRegistry, PluginKind};
 

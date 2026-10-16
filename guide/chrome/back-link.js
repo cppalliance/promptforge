@@ -20,8 +20,8 @@
     link.href = path_to_root + "../index.html";
     link.textContent = "All docs";
     link.className = "icon-button";
-    link.title = "All PromptForge documentation";
-    link.setAttribute("aria-label", "All PromptForge documentation");
+    link.title = "All Runvil documentation";
+    link.setAttribute("aria-label", "All Runvil documentation");
     buttons.insertBefore(link, buttons.firstChild);
   }
 

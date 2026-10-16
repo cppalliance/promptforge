@@ -17,7 +17,7 @@ use gateway_stt_engine::test_fixtures::native::require_fixture;
 use gateway_stt_engine::{DecodeMode, DecodeRequest, EnginePolicy, SttEngine};
 use serde_json::{Map, Value};
 
-const UPDATE_VARIABLE: &str = "PROMPTFORGE_REPLAY_UPDATE";
+const UPDATE_VARIABLE: &str = "RUNVIL_REPLAY_UPDATE";
 const NATIVE_SECTION: &str = "native";
 /// The gateway's default interim window and cadence.
 const WINDOW_SECONDS: u64 = 15;
@@ -102,12 +102,8 @@ fn write_sections(path: &Path, sections: &Map<String, Value>) {
 #[tokio::test]
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn native_interim_decode_timing_is_recorded_in_the_native_sections() {
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let factory = WhisperModelFactory::new(WhisperConfig::new(
         library,
         model,

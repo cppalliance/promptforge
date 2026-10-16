@@ -18,7 +18,7 @@ isProject: false
 
 ## Problem
 
-[`LocalRuntime::start`](promptforge/crates/promptforge-gateway/src/local/mod.rs) spawns `llama-server`, waits for readiness, then never watches the child. After exit, gateway `/health` and `/v1/models` still look fine; chat fails with `502 upstream_transport`. Design note that "endpoint health" is unbuilt means multi-endpoint failover, not "ignore a dead local child forever."
+[`LocalRuntime::start`](runvil/crates/runvil-gateway/src/local/mod.rs) spawns `llama-server`, waits for readiness, then never watches the child. After exit, gateway `/health` and `/v1/models` still look fine; chat fails with `502 upstream_transport`. Design note that "endpoint health" is unbuilt means multi-endpoint failover, not "ignore a dead local child forever."
 
 ## Approach (locked)
 
@@ -49,20 +49,20 @@ sequenceDiagram
 
 ## Code changes
 
-1. **[`server.rs`](promptforge/crates/promptforge-gateway/src/local/server.rs)**  
+1. **[`server.rs`](runvil/crates/runvil-gateway/src/local/server.rs)**  
    - Factor a respawn entry that reuses a fixed `(port, alias, api_key)` instead of always calling `random_identity` + `free_port` (keep random free-port path for first start).  
    - Expose `try_wait` / `is_alive` on the guard (or split "recipe" from "running child" so Drop still kills the current child).
 
-2. **New `LocalUpstream` in [`local/`](promptforge/crates/promptforge-gateway/src/local/)** (or `upstream.rs` if cleaner)  
+2. **New `LocalUpstream` in [`local/`](runvil/crates/runvil-gateway/src/local/)** (or `upstream.rs` if cleaner)  
    - Holds: executable path, model path, `LaunchOptions`, fixed identity + port, `Mutex` around the live `Child`/guard guts, shared `reqwest::Client`.  
-   - Implements `Upstream::send`: ensure child alive → POST like [`OpenAiUpstream`](promptforge/crates/promptforge-gateway/src/upstream.rs) using live `base_url` + key → on transport error, if dead, respawn once and retry once.
+   - Implements `Upstream::send`: ensure child alive → POST like [`OpenAiUpstream`](runvil/crates/runvil-gateway/src/upstream.rs) using live `base_url` + key → on transport error, if dead, respawn once and retry once.
 
-3. **[`LocalRuntime::start`](promptforge/crates/promptforge-gateway/src/local/mod.rs)**  
+3. **[`LocalRuntime::start`](runvil/crates/runvil-gateway/src/local/mod.rs)**  
    - Wire `endpoint.upstream = Arc::new(LocalUpstream::...)` instead of bare `OpenAiUpstream`.  
    - Runtime still owns whatever is needed so Drop tears down children (either keep guards, or move ownership fully into `LocalUpstream` and drop empty `guards` / replace with `Vec<Arc<LocalUpstream>>`).
 
 4. **Docs**  
-   - Update [`design-gateway.md`](promptforge/crates/promptforge-gateway/design-gateway.md): local child supervision on send is in scope; multi-endpoint health selection remains unbuilt.  
+   - Update [`design-gateway.md`](runvil/crates/runvil-gateway/design-gateway.md): local child supervision on send is in scope; multi-endpoint health selection remains unbuilt.  
    - Log `tracing::warn!` on detected death + successful/failed respawn.
 
 5. **Tests**  

@@ -1,6 +1,6 @@
 ---
 name: Enhance TTS endpoint report
-overview: "Revise promptforge/design/report-gateway-tts-endpoint.md with the findings from four web-research streams plus the Voxtral TTS analysis: correct outdated claims, rebuild the phase-2 engine options around newly discovered native runtimes, extend the wire spec, and add the missing risks."
+overview: "Revise runvil/design/report-gateway-tts-endpoint.md with the findings from four web-research streams plus the Voxtral TTS analysis: correct outdated claims, rebuild the phase-2 engine options around newly discovered native runtimes, extend the wire spec, and add the missing risks."
 todos:
   - id: pass-1-corrections
     content: "Pass 1: correct outdated claims (native runtimes, Together dialect, VRAM budget, cloning scope, llama.cpp forecast)"
@@ -28,7 +28,7 @@ isProject: false
 
 # Enhance the Gateway TTS Endpoint Report
 
-Target file: `promptforge/design/report-gateway-tts-endpoint.md`. Evidence base: three research files in the workspace research store (`2026-09-03-conduct-research-openai-tts-api-surface.md`, `2026-09-03-conduct-research-tts-gateway-conventions.md`, `2026-09-03-web-research-tts-streaming-practice.md`, plus the Orpheus native-serving findings) and the Voxtral verification from this session. Every edit preserves the reports-rulebook discipline: answer-first, citations, likelihood separate from confidence.
+Target file: `runvil/design/report-gateway-tts-endpoint.md`. Evidence base: three research files in the workspace research store (`2026-09-03-conduct-research-openai-tts-api-surface.md`, `2026-09-03-conduct-research-tts-gateway-conventions.md`, `2026-09-03-web-research-tts-streaming-practice.md`, plus the Orpheus native-serving findings) and the Voxtral verification from this session. Every edit preserves the reports-rulebook discipline: answer-first, citations, likelihood separate from confidence.
 
 ## Pass 1 - Correct outdated factual claims
 

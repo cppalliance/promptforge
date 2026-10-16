@@ -198,7 +198,7 @@
     "keeps_connection_usable": true
   },
   "unsupported_keywords": {
-    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "keywords": ["PromptForge"] } } } }, "event_id": "client_keywords" } },
+    "input": { "message": { "type": "session.update", "session": { "type": "transcription", "audio": { "input": { "transcription": { "keywords": ["Runvil"] } } } }, "event_id": "client_keywords" } },
     "expected_error": { "event_id": "evt_keywords", "type": "error", "error": { "type": "invalid_request_error", "code": "unsupported_keywords", "message": "Transcription keywords are not supported", "param": "session.audio.input.transcription.keywords", "event_id": "client_keywords" } },
     "effective_session_after": "default",
     "keeps_connection_usable": true

@@ -14,8 +14,8 @@ use harness_runner::display_chain;
 use harness_runner::environment::CurrentModelError;
 use harness_runner::recorder::MemoryRecorder;
 use harness_runner::{Harness, HarnessError, HostContext, PackageRegistry};
-use promptforge::model::{Completion, CompletionError, CompletionErrorKind};
-use promptforge_plugin::HostServices;
+use runvil::model::{Completion, CompletionError, CompletionErrorKind};
+use runvil_plugin::HostServices;
 
 use super::{
     OutputError, PendingTimer, RunOutcome, answers_to, plain_harness, request, run_beside, until,
@@ -24,16 +24,16 @@ use crate::scripted::{Listing, ScriptedBroker};
 use crate::support::FailingRecorder;
 
 /// A Plugin-free prompt whose one section returns a constant.
-const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
+const PLAIN: &str = "---\nname: plain\ndescription: d\nrunvil: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
 /// A prompt of one store write and one read.
-const STORES: &str = "---\nname: stores\ndescription: d\npromptforge: 0\n---\n\n\
+const STORES: &str = "---\nname: stores\ndescription: d\nrunvil: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nstore.write('a.md', '1')\nreturn store.read('a.md')\n```\n";
 
 /// A prompt whose one round sits under a `pcall` that reports how it
 /// ended.
-const CATCHES_A_ROUND: &str = "---\nname: catches\ndescription: d\npromptforge: 0\n\
+const CATCHES_A_ROUND: &str = "---\nname: catches\ndescription: d\nrunvil: 0\n\
     models:\n  writer: {}\n---\n\n\
     # Title\n\n```lua\nmodels.default('writer')\n```\n\n## Only\n\n```lua\n\
     local ok, err = pcall(models.infer, 'asked')\n\

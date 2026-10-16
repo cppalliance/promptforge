@@ -9,10 +9,10 @@ use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
-use promptforge::effect::Round;
-use promptforge::event::ReplyOrigin;
-use promptforge::ids::RoundId;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::event::ReplyOrigin;
+use runvil::ids::RoundId;
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
@@ -25,7 +25,7 @@ const MODEL: &str = "scripted-model";
 /// A program that infers once and then chats once: the nested round
 /// first, then the section's own round over its message list.
 const INFERS_THEN_CHATS: &str = "---\nname: rounds\ndescription: infers then chats\n\
-    promptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+    runvil: 0\nmodels:\n  writer: {}\n---\n\n\
     # Rounds\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\n\
     local inferred = models.infer('infer round')\n\

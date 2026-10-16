@@ -1,7 +1,7 @@
 ---
 name: greet
 description: Greet the named input using a Lua-computed value
-promptforge: 0
+runvil: 0
 models:
   writer: {}
 ---

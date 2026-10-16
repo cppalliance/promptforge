@@ -1,6 +1,6 @@
 ---
-name: PromptForge Orchestrator Design
-overview: Markdown-driven pipeline runtime (Rust + mlua). A prompt is a function (parameters in, a string out, side effects possible) shaped as a bounded linear pipeline - H2 steps run top to bottom, `---`-marked H2s are subroutines, forks/cycles/fanouts allowed; H3-H6 are document structure, not steps; larger programs compose from multiple prompt files. A file is a promptforge prompt only if its YAML frontmatter declares a `promptforge:` version; promptforge offers a detection function and runs only its own prompts (plain prompts without that version are the caller's concern, not promptforge's). Control flow is deterministic and declared in Lua (cycles legal, bounded by budgets); state lives in a run-scoped store/VFS shared by Lua and the model; capabilities (files, shell, network) are injected by the Harness (sandbox or real). Design docs in promptforge-design are provisional; this plan and the conversation override them.
+name: Runvil Orchestrator Design
+overview: Markdown-driven pipeline runtime (Rust + mlua). A prompt is a function (parameters in, a string out, side effects possible) shaped as a bounded linear pipeline - H2 steps run top to bottom, `---`-marked H2s are subroutines, forks/cycles/fanouts allowed; H3-H6 are document structure, not steps; larger programs compose from multiple prompt files. A file is a runvil prompt only if its YAML frontmatter declares a `runvil:` version; runvil offers a detection function and runs only its own prompts (plain prompts without that version are the caller's concern, not runvil's). Control flow is deterministic and declared in Lua (cycles legal, bounded by budgets); state lives in a run-scoped store/VFS shared by Lua and the model; capabilities (files, shell, network) are injected by the Harness (sandbox or real). Design docs in runvil-design are provisional; this plan and the conversation override them.
 todos:
   - id: mark-docs-provisional
     content: Add provisional status to design document headers. This plan overrides them.
@@ -9,7 +9,7 @@ todos:
     content: Sections can be dormant, cyclic, freely organized. Unreachable is not an error.
     status: completed
   - id: build-version-gate
-    content: "Rung 1: detection function for the `promptforge:` version; run only promptforge prompts (absent = not ours, caller handles), refuse an unsupported major."
+    content: "Rung 1: detection function for the `runvil:` version; run only runvil prompts (absent = not ours, caller handles), refuse an unsupported major."
     status: completed
   - id: build-store-vfs
     content: "Rung 2: run-scoped store/VFS in core (write/append/read-numbered/str_replace/delete/glob), Lua + model equal access, capability injection (MemVfs vs RealFs). Files-first."
@@ -27,31 +27,31 @@ todos:
     content: "Rung 6: cyclic state-machine pipelines (mentograph-shaped) driven by Lua conditionals. Model-surface transfer stays deferred."
     status: completed
   - id: generate-design-doc
-    content: "Final step, after all rungs: spawn one subagent to read this plan, grep <design-doc>, and write design-promptforge-orchestrator.md from the finished build; it supersedes the provisional promptforge-design docs."
+    content: "Final step, after all rungs: spawn one subagent to read this plan, grep <design-doc>, and write design-runvil-orchestrator.md from the finished build; it supersedes the provisional runvil-design docs."
     status: completed
 isProject: false
 ---
 
-# PromptForge Orchestrator
+# Runvil Orchestrator
 
 A Rust runtime that executes pipelines defined in a single markdown file. The markdown is the program, the model is the CPU, embedded Lua (mlua) is the microcode, the Rust harness is the decoder. A new pipeline is a new markdown file, not new code.
 
 A prompt is a **function**: parameters in, a string out, side effects possible. It is a **bounded linear pipeline** - forks, cycles, and fanouts are allowed, but it is not a general recursive program and it has a natural size limit. Larger programs are composed from multiple prompt files, each called as a function. **H2 headings are the pipeline steps; H3-H6 are document structure within a step, not steps themselves.**
 
-Design documents in `promptforge-design/design/` are **provisional**; this plan and the conversation override them.
+Design documents in `runvil-design/design/` are **provisional**; this plan and the conversation override them.
 
 ## Built so far
 
-Parser (recursive H2-H6 + frontmatter + leading Lua fence), the gateway (holds vendor + Brave keys, routes models, `/v1/tools/web_search`), `promptforge-webfetch` crate (SSRF-guarded `web_fetch`), the tool-call loop with a configurable cap (`max_tool_iterations`), per-section opt-in tool scoping via `tools.add`, guard-wrapping of untrusted tool output, and a live multi-turn research prompt. Everything below in "Control flow, blocks, and state" is unbuilt design except where noted.
+Parser (recursive H2-H6 + frontmatter + leading Lua fence), the gateway (holds vendor + Brave keys, routes models, `/v1/tools/web_search`), `runvil-webfetch` crate (SSRF-guarded `web_fetch`), the tool-call loop with a configurable cap (`max_tool_iterations`), per-section opt-in tool scoping via `tools.add`, guard-wrapping of untrusted tool output, and a live multi-turn research prompt. Everything below in "Control flow, blocks, and state" is unbuilt design except where noted.
 
 ## File format and versioning
 
-A **promptforge prompt** is identified by a `promptforge:` version in its YAML frontmatter block - an integer major (or a semver whose **major** is the compatibility axis). promptforge exposes a **detection function** that reports that version (or its absence) for any source text, and it **runs only its own prompts**.
+A **runvil prompt** is identified by a `runvil:` version in its YAML frontmatter block - an integer major (or a semver whose **major** is the compatibility axis). runvil exposes a **detection function** that reports that version (or its absence) for any source text, and it **runs only its own prompts**.
 
-- **`promptforge:` present** -> a promptforge prompt. Run it under that major's rules (sections, Lua, transfers, store, budgets); everything below describes major **1**. An unsupported major is **refused, never silently degraded**.
-- **`promptforge:` absent** (no key, or no frontmatter at all) -> **not** a promptforge prompt. Detection reports nothing and promptforge declines to run it; what to do with a plain prompt (hand it to an ordinary harness, etc.) is the **caller's** concern. promptforge does not execute plain prompts.
+- **`runvil:` present** -> a runvil prompt. Run it under that major's rules (sections, Lua, transfers, store, budgets); everything below describes major **1**. An unsupported major is **refused, never silently degraded**.
+- **`runvil:` absent** (no key, or no frontmatter at all) -> **not** a runvil prompt. Detection reports nothing and runvil declines to run it; what to do with a plain prompt (hand it to an ordinary harness, etc.) is the **caller's** concern. runvil does not execute plain prompts.
 
-The Engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a promptforge prompt", never an error.
+The Engine major is distinct from any author-facing `version:` for the prompt's own revision. Detection is lenient: malformed or absent frontmatter simply reads as "not a runvil prompt", never an error.
 
 ## Control flow, blocks, and state (consolidated)
 
@@ -163,7 +163,7 @@ Backstops, not the termination mechanism - primary termination is the explicit L
 
 ## Tranche ladder
 
-1. Version gate: detection function for the `promptforge:` version; run only promptforge prompts (absent = not ours, declined for the caller), refuse an unsupported major.
+1. Version gate: detection function for the `runvil:` version; run only runvil prompts (absent = not ours, declined for the caller), refuse an unsupported major.
 2. Run-scoped store/VFS in core (files-first, Lua + model equal access, capability injection).
 3. Substitution resolver + params: the one-pass `{{ }}` resolver over `args`, `sys` (now/date/elapsed/id), `var`, `reply`, `result` - scalars stringify, tables -> JSON, nil is a hard error, no formulas. Delivers parameterized single-step prompts.
 4. Fall-through + `goto`/`pass`/`task` + reference blocks (`sect.block`/`sect.list`) + `result`/injection + the three budgets.
@@ -190,16 +190,16 @@ Read after the general code-review block; applied to the commit's diff.
 4. Capabilities (files/shell/network) are Harness-injected; the model never names a real path; the sandbox backend is the default.
 5. The mlua sandbox keeps its instruction budget and restricted library set; no new global escapes it.
 6. No secrets, keys, or vendor URLs in code or prompts; they resolve through gateway/Host config.
-7. Versioning: a file under an unsupported `promptforge:` major is refused, never silently degraded.
+7. Versioning: a file under an unsupported `runvil:` major is refused, never silently degraded.
 </review>
 
 ## Rung 1 steps (version gate)
 
-promptforge detects its own prompts and runs only those; a plain prompt (no `promptforge:` version) is declined for the caller to handle - promptforge never runs one. Supported major = 1. Each step is one commit (code + test + docs), written/reviewed/fixed in subagents.
+runvil detects its own prompts and runs only those; a plain prompt (no `runvil:` version) is declined for the caller to handle - runvil never runs one. Supported major = 1. Each step is one commit (code + test + docs), written/reviewed/fixed in subagents.
 
-1. **Detection + frontmatter field.** Add `pub fn promptforge_version(source: &str) -> Option<u32>` returning the `promptforge` major when the source has a YAML frontmatter block declaring it, else `None` (no frontmatter, malformed YAML, or key absent -> `None`; never errors). Add `promptforge: Option<u32>` (`#[serde(default)]`) to `Frontmatter` so the full parse also captures it (leave `name`/`description`/`version` unchanged). Test: present -> `Some(n)`; key absent -> `None`; plain text with no frontmatter -> `None`; malformed frontmatter -> `None`.
-2. **Version support in the run entry.** Add `Error::UnsupportedVersion(u32)` (lib.rs). At the top of `execute::run`, read `prompt.frontmatter.promptforge`: `Some(1)` -> proceed (current behavior); `Some(other)` -> `Err(UnsupportedVersion(other))`; `None` -> `Err(Parse("not a promptforge prompt: no promptforge version"))`. Add `promptforge: 1` to the inline markdown in existing `execute` tests so they still run. Test: major 1 proceeds; major 2 -> `UnsupportedVersion`; missing -> the not-a-prompt error.
-3. **CLI gate + docs + fixtures.** In the CLI `run`, call `promptforge_version` first; if `None`, report that the file is not a promptforge prompt and exit non-zero; otherwise parse + run as today. Add `promptforge: 1` to the fixture prompts under `prompts/`. Update README + module docs (fix the stale "first/entry section" and the `max_tool_iterations` default drift). Test: existing CLI tool-selection test passes.
+1. **Detection + frontmatter field.** Add `pub fn runvil_version(source: &str) -> Option<u32>` returning the `runvil` major when the source has a YAML frontmatter block declaring it, else `None` (no frontmatter, malformed YAML, or key absent -> `None`; never errors). Add `runvil: Option<u32>` (`#[serde(default)]`) to `Frontmatter` so the full parse also captures it (leave `name`/`description`/`version` unchanged). Test: present -> `Some(n)`; key absent -> `None`; plain text with no frontmatter -> `None`; malformed frontmatter -> `None`.
+2. **Version support in the run entry.** Add `Error::UnsupportedVersion(u32)` (lib.rs). At the top of `execute::run`, read `prompt.frontmatter.runvil`: `Some(1)` -> proceed (current behavior); `Some(other)` -> `Err(UnsupportedVersion(other))`; `None` -> `Err(Parse("not a runvil prompt: no runvil version"))`. Add `runvil: 1` to the inline markdown in existing `execute` tests so they still run. Test: major 1 proceeds; major 2 -> `UnsupportedVersion`; missing -> the not-a-prompt error.
+3. **CLI gate + docs + fixtures.** In the CLI `run`, call `runvil_version` first; if `None`, report that the file is not a runvil prompt and exit non-zero; otherwise parse + run as today. Add `runvil: 1` to the fixture prompts under `prompts/`. Update README + module docs (fix the stale "first/entry section" and the `max_tool_iterations` default drift). Test: existing CLI tool-selection test passes.
 
 ## Rung 2 steps (store/VFS)
 
@@ -213,7 +213,7 @@ Logged decisions (reversible): the store is a run-scoped, cheaply cloneable `Sto
 ## Key design principles
 
 - **The orchestration layer is an ordinary computer; the model is its one stochastic instruction.** Sections are statements, `---`-marked sections are definitions (subroutines/data), `task` is call-and-return, `goto` is a jump, `fanout` is a parallel map, cycles are loops, the store is memory, headings are identifiers, and the budgets are the stack and fuel limits. Deterministic scaffolding around a noisy unit whose output the trailing block validates.
-- **Context-clearing** on every transition; state externalized to the store. (Evidence: a scoped harness + externalized state took a 1.5B model from 1% to 93.5% - the harness matters more than model size, which is promptforge's whole bet.)
+- **Context-clearing** on every transition; state externalized to the store. (Evidence: a scoped harness + externalized state took a 1.5B model from 1% to 93.5% - the harness matters more than model size, which is runvil's whole bet.)
 - **Deterministic control flow in Lua**; the model does generative work, not routing.
 - **A prompt is a bounded linear pipeline, not a general program.** Parameters in, a string out, side effects possible; forks/cycles/fanouts allowed. When a program outgrows one file, split it into multiple prompt files called as functions - don't nest.
 - **Single scoped section is the default**; `task`/`fanout` are opt-in for loosely-coupled, read-heavy work ("read in parallel, write in sequence"). Strongest model at the reduce.
@@ -226,22 +226,22 @@ Logged decisions (reversible): the store is a run-scoped, cheaply cloneable `Sto
 
 Also: async tasks; intra-process prompt-to-prompt `task("other.md")`; model-surface `goto` with curated `result` (in tension with readability); MCP client/server; gateway admission (retry-with-backoff on 503) and endpoint pinning; transient upstream 400 retry (in `GatewayClient`).
 
-Deferred `rust-how-to.md` conformance (from the repo audit, mechanical fixes already landed in the sweep): split the crate-wide `promptforge-core::Error` into per-fallibility error types so a signature exposes only the variants it can produce (A1); replace deprecated `serde_yaml` with a maintained fork, re-testing frontmatter parse/error behavior (A2); consider splitting the ~1548-line `promptforge-webfetch/src/lib.rs` into modules (A3).
+Deferred `rust-how-to.md` conformance (from the repo audit, mechanical fixes already landed in the sweep): split the crate-wide `runvil-core::Error` into per-fallibility error types so a signature exposes only the variants it can produce (A1); replace deprecated `serde_yaml` with a maintained fork, re-testing frontmatter parse/error behavior (A2); consider splitting the ~1548-line `runvil-webfetch/src/lib.rs` into modules (A3).
 
 ## Key files
 
-- [design-promptforge.md](promptforge-design/design/design-promptforge.md) - prompt language (provisional)
-- [design.md](promptforge-design/design/design.md) - system architecture (provisional)
-- [example-diligence.md](promptforge-design/example-diligence.md) - idiom-complete teaching example
+- [design-runvil.md](runvil-design/design/design-runvil.md) - prompt language (provisional)
+- [design.md](runvil-design/design/design.md) - system architecture (provisional)
+- [example-diligence.md](runvil-design/example-diligence.md) - idiom-complete teaching example
 - research: `cabinet/_research/2026-07-29-fanout-*` - fan-out / task / budgets prior-art (two rounds)
 - [how-to-write-prompts.md](tools-public/how-to/how-to-write-prompts.md) - prompt engineering rules
 
 ## Design document (generated last)
 
-After **all** implementation is complete, the plan's final step generates the design document - so it reflects what was actually built, not this pre-build sketch. Spawn one subagent whose entire prompt is: *read this plan at its path, grep for `<design-doc>`, and follow the block inside it.* The agent never spawns this generator during design; running the plan does, once the build is done. The generated `design-promptforge-orchestrator.md` **supersedes** the provisional docs in `promptforge-design/design/`; on generation, the superseded files move to `cabinet/_trash/` per workspace rules.
+After **all** implementation is complete, the plan's final step generates the design document - so it reflects what was actually built, not this pre-build sketch. Spawn one subagent whose entire prompt is: *read this plan at its path, grep for `<design-doc>`, and follow the block inside it.* The agent never spawns this generator during design; running the plan does, once the build is done. The generated `design-runvil-orchestrator.md` **supersedes** the provisional docs in `runvil-design/design/`; on generation, the superseded files move to `cabinet/_trash/` per workspace rules.
 
 <design-doc>
-OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-promptforge-orchestrator.md,
+OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-runvil-orchestrator.md,
 that explains the design of what this plan describes. You run as the final step
 of the plan, after the implementation is complete, so describe the design as
 built, reconciling against the finished work any decision the implementation

@@ -42,7 +42,7 @@ const ACTION_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** The context handed to the iframe once it announces itself. */
-const PANEL_CONTEXT = { type: "pf-context", theme: "dark", route: "#/local" } as const;
+const PANEL_CONTEXT = { type: "rv-context", theme: "dark", route: "#/local" } as const;
 
 /**
  * Installs the window-level message listener that serves the config
@@ -73,11 +73,11 @@ export function setupGatewayConfigBridge(options: GatewayConfigBridgeOptions): I
         return;
       }
       switch (data["type"]) {
-        case "pf-bridge-ready": {
+        case "rv-bridge-ready": {
           reply(event, PANEL_CONTEXT, origin);
           return;
         }
-        case "pf-api": {
+        case "rv-api": {
           const id = data["id"];
           const method = data["method"];
           const path = data["path"];
@@ -89,10 +89,10 @@ export function setupGatewayConfigBridge(options: GatewayConfigBridgeOptions): I
             { id, method, path, body: typeof body === "string" ? body : null },
             options.fetchFn,
           );
-          reply(event, { type: "pf-api-result", id, ...result }, origin);
+          reply(event, { type: "rv-api-result", id, ...result }, origin);
           return;
         }
-        case "pf-action": {
+        case "rv-action": {
           const action = data["action"];
           const label = typeof action === "string" ? ACTION_LABELS[action] : undefined;
           if (label !== undefined) {

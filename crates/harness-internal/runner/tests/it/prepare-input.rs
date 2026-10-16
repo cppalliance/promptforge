@@ -11,7 +11,7 @@ use crate::asker::{ASKER, AskBroker, BROKER, broker_services};
 
 /// A prompt declaring the probe Plugin and returning what its one call
 /// saw.
-const PROBES: &str = "---\nname: probes\ndescription: d\npromptforge: 0\n\
+const PROBES: &str = "---\nname: probes\ndescription: d\nrunvil: 0\n\
     plugins:\n  - probe\n---\n\n# Title\n\n## Only\n\n\
     ```lua\nreturn tools.call('probe/saw')\n```\n";
 
@@ -137,7 +137,7 @@ fn user_input_prompt(declaration: &str, lua: &str) -> String {
         format!("plugins:\n{declaration}")
     };
     format!(
-        "---\nname: asks-input\ndescription: d\npromptforge: 0\n{plugins}---\n\n\
+        "---\nname: asks-input\ndescription: d\nrunvil: 0\n{plugins}---\n\n\
          # Title\n\n## Only\n\n```lua\n{lua}\n```\n"
     )
 }

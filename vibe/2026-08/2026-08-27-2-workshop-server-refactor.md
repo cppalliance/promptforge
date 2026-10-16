@@ -1,6 +1,6 @@
 ---
 name: Workshop server refactor
-overview: "Refactor promptforge-ws-server per the server-delivery comparison report: build a test net first, rewrite both WebSocket handlers onto the Rustpad single-task model, split app.rs into per-feature route constructors with a split error type, add a size ratchet, and harden shutdown - executed as a vibe-rulebook Full run, one tested commit per step."
+overview: "Refactor runvil-ws-server per the server-delivery comparison report: build a test net first, rewrite both WebSocket handlers onto the Rustpad single-task model, split app.rs into per-feature route constructors with a split error type, add a size ratchet, and harden shutdown - executed as a vibe-rulebook Full run, one tested commit per step."
 todos:
   - id: step-1-harness
     content: "Test support: tests/it + tests/common typed WS client, spawn fixture, characterization tests"
@@ -29,13 +29,13 @@ todos:
 isProject: false
 ---
 
-# PromptForge Workshop Server Refactor
+# Runvil Workshop Server Refactor
 
-Implements the execution order of [promptforge/design/compare-server-delivery-human-idioms.md](promptforge/design/compare-server-delivery-human-idioms.md) (Findings 1-3, 5, 6, 9), run under the vibe rulebook's Full path. Finding 4 (gateway merge) belongs to the plan already in flight; Findings 7 and 8 are excluded - user settled that nothing served is cacheable (windowed SPA, no content hashing), and `assets.rs` has explicit per-file routes with no SPA fallback, so the API-404 concern does not apply.
+Implements the execution order of [runvil/design/compare-server-delivery-human-idioms.md](runvil/design/compare-server-delivery-human-idioms.md) (Findings 1-3, 5, 6, 9), run under the vibe rulebook's Full path. Finding 4 (gateway merge) belongs to the plan already in flight; Findings 7 and 8 are excluded - user settled that nothing served is cacheable (windowed SPA, no content hashing), and `assets.rs` has explicit per-file routes with no SPA fallback, so the API-404 concern does not apply.
 
 ## Level 1 - What is being built
 
-A structural refactor of the crate at `promptforge/crates/promptforge-ws-server`: the duplicated WebSocket session scaffolding (`ws_session.rs` outbox channel + writer task) is deleted in favor of one `select!` loop per connection with RAII cleanup; the 568-line `app.rs` splits into per-feature `routes/` constructors; `AppError` becomes an opaque wire error; `serve.rs` gains a force-exit watchdog and stopped barrier; typed WS test support lands first as the net. Wire protocol stays byte-identical, so `ui/` (TypeScript) should be untouched.
+A structural refactor of the crate at `runvil/crates/runvil-ws-server`: the duplicated WebSocket session scaffolding (`ws_session.rs` outbox channel + writer task) is deleted in favor of one `select!` loop per connection with RAII cleanup; the 568-line `app.rs` splits into per-feature `routes/` constructors; `AppError` becomes an opaque wire error; `serve.rs` gains a force-exit watchdog and stopped barrier; typed WS test support lands first as the net. Wire protocol stays byte-identical, so `ui/` (TypeScript) should be untouched.
 
 ## Level 2 - Components in dependency order
 
@@ -71,9 +71,9 @@ flowchart LR
 ## Execution mechanics (vibe rulebook, Full path)
 
 - Per step: Coder subagent -> commit -> Review-and-Fix subagent -> amend if dirtied -> Verify on schedule (every 3rd step, end of each component, final step). Ledger in `vibe-ledger.md`, findings in `vibe-review.md`, one fix round, Critical findings block, two consecutive failures on a step stops the run for a re-plan.
-- Rules manifest for every Coder/Review dispatch (paths only): `promptforge/AGENTS.md` + `promptforge/crates/promptforge-ws-server/AGENTS.md` (+ `.../ui/AGENTS.md` only if a step unexpectedly touches `ui/`). The crate AGENTS.md already encodes this design's target state.
+- Rules manifest for every Coder/Review dispatch (paths only): `runvil/AGENTS.md` + `runvil/crates/runvil-ws-server/AGENTS.md` (+ `.../ui/AGENTS.md` only if a step unexpectedly touches `ui/`). The crate AGENTS.md already encodes this design's target state.
 - Rulebooks: Rust rulebook binds every step; TypeScript and HTML/CSS rulebooks bind only if `ui/` files are touched (expected: none, wire protocol is frozen).
-- Verify command per step: `cargo fmt --all --check && cargo clippy -p promptforge-ws-server --all-targets -- -D warnings && cargo test --locked -p promptforge-ws-server` (matches the Windows CI job). Final step: workspace `cargo test` plus, if `ui/` was touched, `npm run typecheck && npm test` in the ui directory.
+- Verify command per step: `cargo fmt --all --check && cargo clippy -p runvil-ws-server --all-targets -- -D warnings && cargo test --locked -p runvil-ws-server` (matches the Windows CI job). Final step: workspace `cargo test` plus, if `ui/` was touched, `npm run typecheck && npm test` in the ui directory.
 - Precondition: worktree must be clean at run start; the run never pushes.
 
 ## Plan defect pass (done once)
@@ -90,11 +90,11 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Why
 
-The plan executes the execution order of the server-delivery comparison study (`promptforge/design/compare-server-delivery-human-idioms.md`). The user's framing was minimal: "plan this full refactor ... apply [the vibe, rust, html-css, typescript rulebooks]" - the deliverable was the plan itself, and execution followed only after approval ("git add commit, then run the plan"). The TypeScript and HTML/CSS rulebooks were included as guardrails only; since the wire protocol stays byte-identical, no `ui/` touch was expected and none occurred.
+The plan executes the execution order of the server-delivery comparison study (`runvil/design/compare-server-delivery-human-idioms.md`). The user's framing was minimal: "plan this full refactor ... apply [the vibe, rust, html-css, typescript rulebooks]" - the deliverable was the plan itself, and execution followed only after approval ("git add commit, then run the plan"). The TypeScript and HTML/CSS rulebooks were included as guardrails only; since the wire protocol stays byte-identical, no `ui/` touch was expected and none occurred.
 
 ## Discarded alternatives and scope decisions
 
-**Finding 7 (asset polish / immutable caching) - dropped entirely.** The design doc contradicted itself: its execution order included Finding 7 as step 5 while directive 10 limited scope to Findings 1-3, 5, 6, 9. The planner raised this as its one scope question. The user settled it verbatim: "I dont see a point to ugly content hashes in filenames, and nothing we have is cacheable its a windowed spa". The planner had first recommended keeping the two cheap non-caching fixes (API-path 404s, diagnostic missing-bundle 404), then flipped on inspection: `assets.rs` registers explicit per-file routes with no SPA catch-all, so API misses already 404 naturally and the fallback concern never applied. A further reason exclusion was cheap (paraphrase): the esbuild pipeline emits plain names (`app.js`, `app.css`) with no content hash, so the caching half would have required changing the UI build - a bigger change than the doc contemplated. The user then directed the policy be recorded, verbatim: "update @promptforge/design/compare-server-delivery-human-idioms.md and any AGENTS.md to reflect that we do not use ugly content hashes and we do not cache". That landed as commit 343ca0a before the run started.
+**Finding 7 (asset polish / immutable caching) - dropped entirely.** The design doc contradicted itself: its execution order included Finding 7 as step 5 while directive 10 limited scope to Findings 1-3, 5, 6, 9. The planner raised this as its one scope question. The user settled it verbatim: "I dont see a point to ugly content hashes in filenames, and nothing we have is cacheable its a windowed spa". The planner had first recommended keeping the two cheap non-caching fixes (API-path 404s, diagnostic missing-bundle 404), then flipped on inspection: `assets.rs` registers explicit per-file routes with no SPA catch-all, so API misses already 404 naturally and the fallback concern never applied. A further reason exclusion was cheap (paraphrase): the esbuild pipeline emits plain names (`app.js`, `app.css`) with no content hash, so the caching half would have required changing the UI build - a bigger change than the doc contemplated. The user then directed the policy be recorded, verbatim: "update @runvil/design/compare-server-delivery-human-idioms.md and any AGENTS.md to reflect that we do not use ugly content hashes and we do not cache". That landed as commit 343ca0a before the run started.
 
 **Finding 4 (gateway merge)** was excluded as belonging to a plan already in flight (the plan file states this).
 
@@ -115,4 +115,4 @@ The plan executes the execution order of the server-delivery comparison study (`
 - **Step 3 review Critical:** the always-ready gateway branch in `select!` could starve status frames past `done`; it failed live during the review's gate run and was fixed with `biased;` ordering.
 - **Step 1 (from the run-chat review):** the test support reuses `serve::spawn` / `VoiceConfig` rather than exporting `app::fixtures` helpers - a sanctioned simplification, since Config/spawn were already public and no production change was needed. One Minor finding was delegated to step 3: the integration binary duplicates `#[cfg(test)]` fixture helpers (`transcribe::fixtures`, `spawn_gateway`), unavoidable without a production edit step 1 forbids; the stated fix is to gate the helpers behind a `test-fixtures` feature once a production-touching step allows it.
 - **Step 8 empirical correction to the design study:** held WebSockets do not block axum's graceful drain (upgrades detach); wedged in-flight HTTP requests are the real blocker. The watchdog bounds both. Recorded in code comments and tests.
-- **Environmental, not refactor-caused:** 7 promptforge-mcp-server test failures trace to the user's live promptforge-gateway.exe (pid 26072) occupying 127.0.0.1:8081, where those tests expect connection-refused; reproduced identically at the pre-run baseline. 5 whisper-fixture voice tests fail when force-run on this machine, also pre-existing (stash-verified). The final verify was re-run excluding the blocked crate rather than killing the user's running process.
+- **Environmental, not refactor-caused:** 7 runvil-mcp-server test failures trace to the user's live runvil-gateway.exe (pid 26072) occupying 127.0.0.1:8081, where those tests expect connection-refused; reproduced identically at the pre-run baseline. 5 whisper-fixture voice tests fail when force-run on this machine, also pre-existing (stash-verified). The final verify was re-run excluding the blocked crate rather than killing the user's running process.

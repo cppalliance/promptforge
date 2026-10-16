@@ -36,7 +36,7 @@ isProject: false
 ## README structure (top to bottom)
 
 - Badges (CI status, license, Rust version)
-- `# PromptForge`
+- `# Runvil`
 - Sizzle paragraph (2-3 sentences: what it is, why it matters, key differentiator)
 - Banner strip 1 (header - workbench with circuit boards and glowing data tablets)
 - **What you get** - 4-5 bullet features with one emoji each
@@ -59,7 +59,7 @@ Target: under 200 lines (excluding image tags). Dense, scannable, no glop.
 
 **Source composition:** One tall portrait image (1024x1536, aspect 3:4). Dystopian cyberpunk workshop aesthetic - William Gibson Sprawl, dark industrial, grime and cables, neon accents (teal/cyan + orange sparks), humanoid robots, electronics, neural interfaces. Unified palette across the full height but distinct focal subjects per band.
 
-**Reference images:** Use the existing promptforge robot-workshop image and the Falco how-to image (dark leather apron, android on slab, shelf of faces, wet concrete, forge-glow + cold neon) as style anchors.
+**Reference images:** Use the existing runvil robot-workshop image and the Falco how-to image (dark leather apron, android on slab, shelf of faces, wet concrete, forge-glow + cold neon) as style anchors.
 
 **6 horizontal bands (top to bottom in the source):**
 
@@ -88,7 +88,7 @@ jobs:
       - run: cargo test --workspace
 ```
 
-Badge: `![CI](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml/badge.svg)`
+Badge: `![CI](https://github.com/cppalliance/runvil/actions/workflows/ci.yml/badge.svg)`
 
 ## DEVELOPMENT.md migration
 
@@ -98,7 +98,7 @@ Move from current README (verify each against current codebase):
 - Tool configuration (web_search knobs)
 - Architecture notes (crate relationships, boundary diagram)
 - Model catalog and binding flow
-- Development workflow (promptforge-dev, env vars)
+- Development workflow (runvil-dev, env vars)
 
 Run as async subagent: read current README + source code, verify each item is still accurate, drop stale content, write DEVELOPMENT.md.
 

@@ -1,6 +1,6 @@
 ---
 name: Add sys.model
-overview: Explicit-only PromptForge - no Harness model defaults; gateway env PROMPTFORGE_GATEWAY_URL + PROMPTFORGE_GATEWAY_KEY; sys.model from bindings; design principle documented.
+overview: Explicit-only Runvil - no Harness model defaults; gateway env RUNVIL_GATEWAY_URL + RUNVIL_GATEWAY_KEY; sys.model from bindings; design principle documented.
 todos:
   - id: step-1-principle
     content: "Commit 1: design-core.md no-defaults principle + README pointer"
@@ -24,11 +24,11 @@ isProject: false
 
 ## What we are building
 
-PromptForge stops inventing a model or gateway endpoint. Prompts bind models. Hosts supply `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` only. After a section closes its model scope, `sys.model` names the bound catalog id for footers.
+Runvil stops inventing a model or gateway endpoint. Prompts bind models. Hosts supply `RUNVIL_GATEWAY_URL` and `RUNVIL_GATEWAY_KEY` only. After a section closes its model scope, `sys.model` names the bound catalog id for footers.
 
 ## Principle (design doc)
 
-In [design-core.md](c:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\design-core.md), near the top:
+In [design-core.md](c:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\design-core.md), near the top:
 
 **No defaults. Everything explicit. Implicit is the enemy of precision.**
 
@@ -58,18 +58,18 @@ Do not rewrite historical files under `research/` - leave them as archaeology.
 
 - `GatewayClient::new(gateway_url, key)` - drop model argument
 - Remove `GatewayClient::model()`, `DEFAULT_MODEL`, `DEFAULT_BASE_URL`
-- `from_env` reads only `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`; either missing → `Error::MissingEnv` with that name
+- `from_env` reads only `RUNVIL_GATEWAY_URL` and `RUNVIL_GATEWAY_KEY`; either missing → `Error::MissingEnv` with that name
 - `complete`: model comes from `CompletionOptions`; change `CompletionOptions.model` from `Option<String>` to `String` so the wire path cannot omit it (rust-rulebook: make illegal states unrepresentable). `ModelBinding::completion_options` always fills it.
 
 **Config / env rename:**
 
 | Old | New |
 |-----|-----|
-| `PROMPTFORGE_BASE_URL` | `PROMPTFORGE_GATEWAY_URL` |
-| `PROMPTFORGE_TOKEN` | `PROMPTFORGE_GATEWAY_KEY` |
+| `RUNVIL_BASE_URL` | `RUNVIL_GATEWAY_URL` |
+| `RUNVIL_TOKEN` | `RUNVIL_GATEWAY_KEY` |
 | MCP `gateway.token` | `gateway.key` |
 | Gateway `[server] token` | `[server] key` |
-| `${PROMPTFORGE_TOKEN}` in profiles / examples | `${PROMPTFORGE_GATEWAY_KEY}` |
+| `${RUNVIL_TOKEN}` in profiles / examples | `${RUNVIL_GATEWAY_KEY}` |
 
 Local llama-server child `--api-key` stays (upstream flag name).
 
@@ -105,13 +105,13 @@ Mirror in fanout arms.
 
 ### Commit 5 - briefer + docs sweep
 
-[briefer.md](c:\Users\Vinnie\src\cursor\promptforge\briefer.md) Report epilog:
+[briefer.md](c:\Users\Vinnie\src\cursor\runvil\briefer.md) Report epilog:
 
 ```lua
 store.write("report.md", reply .. "\n\n*" .. sys.when .. " - " .. sys.model .. "*")
 ```
 
-Sweep STATUS.md, README env examples, design-gateway / design-core env names. No `PROMPTFORGE_MODEL`, `PROMPTFORGE_BASE_URL`, or `PROMPTFORGE_TOKEN` left in active code or operator docs.
+Sweep STATUS.md, README env examples, design-gateway / design-core env names. No `RUNVIL_MODEL`, `RUNVIL_BASE_URL`, or `RUNVIL_TOKEN` left in active code or operator docs.
 
 ## Data flow
 

@@ -16,7 +16,7 @@ use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 use url::Url;
 
-use promptforge_plugin::{ToolError, ToolErrorKind, ToolOutput};
+use runvil_plugin::{ToolError, ToolErrorKind, ToolOutput};
 
 use crate::config::{ConfigError, FetchConfig};
 use crate::error::{Disposition, FetchError, SafeUrl};

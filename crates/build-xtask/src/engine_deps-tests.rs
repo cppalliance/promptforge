@@ -258,7 +258,7 @@ fn graph_findings(root: &Path, dir: &str) -> Vec<String> {
 
 #[test]
 fn a_forbidden_crate_reached_through_a_dev_dependency_is_reported() {
-    let engine = "crates/promptforge-internal/engine";
+    let engine = "crates/runvil-internal/engine";
     let root = graph_workspace(&[
         (
             "vendor/driver",
@@ -267,7 +267,7 @@ fn a_forbidden_crate_reached_through_a_dev_dependency_is_reported() {
         ),
         (
             engine,
-            "promptforge-engine",
+            "runvil-engine",
             "[dev-dependencies]\ndriver = { path = \"../../../vendor/driver\" }\n",
         ),
     ]);
@@ -279,7 +279,7 @@ fn a_forbidden_crate_reached_through_a_dev_dependency_is_reported() {
     let found = graph_findings(root.path(), engine);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
-        found[0].contains("promptforge-engine")
+        found[0].contains("runvil-engine")
             && found[0].contains("resolved graph")
             && found[0].contains("tokio"),
         "the finding names the Engine crate, the graph, and the package: {found:?}"
@@ -288,7 +288,7 @@ fn a_forbidden_crate_reached_through_a_dev_dependency_is_reported() {
 
 #[test]
 fn a_forbidden_crate_reached_only_on_another_platform_is_reported() {
-    let engine = "crates/promptforge-internal/engine";
+    let engine = "crates/runvil-internal/engine";
     let root = graph_workspace(&[
         (
             "vendor/driver",
@@ -297,7 +297,7 @@ fn a_forbidden_crate_reached_only_on_another_platform_is_reported() {
         ),
         (
             engine,
-            "promptforge-engine",
+            "runvil-engine",
             "[dependencies]\ndriver = { path = \"../../../vendor/driver\" }\n",
         ),
     ]);
@@ -309,7 +309,7 @@ fn a_forbidden_crate_reached_only_on_another_platform_is_reported() {
     let found = graph_findings(root.path(), engine);
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(
-        found[0].contains("promptforge-engine")
+        found[0].contains("runvil-engine")
             && found[0].contains("resolved graph")
             && found[0].contains("tokio"),
         "a forbidden crate behind a non-host target edge is reported: {found:?}"
@@ -325,33 +325,33 @@ fn getrandom_reached_through_any_edge_is_reported() {
             "[dependencies]\ngetrandom = { path = \"../getrandom\" }\n",
         ),
         (
-            "crates/promptforge-internal/normal",
-            "promptforge-normal",
+            "crates/runvil-internal/normal",
+            "runvil-normal",
             "[dependencies]\nseeder = { path = \"../../../vendor/seeder\" }\n",
         ),
         (
-            "crates/promptforge-internal/build",
-            "promptforge-build",
+            "crates/runvil-internal/build",
+            "runvil-build",
             "[build-dependencies]\nseeder = { path = \"../../../vendor/seeder\" }\n",
         ),
         (
-            "crates/promptforge-internal/dev",
-            "promptforge-dev",
+            "crates/runvil-internal/dev",
+            "runvil-dev",
             "[dev-dependencies]\nseeder = { path = \"../../../vendor/seeder\" }\n",
         ),
         // Only a graph resolved with all features reaches this optional entry.
         (
-            "crates/promptforge-internal/optional",
-            "promptforge-optional",
+            "crates/runvil-internal/optional",
+            "runvil-optional",
             "[dependencies]\nseeder = { path = \"../../../vendor/seeder\", optional = true }\n\
              [features]\nseed = [\"dep:seeder\"]\n",
         ),
     ]);
     for edge in ["normal", "build", "dev", "optional"] {
-        let found = graph_findings(root.path(), &format!("crates/promptforge-internal/{edge}"));
+        let found = graph_findings(root.path(), &format!("crates/runvil-internal/{edge}"));
         assert_eq!(found.len(), 1, "{edge}: {found:?}");
         assert!(
-            found[0].contains(&format!("promptforge-{edge}")) && found[0].contains("getrandom"),
+            found[0].contains(&format!("runvil-{edge}")) && found[0].contains("getrandom"),
             "getrandom reached through the {edge} seeder entry is reported: {found:?}"
         );
     }
@@ -359,10 +359,10 @@ fn getrandom_reached_through_any_edge_is_reported() {
 
 #[test]
 fn a_tempfile_dev_dependency_is_reported_for_getrandom_and_fastrand() {
-    let vfs = "crates/promptforge-internal/vfs";
+    let vfs = "crates/runvil-internal/vfs";
     let root = graph_workspace(&[(
         vfs,
-        "promptforge-vfs",
+        "runvil-vfs",
         "[dev-dependencies]\ntempfile = { path = \"../../../vendor/tempfile\" }\n",
     )]);
     let found = graph_findings(root.path(), vfs);
@@ -382,7 +382,7 @@ fn a_clean_engine_crate_graph_has_no_violations() {
     // `driver` turns on `clean`'s optional tokio. Resolving the workspace as
     // a whole would unify that feature into the Engine crate's graph;
     // resolving the Engine crate alone does not.
-    let engine = "crates/promptforge-internal/engine";
+    let engine = "crates/runvil-internal/engine";
     let root = graph_workspace(&[
         (
             "vendor/clean",
@@ -397,7 +397,7 @@ fn a_clean_engine_crate_graph_has_no_violations() {
         ),
         (
             engine,
-            "promptforge-engine",
+            "runvil-engine",
             "[dependencies]\nclean = { path = \"../../../vendor/clean\" }\n\
              [build-dependencies]\nclean = { path = \"../../../vendor/clean\" }\n\
              [dev-dependencies]\nclean = { path = \"../../../vendor/clean\" }\n",

@@ -4,7 +4,7 @@
 //! back through `PUT /workspace/file/window-state` - debounced while the
 //! user drags, once more on close - and reapplies them when the SPA opens,
 //! saves as, or duplicates a workspace file (its
-//! `promptforge:workspace-opened` event). The workspace file, not a
+//! `runvil:workspace-opened` event). The workspace file, not a
 //! Tauri-plugin-owned location, owns the geometry: an ephemeral workspace
 //! has nowhere to keep it and the server answers `saved: false`.
 //!
@@ -36,7 +36,7 @@ const CLOSE_SAVE_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// The Tauri event the SPA emits after switching the workspace file, so
 /// the desktop app can apply the file's geometry to the live window.
-const WORKSPACE_OPENED_EVENT: &str = "promptforge:workspace-opened";
+const WORKSPACE_OPENED_EVENT: &str = "runvil:workspace-opened";
 /// How far inside the saved top-left corner the monitor probe looks: a
 /// window whose first title-bar pixels are on a monitor can be grabbed.
 const VISIBILITY_INSET: i32 = 16;

@@ -120,7 +120,7 @@ fn the_menu_spec_disables_login_when_the_os_store_is_unavailable() {
 #[test]
 fn the_sibling_probe_finds_the_workshop_exe_beside_the_gateway() {
     let temp = tempfile::TempDir::new().expect("tempdir");
-    let gateway = temp.path().join("promptforge-gateway.exe");
+    let gateway = temp.path().join("runvil-gateway.exe");
     let workshop = temp.path().join(WORKSHOP_EXE_NAME);
     std::fs::write(&workshop, "").expect("write fixture");
 
@@ -140,7 +140,7 @@ fn the_sibling_probe_finds_the_workshop_exe_beside_the_gateway() {
 #[test]
 fn the_sibling_probe_tolerates_a_missing_install_directory() {
     let temp = tempfile::TempDir::new().expect("tempdir");
-    let gateway = temp.path().join("absent").join("promptforge-gateway.exe");
+    let gateway = temp.path().join("absent").join("runvil-gateway.exe");
     assert_eq!(workshop_sibling(&gateway), None);
 }
 
@@ -173,24 +173,22 @@ impl RunKeyStore for FakeStore {
 #[test]
 fn the_login_command_quotes_the_exe_and_appends_the_login_flag() {
     assert_eq!(
-        run_key_command(Path::new(
-            "C:\\Program Files\\PromptForge\\promptforge-gateway.exe"
-        )),
-        "\"C:\\Program Files\\PromptForge\\promptforge-gateway.exe\" --login"
+        run_key_command(Path::new("C:\\Program Files\\Runvil\\runvil-gateway.exe")),
+        "\"C:\\Program Files\\Runvil\\runvil-gateway.exe\" --login"
     );
 }
 
 #[test]
 fn enabling_login_writes_the_command_and_disabling_deletes_it() {
     let mut store = FakeStore::default();
-    let exe = Path::new("C:\\PromptForge\\promptforge-gateway.exe");
+    let exe = Path::new("C:\\Runvil\\runvil-gateway.exe");
 
     let enabled =
         set_launch_at_login(&mut store, &run_key_command(exe), true).expect("write succeeds");
     assert!(enabled);
     assert_eq!(
         store.value.as_deref(),
-        Some("\"C:\\PromptForge\\promptforge-gateway.exe\" --login")
+        Some("\"C:\\Runvil\\runvil-gateway.exe\" --login")
     );
     assert!(launch_at_login(&store), "the state reads from the store");
 
@@ -206,7 +204,7 @@ fn a_failed_write_leaves_the_state_unchanged() {
         value: None,
         fail_writes: true,
     };
-    let exe = Path::new("C:\\PromptForge\\promptforge-gateway.exe");
+    let exe = Path::new("C:\\Runvil\\runvil-gateway.exe");
     let error = set_launch_at_login(&mut store, &run_key_command(exe), true)
         .expect_err("the failure propagates");
     assert_eq!(error.to_string(), "access denied");
@@ -245,36 +243,33 @@ mod macos {
 
     #[test]
     fn the_bundle_walks_up_from_contents_macos_to_the_app() {
-        let exe = Path::new("/Applications/PromptForge.app/Contents/MacOS/promptforge-gateway");
+        let exe = Path::new("/Applications/Runvil.app/Contents/MacOS/runvil-gateway");
         assert_eq!(
             app_bundle(exe).as_deref(),
-            Some(Path::new("/Applications/PromptForge.app"))
+            Some(Path::new("/Applications/Runvil.app"))
         );
     }
 
     #[test]
     fn the_bundle_probe_rejects_unbundled_and_partial_paths() {
+        assert_eq!(app_bundle(Path::new("/usr/local/bin/runvil-gateway")), None);
         assert_eq!(
-            app_bundle(Path::new("/usr/local/bin/promptforge-gateway")),
-            None
-        );
-        assert_eq!(
-            app_bundle(Path::new("/Applications/PromptForge.app/Contents/MacOS")),
+            app_bundle(Path::new("/Applications/Runvil.app/Contents/MacOS")),
             None,
             "the exe itself must sit below MacOS"
         );
         assert_eq!(
-            app_bundle(Path::new("/opt/x/Contents/MacOS/promptforge-gateway")),
+            app_bundle(Path::new("/opt/x/Contents/MacOS/runvil-gateway")),
             None,
             "the parent two levels up must be a .app"
         );
-        assert_eq!(app_bundle(Path::new("promptforge-gateway")), None);
+        assert_eq!(app_bundle(Path::new("runvil-gateway")), None);
     }
 
     /// Writes a minimal bundle fixture: `Contents/Info.plist` with the
     /// given principal executable.
     fn bundle_fixture(dir: &Path, principal: &str) -> PathBuf {
-        let bundle = dir.join("PromptForge.app");
+        let bundle = dir.join("Runvil.app");
         let contents = bundle.join("Contents");
         std::fs::create_dir_all(contents.join("MacOS")).expect("mkdir");
         std::fs::write(
@@ -292,11 +287,8 @@ mod macos {
     #[test]
     fn the_principal_reads_the_bundle_executable() {
         let temp = tempfile::TempDir::new().expect("tempdir");
-        let bundle = bundle_fixture(temp.path(), "promptforge-gateway");
-        assert_eq!(
-            bundle_principal(&bundle).as_deref(),
-            Some("promptforge-gateway")
-        );
+        let bundle = bundle_fixture(temp.path(), "runvil-gateway");
+        assert_eq!(bundle_principal(&bundle).as_deref(), Some("runvil-gateway"));
     }
 
     #[test]
@@ -308,13 +300,13 @@ mod macos {
     #[test]
     fn the_gateway_is_principal_only_in_its_own_bundle() {
         let temp = tempfile::TempDir::new().expect("tempdir");
-        let bundle = bundle_fixture(temp.path(), "promptforge-workshop");
-        let gateway = bundle.join("Contents/MacOS/promptforge-gateway");
+        let bundle = bundle_fixture(temp.path(), "runvil-workshop");
+        let gateway = bundle.join("Contents/MacOS/runvil-gateway");
         assert!(
             !gateway_is_bundle_principal(&bundle, &gateway),
             "inside the workshop's bundle, mainApp registration would launch the workshop"
         );
-        let bundle = bundle_fixture(temp.path(), "promptforge-gateway");
+        let bundle = bundle_fixture(temp.path(), "runvil-gateway");
         assert!(
             gateway_is_bundle_principal(&bundle, &gateway),
             "a standalone gateway bundle registers itself"
@@ -366,14 +358,14 @@ mod linux {
         let xdg = OsStr::new("/xdg/config");
         assert_eq!(
             autostart_path(Some(xdg), home),
-            PathBuf::from("/xdg/config/autostart/promptforge-gateway.desktop")
+            PathBuf::from("/xdg/config/autostart/runvil-gateway.desktop")
         );
     }
 
     #[test]
     fn the_autostart_path_defaults_to_home_config() {
         let home = Path::new("/home/user");
-        let expected = PathBuf::from("/home/user/.config/autostart/promptforge-gateway.desktop");
+        let expected = PathBuf::from("/home/user/.config/autostart/runvil-gateway.desktop");
         assert_eq!(autostart_path(None, home), expected);
         assert_eq!(
             autostart_path(Some(OsStr::new("")), home),
@@ -390,26 +382,26 @@ mod linux {
     #[test]
     fn the_exec_command_quotes_spaces_and_escapes_reserved_characters() {
         assert_eq!(
-            exec_command(Path::new("/opt/Prompt Forge/promptforge-gateway")),
-            "\"/opt/Prompt Forge/promptforge-gateway\" --login"
+            exec_command(Path::new("/opt/Runvil/runvil-gateway")),
+            "\"/opt/Runvil/runvil-gateway\" --login"
         );
         assert_eq!(
-            exec_command(Path::new("/opt/weird$`\\\"dir/promptforge-gateway")),
-            "\"/opt/weird\\$\\`\\\\\\\"dir/promptforge-gateway\" --login",
+            exec_command(Path::new("/opt/weird$`\\\"dir/runvil-gateway")),
+            "\"/opt/weird\\$\\`\\\\\\\"dir/runvil-gateway\" --login",
             "the desktop-entry parser's reserved characters are backslash-escaped"
         );
     }
 
     #[test]
     fn the_desktop_entry_is_a_daemon_autostart_file() {
-        let entry = desktop_entry("\"/opt/Prompt Forge/promptforge-gateway\" --login");
+        let entry = desktop_entry("\"/opt/Runvil/runvil-gateway\" --login");
         assert_eq!(
             entry,
             "[Desktop Entry]\n\
              Type=Application\n\
-             Name=PromptForge Gateway\n\
-             Comment=PromptForge inference gateway\n\
-             Exec=\"/opt/Prompt Forge/promptforge-gateway\" --login\n\
+             Name=Runvil Gateway\n\
+             Comment=Runvil inference gateway\n\
+             Exec=\"/opt/Runvil/runvil-gateway\" --login\n\
              Terminal=false\n",
             "the Exec line is the quoted exe plus --login; Terminal=false"
         );
@@ -419,7 +411,7 @@ mod linux {
     fn the_notification_marker_lives_beside_the_profile_config() {
         assert_eq!(
             notification_marker(Path::new("/home/user")),
-            PathBuf::from("/home/user/.promptforge/tray-notification-sent")
+            PathBuf::from("/home/user/.runvil/tray-notification-sent")
         );
     }
 

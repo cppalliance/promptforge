@@ -14,9 +14,9 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use futures_util::future::{Either, select};
-use promptforge::cancel::CancelHandle;
-use promptforge::vfs::VfsRef;
-use promptforge_plugin::HostServices;
+use runvil::cancel::CancelHandle;
+use runvil::vfs::VfsRef;
+use runvil_plugin::HostServices;
 
 use crate::effect_loop::{DriveError, drive};
 use crate::environment::{CurrentModelError, HostSnapshot, current_model};

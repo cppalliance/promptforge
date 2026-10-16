@@ -46,7 +46,7 @@ globalThis.document = dom.window.document;
 globalThis.Element = dom.window.Element;
 globalThis.Node = dom.window.Node;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-token-ring-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-token-ring-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { TokenRing, lifecycle } = await import(pathToFileURL(bundlePath).href);
 

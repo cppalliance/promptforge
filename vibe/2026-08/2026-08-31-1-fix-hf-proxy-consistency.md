@@ -102,26 +102,26 @@ GET /admin/hf/model/{owner}/{name}/readme  (new)
 
 During STT engine startup, whisper.cpp writes init logs (`whisper_model_load:`, `ggml_cuda_init:`, etc.) directly to stderr from C. The gateway's progress renderer draws an indicatif `MultiProgress` on the same stderr (`render.rs` `tty_loop`). Foreign writes break indicatif's cursor tracking, so bars jam together.
 
-**`crates/promptforge-transcribe/Cargo.toml`:**
+**`crates/runvil-transcribe/Cargo.toml`:**
 - Enable `tracing_backend` on `whisper-rs`: `whisper-rs = { workspace = true, features = ["tracing_backend"] }`
 
-**`crates/promptforge-transcribe/src/engine.rs`:**
+**`crates/runvil-transcribe/src/engine.rs`:**
 - Call `whisper_rs::install_logging_hooks()` at the top of `SttEngine::new_with_progress`, before any whisper context loads. Idempotent, no `Once` needed.
 
-**`crates/promptforge-gateway/src/main.rs`:**
-- Replace `tracing_subscriber::fmt::init()` with an `EnvFilter`-based subscriber defaulting `whisper_rs::whisper_logging_hook` and `whisper_rs::ggml_logging_hook` to `WARN`. `RUST_LOG` overrides still work. The `promptforge-workshop` binary has no subscriber, so rerouted logs are simply dropped there.
+**`crates/runvil-gateway/src/main.rs`:**
+- Replace `tracing_subscriber::fmt::init()` with an `EnvFilter`-based subscriber defaulting `whisper_rs::whisper_logging_hook` and `whisper_rs::ggml_logging_hook` to `WARN`. `RUST_LOG` overrides still work. The `runvil-workshop` binary has no subscriber, so rerouted logs are simply dropped there.
 
 Rejected: `MultiProgress::println`/`suspend` (cannot intercept C fd writes); fd-level stderr redirect (platform-fragile).
 
 ## Verification
 
 - `cargo fmt --all --check`
-- `cargo clippy -p promptforge-gateway -p promptforge-transcribe --all-targets --all-features -- -D warnings`
-- `cargo test -p promptforge-gateway`, `cargo test -p promptforge-transcribe`
+- `cargo clippy -p runvil-gateway -p runvil-transcribe --all-targets --all-features -- -D warnings`
+- `cargo test -p runvil-gateway`, `cargo test -p runvil-transcribe`
 - `npm run build`, `npm run typecheck`, `npm test` in config-ui
-- `cargo test -p promptforge-workshop-server gateway_config` (proxy allowlist)
-- `cargo build -p promptforge-workshop` (CUDA feature unification)
-- Manual TTY acceptance: run `.\target\release\promptforge-workshop.exe` and confirm clean progress bars
+- `cargo test -p runvil-workshop-server gateway_config` (proxy allowlist)
+- `cargo build -p runvil-workshop` (CUDA feature unification)
+- Manual TTY acceptance: run `.\target\release\runvil-workshop.exe` and confirm clean progress bars
 
 ---
 
@@ -133,7 +133,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin
 
-This plan was created mid-chat while running `chat_templates_and_injection_defense_faef0fb8`. After that run finished, the user dogfooded the result (ran `promptforge-workshop.exe`, used the rebuilt Config UI) and reported four live bugs in quick succession; a fifth (whisper stderr) came from the garbled terminal output in that same dogfooding session. Each bug report was a short user message with a screenshot or terminal reference; the agent diagnosed root causes in-chat before planning.
+This plan was created mid-chat while running `chat_templates_and_injection_defense_faef0fb8`. After that run finished, the user dogfooded the result (ran `runvil-workshop.exe`, used the rebuilt Config UI) and reported four live bugs in quick succession; a fifth (whisper stderr) came from the garbled terminal output in that same dogfooding session. Each bug report was a short user message with a screenshot or terminal reference; the agent diagnosed root causes in-chat before planning.
 
 ## Why five fixes in one plan
 

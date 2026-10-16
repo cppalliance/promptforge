@@ -13,13 +13,13 @@ use gateway_api_discovery::{GatewayDiscoveryFile, ValidatedConnection};
 mod process;
 
 #[cfg(windows)]
-const GATEWAY_EXE_NAME: &str = "promptforge-gateway.exe";
+const GATEWAY_EXE_NAME: &str = "runvil-gateway.exe";
 #[cfg(not(windows))]
-const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
+const GATEWAY_EXE_NAME: &str = "runvil-gateway";
 
-const CONTROL_ADDRESS_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_CONTROL_ADDRESS";
-const EXPECTED_KEY_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_EXPECTED_KEY";
-const INSTANCE_LEASE_RUN_DIR_ENV: &str = "PROMPTFORGE_TEST_GATEWAY_INSTANCE_LEASE_RUN_DIR";
+const CONTROL_ADDRESS_ENV: &str = "RUNVIL_TEST_GATEWAY_CONTROL_ADDRESS";
+const EXPECTED_KEY_ENV: &str = "RUNVIL_TEST_GATEWAY_EXPECTED_KEY";
+const INSTANCE_LEASE_RUN_DIR_ENV: &str = "RUNVIL_TEST_GATEWAY_INSTANCE_LEASE_RUN_DIR";
 
 /// A named child gateway that passes production process-image validation.
 #[derive(Debug)]

@@ -1,7 +1,7 @@
 //! Stale detection: decide whether a gateway discovery file names a live
 //! gateway, and remove it when it does not.
 //!
-//! A file is live when one OS process boot with a `promptforge-gateway`
+//! A file is live when one OS process boot with a `runvil-gateway`
 //! image is unchanged across a same-socket health and bearer proof, and
 //! the file includes a boot identity. Anything else is stale - the Jupyter
 //! phantom-server bug class - and the file is deleted so the next reader
@@ -39,7 +39,7 @@ pub enum StaleReason {
     /// The pid is dead.
     #[error("the recorded gateway process is dead")]
     ProcessDead,
-    /// The pid is alive but its image is not a `promptforge-gateway`
+    /// The pid is alive but its image is not a `runvil-gateway`
     /// binary (a reused pid).
     #[error("the recorded pid belongs to another process image")]
     ImageMismatch,
@@ -83,7 +83,7 @@ pub fn resolve_cancellable(
 }
 
 /// [`resolve`] against a caller-named process image, so a consumer's test
-/// binary - never named `promptforge-gateway` - can run the full liveness
+/// binary - never named `runvil-gateway` - can run the full liveness
 /// gauntlet. Test builds only, behind the `test-fixtures` feature.
 #[cfg(feature = "test-fixtures")]
 #[doc(hidden)]
@@ -93,7 +93,7 @@ pub fn resolve_for_test(run_dir: &Path, image_name: &str) -> Result<Resolution, 
 
 /// [`resolve`] against a caller-named process image, so tests can run the
 /// full liveness gauntlet from a test binary, which is never named
-/// `promptforge-gateway`.
+/// `runvil-gateway`.
 pub(crate) fn resolve_named(run_dir: &Path, image_name: &str) -> Result<Resolution, SidecarError> {
     let file = match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => file,
@@ -204,7 +204,7 @@ pub fn is_running(run_dir: &Path) -> bool {
 }
 
 /// [`is_running`] against a caller-named process image, so a test binary -
-/// never named `promptforge-gateway` - can run the full liveness gauntlet.
+/// never named `runvil-gateway` - can run the full liveness gauntlet.
 fn is_running_named(run_dir: &Path, image_name: &str) -> bool {
     match GatewayDiscoveryFile::read(run_dir) {
         Ok(Some(file)) => is_live(&file, image_name),

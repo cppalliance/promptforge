@@ -34,7 +34,7 @@ use crate::common::{
 const ECHO_MD: &str = r"---
 name: echo
 description: The echo test agent on the unified runtime.
-promptforge: 0
+runvil: 0
 plugins:
   - user-input
 ---

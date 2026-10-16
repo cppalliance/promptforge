@@ -1,0 +1,15 @@
+[package]
+name = "runvil-vfs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Zero-dependency rule: the library is std only, with no normal or build
+# dependencies, workspace or external. The manifest test enforces this.
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
-//! The `promptforge-gateway` binary:
-//! `promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]`.
+//! The `runvil-gateway` binary:
+//! `runvil-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]`.
 //!
 //! This is a thin shell: it parses arguments into a typed `ServeOptions` and
 //! hands off to [`run_with_tray`], which owns the tokio runtime, provisioning,
@@ -33,9 +33,9 @@ const DEFAULT_LOG_FILTER: &str = "info,whisper_cpp=warn,hyper=warn,h2=warn,reqwe
 /// Maximum time a process-lease loser waits for the owner's validated record.
 const OWNER_PUBLICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 #[cfg(feature = "test-fixtures")]
-const TEST_START_READY_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_READY";
+const TEST_START_READY_ENV: &str = "RUNVIL_GATEWAY_TEST_START_READY";
 #[cfg(feature = "test-fixtures")]
-const TEST_START_RELEASE_ENV: &str = "PROMPTFORGE_GATEWAY_TEST_START_RELEASE";
+const TEST_START_RELEASE_ENV: &str = "RUNVIL_GATEWAY_TEST_START_RELEASE";
 #[cfg(feature = "test-fixtures")]
 const TEST_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Err(ParseError::Version) => {
-            println!("promptforge-gateway {}", env!("CARGO_PKG_VERSION"));
+            println!("runvil-gateway {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Err(ParseError::Usage(message)) => {
@@ -210,7 +210,7 @@ fn wait_for_test_start_rendezvous() -> anyhow::Result<()> {
 /// Installs the global subscriber and starts the log pipeline: the filtered
 /// stream on stdout, plus the same stream through the bounded queue into
 /// `<state dir>/logs/gateway.log`, where the state dir is the
-/// `.promptforge` directory the run directory's resolver already knows
+/// `.runvil` directory the run directory's resolver already knows
 /// (it holds `gateway.toml`, `run/`, and `models/`). A log file that cannot
 /// be opened warns on stdout and never stops the gateway. The returned
 /// runtime must be shut down last.
@@ -243,7 +243,7 @@ fn init_logging_for_state(state_dir: Option<PathBuf>) -> Option<LogRuntime> {
                 .with(stdout)
                 .with(file_layer)
                 .init();
-            tracing::info!("promptforge-gateway {} starting", env!("CARGO_PKG_VERSION"));
+            tracing::info!("runvil-gateway {} starting", env!("CARGO_PKG_VERSION"));
             tracing::info!("logging to {}", runtime.path().display());
             Some(runtime)
         }

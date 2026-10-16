@@ -2,12 +2,12 @@
 //! production Realtime session at the pace of a live client and fails when
 //! the completed transcript drops a run of five or more consecutive words.
 //!
-//! `PROMPTFORGE_LONG_SPEECH_CLIPS` names a directory holding `clips.json`,
+//! `RUNVIL_LONG_SPEECH_CLIPS` names a directory holding `clips.json`,
 //! an array of `{ "id", "file", "text" }` entries, and the 16 kHz mono 16-bit
 //! WAV files it lists. The test returns at once when the variable is unset.
 //! It reads the models the native replay capture reads:
-//! `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL` for captions,
-//! and `PROMPTFORGE_WHISPER_FINAL_MODEL` for finals. The test needs the
+//! `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL` for captions,
+//! and `RUNVIL_WHISPER_FINAL_MODEL` for finals. The test needs the
 //! recommended pair, `base.en` for captions and `small.en` for finals.
 //!
 //! Each clip streams as 100 ms appends, each followed by a 100 ms sleep on
@@ -35,7 +35,7 @@ use crate::common;
 use crate::native_session::audio::pcm24_payload;
 use crate::native_session::{self, CHUNK_SAMPLES, TICK_SAMPLES};
 
-const CLIPS_VARIABLE: &str = "PROMPTFORGE_LONG_SPEECH_CLIPS";
+const CLIPS_VARIABLE: &str = "RUNVIL_LONG_SPEECH_CLIPS";
 /// The wall-clock gap after each 100 ms append.
 const PACE: Duration = Duration::from_millis(100);
 /// A run of this many consecutive missing reference words fails a clip.

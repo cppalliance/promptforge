@@ -221,7 +221,7 @@ fn default_build_derives_host_and_cleans_up_in_order() {
     let source = environment
         .target_root
         .join("debug")
-        .join("promptforge-gateway.exe");
+        .join("runvil-gateway.exe");
     assert_eq!(
         runner.commands,
         vec![
@@ -298,7 +298,7 @@ fn explicit_release_target_uses_target_output_without_a_host_probe() {
         .target_root
         .join(triple)
         .join("release")
-        .join("promptforge-gateway");
+        .join("runvil-gateway");
     assert_eq!(
         runner.commands,
         vec![

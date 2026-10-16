@@ -303,7 +303,7 @@ class FakeWebSocket {
 window.WebSocket = FakeWebSocket;
 globalThis.WebSocket = FakeWebSocket;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-stt-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-stt-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   lifecycle,

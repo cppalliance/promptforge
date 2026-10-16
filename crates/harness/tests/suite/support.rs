@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use harness::{BoxFuture, InferenceBroker, Timer};
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding,
     ModelCatalog, ToolSchema,
 };

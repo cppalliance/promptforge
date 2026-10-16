@@ -13,7 +13,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Wry};
 
 /// The quit item's menu id, matched by the event handler.
-const QUIT_MENU_ID: &str = "quit-promptforge";
+const QUIT_MENU_ID: &str = "quit-runvil";
 
 /// The quit item's accelerator. macOS keeps `CmdOrCtrl+Q`, the platform's
 /// quit gesture. Windows and Linux have none: Ctrl+Q opens View in the SPA
@@ -30,9 +30,9 @@ fn quit_accelerator(macos: bool) -> Option<&'static str> {
 /// Returns an error when the menu cannot be built or installed.
 pub(crate) fn install(app: &tauri::App, has_sidecar: bool) -> tauri::Result<()> {
     let label = if has_sidecar {
-        "Quit PromptForge and Gateway"
+        "Quit Runvil and Gateway"
     } else {
-        "Quit PromptForge"
+        "Quit Runvil"
     };
     let mut quit = MenuItemBuilder::with_id(QUIT_MENU_ID, label);
     if let Some(accelerator) = quit_accelerator(cfg!(target_os = "macos")) {
@@ -48,7 +48,7 @@ pub(crate) fn install(app: &tauri::App, has_sidecar: bool) -> tauri::Result<()> 
     // the gesture.
     #[cfg(target_os = "macos")]
     let menu = {
-        let app_menu = SubmenuBuilder::new(app, "PromptForge")
+        let app_menu = SubmenuBuilder::new(app, "Runvil")
             .about(None)
             .separator()
             .services()

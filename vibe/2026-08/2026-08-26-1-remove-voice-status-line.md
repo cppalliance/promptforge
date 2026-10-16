@@ -1,6 +1,6 @@
 ---
 name: Workshop UI overhaul
-overview: Remove the layout-shifting voice-status line, upgrade the agent window (thinking block, streaming markdown, tool activity, external links), replace the Windows system title bar with custom PromptForge chrome and functional menus, and add a three-zone workspace with file tree and CodeMirror 6 editor.
+overview: Remove the layout-shifting voice-status line, upgrade the agent window (thinking block, streaming markdown, tool activity, external links), replace the Windows system title bar with custom Runvil chrome and functional menus, and add a three-zone workspace with file tree and CodeMirror 6 editor.
 todos:
   - id: step-01
     content: Remove the voice-status line; route voice errors to StatusBar.showLocal
@@ -53,9 +53,9 @@ todos:
 isProject: false
 ---
 
-# PromptForge Workshop UI overhaul
+# Runvil Workshop UI overhaul
 
-All paths below are relative to `promptforge/` (the repo at `c:\Users\Vinnie\cursor\promptforge`). The UI lives in `crates/promptforge-ws-server/ui/`; the desktop shell is `crates/promptforge-ws/`; the in-process server is `crates/promptforge-ws-server/src/`.
+All paths below are relative to `runvil/` (the repo at `c:\Users\Vinnie\cursor\runvil`). The UI lives in `crates/runvil-ws-server/ui/`; the desktop shell is `crates/runvil-ws/`; the in-process server is `crates/runvil-ws-server/src/`.
 
 ## House rules (binding on every step)
 
@@ -88,13 +88,13 @@ Execution (per the vibe rulebook): one step = one commit carrying code, test, an
 
 ## Visual specifications (self-contained)
 
-Custom title bar: a compact near-black (#0d0e12) strip, roughly 40px high, with a one-pixel lower divider in `--border` (#262a33) and a restrained purple accent (`--accent` #7c7fd4) used only for focus/selection states - no glow, no gradient. Left to right: the PromptForge program icon (decorative, noninteractive), then text menu buttons `File`, `Edit`, `Window`, `Help`. The center is empty draggable space. The far-right cluster is exactly three equal-width buttons in Windows order: Minimize (short horizontal stroke), Maximize/Restore (one outlined square normally, two overlapping outlined squares while maximized), Close (thin X at the extreme right). Glyphs are thin muted-gray SVG strokes (`--text-muted`); Minimize and Maximize/Restore get a neutral `--bg-hover` wash on hover; Close gets the standard red hover (`--danger` #b0606a background, white glyph). The Workshop running in a browser keeps normal browser chrome; the custom bar appears only in the Windows desktop shell.
+Custom title bar: a compact near-black (#0d0e12) strip, roughly 40px high, with a one-pixel lower divider in `--border` (#262a33) and a restrained purple accent (`--accent` #7c7fd4) used only for focus/selection states - no glow, no gradient. Left to right: the Runvil program icon (decorative, noninteractive), then text menu buttons `File`, `Edit`, `Window`, `Help`. The center is empty draggable space. The far-right cluster is exactly three equal-width buttons in Windows order: Minimize (short horizontal stroke), Maximize/Restore (one outlined square normally, two overlapping outlined squares while maximized), Close (thin X at the extreme right). Glyphs are thin muted-gray SVG strokes (`--text-muted`); Minimize and Maximize/Restore get a neutral `--bg-hover` wash on hover; Close gets the standard red hover (`--danger` #b0606a background, white glyph). The Workshop running in a browser keeps normal browser chrome; the custom bar appears only in the Windows desktop shell.
 
 Thinking block: a quiet single row when collapsed - chevron-right plus the label in `--text-muted` italic. While reasoning streams, the label reads "Planning next moves..." with a shimmer that blends only gray tones (a soft light-gray highlight sweeping across the dim base text via a `background-position` animation; static text under `prefers-reduced-motion`). When open, the thinking text renders as italic `--text-muted` prose inside a subtle container with a soft left edge (a 2px `--border` left border with small left padding), sitting between the label row and the response.
 
 Tool activity block: collapsed, a one-line autoscrolling status window in `--text-muted`; expanded, a static list of single-line rows, each with a status icon (spinner while running, green check `--led-green` #4caf7d when done, red X `--danger-text` #cf7f88 on error), a one-line human summary, and a per-row chevron for arguments/result.
 
-Program icon: `crates/promptforge-ws/assets/icons/promptforge-icon-1.png` (cold medallion) is the static program icon in the title bar and Windows shell. Frames 2-5 (`promptforge-icon-2.png` through `promptforge-icon-5.png`, same directory) are matching heat stages reserved for a future activity animation; this plan installs only the cold frame.
+Program icon: `crates/runvil-ws/assets/icons/runvil-icon-1.png` (cold medallion) is the static program icon in the title bar and Windows shell. Frames 2-5 (`runvil-icon-2.png` through `runvil-icon-5.png`, same directory) are matching heat stages reserved for a future activity animation; this plan installs only the cold frame.
 
 ## Workstream A: voice-status removal
 
@@ -126,7 +126,7 @@ Context: the vendored murm-ui (`ui/src/chat/`) already has typed `reasoning` blo
 ### Step 2: external links
 
 - `ui/src/chat/utils/html.ts`: sanitized anchors gain `target="_blank"` and `rel="noopener"`.
-- `crates/promptforge-ws/src/window.rs`: intercept webview navigation to external (non-loopback) URLs and open them in the system browser via the existing `open` crate, so a clicked link never navigates the app away from itself.
+- `crates/runvil-ws/src/window.rs`: intercept webview navigation to external (non-loopback) URLs and open them in the system browser via the existing `open` crate, so a clicked link never navigates the app away from itself.
 - Test: sanitized anchors carry `target`/`rel`; a unit test covers the navigation classifier (loopback allowed, external intercepted).
 
 ### Step 3: streaming markdown
@@ -153,13 +153,13 @@ Context: the vendored murm-ui (`ui/src/chat/`) already has typed `reasoning` blo
 ### Step 6: title-bar markup and browser wiring
 
 - `ui/index.html`: add a semantic `<header class="window-titlebar">` before `.shell`, hidden by default, containing the decorative program icon `<img>` (with `alt=""`, `width`, `height`), the four menu buttons, the draggable center region, and the three window controls - every control a real `<button>` with an accessible label and inline SVG (no icon dependency).
-- New module `ui/src/window-chrome.ts`: reveals the bar only when the wry initialization flag `window.__PROMPTFORGE_DESKTOP__` is present; sends only typed window commands through `window.ipc.postMessage(...)` for drag, minimize, maximize/restore, and close; starts native dragging on primary-button `pointerdown` in the empty center; toggles maximize on double-click; listens for a native `promptforge:maximized` event so the maximize glyph and `aria-label` switch to Restore after button maximize, double-click, Windows Snap, or restore. IPC payloads are parsed and validated into a narrow command type, never cast.
+- New module `ui/src/window-chrome.ts`: reveals the bar only when the wry initialization flag `window.__RUNVIL_DESKTOP__` is present; sends only typed window commands through `window.ipc.postMessage(...)` for drag, minimize, maximize/restore, and close; starts native dragging on primary-button `pointerdown` in the empty center; toggles maximize on double-click; listens for a native `runvil:maximized` event so the maximize glyph and `aria-label` switch to Restore after button maximize, double-click, Windows Snap, or restore. IPC payloads are parsed and validated into a narrow command type, never cast.
 - Test: smoke test asserts the icon, four menu buttons, and three controls exist, stay hidden in browser mode, and do not require `window.ipc` when inactive.
 
 ### Step 7: application menus
 
 - New module `ui/src/window-menu.ts`: accessible HTML popovers inside the title bar, not native menus. Each top-level button opens on click; Left/Right moves between menus; Up/Down moves through commands; Enter activates; Escape and outside-click dismiss. Opening a second menu replaces the first; disabled commands are announced and cannot run; popovers position below the bar without changing layout.
-- Commands: **File** - New Chat (`chat.engine.sessions.create()`), separator, Close Window (typed Close IPC). **Edit** - Undo, Redo, Cut, Copy, Paste, Select All, preserving the previously focused editable target and disabling commands with no valid target. **Window** - Minimize, Maximize/Restore, reusing the same command functions as the visible controls. **Help** - About PromptForge, a small themed modal (product name, application version, license) with focus trapping and Escape dismissal.
+- Commands: **File** - New Chat (`chat.engine.sessions.create()`), separator, Close Window (typed Close IPC). **Edit** - Undo, Redo, Cut, Copy, Paste, Select All, preserving the previously focused editable target and disabling commands with no valid target. **Window** - Minimize, Maximize/Restore, reusing the same command functions as the visible controls. **Help** - About Runvil, a small themed modal (product name, application version, license) with focus trapping and Escape dismissal.
 - Expose the initialized `ChatUI` instance to the menu setup from `ui/src/main.ts` rather than querying internal chat DOM. All command dispatch lives in this one module so keyboard shortcuts and future menu items call the same actions.
 - Test: menu opening, one-menu-at-a-time, keyboard navigation/dismissal, New Chat dispatch, shared Window commands, About-dialog focus/close.
 
@@ -170,7 +170,7 @@ Context: the vendored murm-ui (`ui/src/chat/`) already has typed `reasoning` blo
 
 ### Step 9: decorationless Windows shell and IPC
 
-- `crates/promptforge-ws/src/window.rs`: on Windows, create the tao window with `.with_decorations(false)`; macOS and Linux keep the native frame. Configure wry with an initialization script setting `window.__PROMPTFORGE_DESKTOP__ = true`, then install `with_ipc_handler` to parse a narrow JSON command enum. The IPC callback does not own the tao `Window`, so it forwards commands through `EventLoopProxy<WindowCommand>` to the tao event loop:
+- `crates/runvil-ws/src/window.rs`: on Windows, create the tao window with `.with_decorations(false)`; macOS and Linux keep the native frame. Configure wry with an initialization script setting `window.__RUNVIL_DESKTOP__ = true`, then install `with_ipc_handler` to parse a narrow JSON command enum. The IPC callback does not own the tao `Window`, so it forwards commands through `EventLoopProxy<WindowCommand>` to the tao event loop:
 
 ```text
 HTML button -> window.ipc.postMessage -> validated WindowCommand
@@ -182,7 +182,7 @@ HTML button -> window.ipc.postMessage -> validated WindowCommand
 
 ### Step 10: program icon
 
-- Install `crates/promptforge-ws/assets/icons/promptforge-icon-1.png` as the title-bar icon (referenced from the markup in step 6) and as the tao window icon via `WindowBuilder::with_window_icon` (decode the PNG once at startup; on failure, log and continue without an icon rather than failing startup). Revision (landed in step 6's commit): the web-served half of this install shipped early - step 6's markup references the icon, so that commit copied the cold frame to `crates/promptforge-ws-server/ui/icons/promptforge-icon-1.png`, serves it at `/icons/promptforge-icon-1.png` from `app.rs`, and mirrors it in both static-copy lists. What remains here is only the tao window icon.
+- Install `crates/runvil-ws/assets/icons/runvil-icon-1.png` as the title-bar icon (referenced from the markup in step 6) and as the tao window icon via `WindowBuilder::with_window_icon` (decode the PNG once at startup; on failure, log and continue without an icon rather than failing startup). Revision (landed in step 6's commit): the web-served half of this install shipped early - step 6's markup references the icon, so that commit copied the cold frame to `crates/runvil-ws-server/ui/icons/runvil-icon-1.png`, serves it at `/icons/runvil-icon-1.png` from `app.rs`, and mirrors it in both static-copy lists. What remains here is only the tao window icon.
 - Test: smoke assertion that the title-bar img resolves; Rust unit test that the icon decoder accepts the bundled asset.
 
 ## Workstream D: workspace, file tree, and editor
@@ -191,14 +191,14 @@ Product shape: three fixed named zones - **left** (workspace/file tree), **main*
 
 ### Step 11: confined workspace APIs
 
-- New module `crates/promptforge-ws-server/src/workspace.rs`, rooted only at paths explicitly granted through Windows drag/drop. A dropped folder becomes an allowed root; a dropped file grants its parent directory for that session. Grants live in memory for the running process; profile persistence is a separate future consent decision.
+- New module `crates/runvil-ws-server/src/workspace.rs`, rooted only at paths explicitly granted through Windows drag/drop. A dropped folder becomes an allowed root; a dropped file grants its parent directory for that session. Grants live in memory for the running process; profile persistence is a separate future consent decision.
 - Routes beside the existing ones in `app.rs`: `GET /workspace/tree?path=...` (one level, directories before files, stable ordering, tree metadata), `GET /workspace/file?path=...` (UTF-8 text, size, modified time; rejects binary or oversized files), `PUT /workspace/file` (writes only after validating path, size, and expected modified-time token).
 - All paths are canonicalized and confined to granted roots before any filesystem operation. Reject `..`, symlink escapes, UNC tricks, alternate data streams, and paths outside every grant. Pattern the jail on the gateway's existing `confine.rs` approach. Errors use a concrete `thiserror` enum per the house rules.
 - Test (in-file): canonical path confinement, symlink escape rejection, binary rejection, size limits, modified-time conflict handling, and successful read/write inside a granted root, using `tempfile::TempDir`.
 
 ### Step 12: native path drops
 
-- `crates/promptforge-ws/src/window.rs`: use wry's file-drop handling so dragging files or folders from Explorer delivers real OS paths. Translate native drop events into a typed browser event containing normalized paths; the page then calls the workspace HTTP APIs. The browser fallback can still receive file contents through normal HTML drag/drop, but desktop mode prefers trusted paths and never reads file bytes merely because a file was dragged.
+- `crates/runvil-ws/src/window.rs`: use wry's file-drop handling so dragging files or folders from Explorer delivers real OS paths. Translate native drop events into a typed browser event containing normalized paths; the page then calls the workspace HTTP APIs. The browser fallback can still receive file contents through normal HTML drag/drop, but desktop mode prefers trusted paths and never reads file bytes merely because a file was dragged.
 - Test: unit-test the path normalization (Windows backslashes, spaces, Unicode); smoke-test that a synthesized drop event reaches the page handler with paths only.
 
 ### Step 13: zone registry and Workshop tree panel
@@ -212,7 +212,7 @@ Product shape: three fixed named zones - **left** (workspace/file tree), **main*
 
 ### Step 14: CodeMirror 6 editor panel
 
-- `ui/src/workshop/editor-surface.ts` - the internal `EditorSurface` interface (`open`, `save`, `isDirty`, `focus`) plus the CodeMirror 6 implementation. Nothing else in the app imports `@codemirror/*` directly. Initial extension set: `basic-setup`, a dark theme built from the PromptForge palette tokens, default keymap plus history, `@codemirror/search` for in-file find/replace, and language modes loaded lazily by file extension (first-party packs: JavaScript/TypeScript, Python, Rust, JSON, Markdown, YAML; TOML via legacy-modes). Dirty tracking is an `updateListener` comparing against the saved document. Revision (found in step 14's review): the language modes are not truly lazy - the single-file esbuild bundle (`ui/build.mjs`, no code splitting) inlines the dynamic `import()`s, so every first-party pack ships in the bundle; the `import()` structure only keeps the load boundary explicit. Enabling real laziness means turning on esbuild code splitting, a build change deferred out of this plan.
+- `ui/src/workshop/editor-surface.ts` - the internal `EditorSurface` interface (`open`, `save`, `isDirty`, `focus`) plus the CodeMirror 6 implementation. Nothing else in the app imports `@codemirror/*` directly. Initial extension set: `basic-setup`, a dark theme built from the Runvil palette tokens, default keymap plus history, `@codemirror/search` for in-file find/replace, and language modes loaded lazily by file extension (first-party packs: JavaScript/TypeScript, Python, Rust, JSON, Markdown, YAML; TOML via legacy-modes). Dirty tracking is an `updateListener` comparing against the saved document. Revision (found in step 14's review): the language modes are not truly lazy - the single-file esbuild bundle (`ui/build.mjs`, no code splitting) inlines the dynamic `import()`s, so every first-party pack ships in the bundle; the `import()` structure only keeps the load boundary explicit. Enabling real laziness means turning on esbuild code splitting, a build change deferred out of this plan.
 - `ui/src/workshop/editor-panel.ts` - one open document per panel, written against `EditorSurface`; panel, zone, and save logic never touch the concrete editor. Dirty state shows in the panel title; save runs through the workspace API and refuses to silently overwrite a file whose modified-time token changed on disk (conflict dialog: reload or overwrite).
 - Test: opening a file creates an editor panel, typing sets dirty state, save clears it, and a stale modified-time token surfaces the conflict dialog.
 
@@ -231,7 +231,7 @@ The four workstreams are independent until verification: voice errors flow into 
 ## Verification schedule
 
 - Verify after steps 3, 6, 9, 12, and 15 (every 3rd step), at the end of each workstream, and as the final gate.
-- Final gate: `cargo build -p promptforge-ws-server` (build.rs rebuilds `ui/dist/` via esbuild), `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --locked --workspace`, `node ui/test/smoke.mjs`, and a manual Windows pass: mic recording shifts nothing, links open externally, thinking preview caps at four lines, activity row autoscrolls, title bar drags/minimizes/maximizes/closes, menus navigate by keyboard, a dropped folder browses and edits, and Close shuts the server down cleanly.
+- Final gate: `cargo build -p runvil-ws-server` (build.rs rebuilds `ui/dist/` via esbuild), `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --locked --workspace`, `node ui/test/smoke.mjs`, and a manual Windows pass: mic recording shifts nothing, links open externally, thinking preview caps at four lines, activity row autoscrolls, title bar drags/minimizes/maximizes/closes, menus navigate by keyboard, a dropped folder browses and edits, and Close shuts the server down cleanly.
 
 
 ---

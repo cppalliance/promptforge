@@ -228,7 +228,7 @@ fn disk_target(cache_dir: Option<&str>) -> Option<PathBuf> {
     {
         // Headless builds compile without the local crate, so its defaulting
         // rule is mirrored here: the configured dir with `~` expanded, else
-        // `~/.promptforge` under the platform home variable.
+        // `~/.runvil` under the platform home variable.
         let home = || {
             #[cfg(windows)]
             let value = std::env::var_os("USERPROFILE");
@@ -244,7 +244,7 @@ fn disk_target(cache_dir: Option<&str>) -> Option<PathBuf> {
                     None => Some(PathBuf::from(dir)),
                 }
             }
-            _ => home().map(|h| h.join(".promptforge")),
+            _ => home().map(|h| h.join(".runvil")),
         }
     }
 }

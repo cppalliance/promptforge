@@ -12,8 +12,8 @@ use std::sync::atomic::Ordering;
 
 use harness_runner::Harness;
 use harness_runner::recorder::MemoryRecorder;
-use promptforge::model::{Completion, CompletionResult, ToolCall};
-use promptforge_plugin::HostServices;
+use runvil::model::{Completion, CompletionResult, ToolCall};
+use runvil_plugin::HostServices;
 use serde_json::json;
 
 use super::{
@@ -32,7 +32,7 @@ const ASK_TOOL: &str = "user-input/ask";
 /// call, each under a `pcall` that reports how the call ended. The run
 /// then joins both children and returns how its own wait ended beside
 /// both children's reports.
-const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
+const STOPS_ALL: &str = "---\nname: stops\ndescription: d\nrunvil: 0\n\
     plugins:\n  - harness\nmodels:\n  writer: {}\n---\n\n\
     # Stops\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\
@@ -49,14 +49,14 @@ const STOPS_ALL: &str = "---\nname: stops\ndescription: d\npromptforge: 0\n\
     return 'tool:' .. tostring(ok) .. ':' .. err.kind\n```\n";
 
 /// A prompt whose one round sits under nothing that catches.
-const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\npromptforge: 0\n\
+const STOPS_UNCAUGHT: &str = "---\nname: uncaught\ndescription: d\nrunvil: 0\n\
     models:\n  writer: {}\n---\n\n\
     # Uncaught\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\nreturn models.infer('held')\n```\n";
 
 /// The built-in chat's shape: ask the operator, run the model loop under
 /// a `pcall`, and ask again, with the held tool advertised to the model.
-const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
+const CHATS: &str = "---\nname: chats\ndescription: d\nrunvil: 0\n\
     plugins:\n  - harness\n  - user-input\n\
     models:\n  writer: {}\n---\n\n\
     # Chats\n\n```lua\nmodels.default('writer')\n```\n\n\
@@ -71,7 +71,7 @@ const CHATS: &str = "---\nname: chats\ndescription: d\npromptforge: 0\n\
 
 /// A model loop under a `pcall` with the held tool advertised, reporting
 /// how the loop call ended.
-const LOOPS_ONCE: &str = "---\nname: loops\ndescription: d\npromptforge: 0\n\
+const LOOPS_ONCE: &str = "---\nname: loops\ndescription: d\nrunvil: 0\n\
     plugins:\n  - harness\n\
     models:\n  writer: {}\n---\n\n\
     # Loops\n\n```lua\nmodels.default('writer')\n```\n\n\
@@ -83,12 +83,12 @@ const LOOPS_ONCE: &str = "---\nname: loops\ndescription: d\npromptforge: 0\n\
     return tostring(ok) .. ':' .. err.kind\n```\n";
 
 /// A prompt that returns the operator's answer to one question.
-const ASKS: &str = "---\nname: asks\ndescription: d\npromptforge: 0\n\
+const ASKS: &str = "---\nname: asks\ndescription: d\nrunvil: 0\n\
     plugins:\n  - user-input\n---\n\n\
     # Asks\n\n## Only\n\n```lua\nreturn (input.ask())\n```\n";
 
 /// A prompt that returns what the held tool answers.
-const HOLDS: &str = "---\nname: holds\ndescription: d\npromptforge: 0\n\
+const HOLDS: &str = "---\nname: holds\ndescription: d\nrunvil: 0\n\
     plugins:\n  - harness\n---\n\n\
     # Holds\n\n## Only\n\n```lua\nreturn tools.call('harness/hold')\n```\n";
 

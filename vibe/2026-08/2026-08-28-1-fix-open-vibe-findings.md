@@ -37,9 +37,9 @@ The vibe-rulebook's Full per-step ceremony (coder + review-and-fix per commit) i
 
 Named rulebooks: `rust-rulebook.md` binds every fix (all are Rust). `vibe-rulebook.md` governs the loop as amended here. `html+css-rulebook.md` and `zed/docs/src/languages/typescript.md` bind nothing - no finding touches markup or TypeScript; carried as no-ops.
 
-Rules manifest (pass by path in every dispatch): `promptforge/AGENTS.md`, `crates/promptforge-ws-server/AGENTS.md`, `crates/promptforge-ws/AGENTS.md`. The gateway and gateway-config crates have no nested AGENTS.md.
+Rules manifest (pass by path in every dispatch): `runvil/AGENTS.md`, `crates/runvil-ws-server/AGENTS.md`, `crates/runvil-ws/AGENTS.md`. The gateway and gateway-config crates have no nested AGENTS.md.
 
-## Coder A: promptforge-ws-server (6 findings, up to 2 commits)
+## Coder A: runvil-ws-server (6 findings, up to 2 commits)
 
 - `atomic.rs:66` - reword the sweep doc: a missing directory is skipped silently, not logged.
 - `atomic.rs:95` - the sweep also removes the legacy `workshop-state.json.tmp` name; add a test.
@@ -48,9 +48,9 @@ Rules manifest (pass by path in every dispatch): `promptforge/AGENTS.md`, `crate
 - `backoff.rs:146` - make `xorshift` `pub(crate)` and delete the duplicate in `gateway.rs` tests.
 - `assets.rs:45` - scope the parity comment: the guarantee covers request-supplied names; rust-embed 8.12.0's symlink bypass is outside it.
 
-Test: `cargo test -p promptforge-ws-server --lib`. Watch `module-ceilings.toml`: if a module grows past its ceiling, update to the actual value and state the raise reason in the commit message.
+Test: `cargo test -p runvil-ws-server --lib`. Watch `module-ceilings.toml`: if a module grows past its ceiling, update to the actual value and state the raise reason in the commit message.
 
-## Coder B: promptforge-gateway (6 findings, up to 3 commits)
+## Coder B: runvil-gateway (6 findings, up to 3 commits)
 
 - `runner.rs:263` - distinct `StartupError` kind for thread-spawn / pre-bind thread-exit failure (enum is `#[non_exhaustive]`) instead of misreporting as `bind`.
 - `runner.rs:271,275` - downcast the discarded `thread.join()` panic payload into the returned error text.
@@ -59,19 +59,19 @@ Test: `cargo test -p promptforge-ws-server --lib`. Watch `module-ceilings.toml`:
 - `workshop.rs:98` - inject the browser opener as a seam; assert `open::that` is called with the workshop URL when `open_browser` is set.
 - **Important** `runner.rs:215` - shutdown-ordering test. Do NOT use the stall-based approach the reviewer rejected (unverified hyper half-request drain semantics, 5+ wall-clock seconds). Add a sequence-recording seam: a `pub(crate)` ordering log or injected observer recording workshop-shutdown-complete before gateway-shutdown-signaled; the test spawns with a `[workshop]` section, shuts down, and asserts the recorded order. If the seam proves impossible without restructuring, return blocked with options rather than landing the brittle test.
 
-Tests: `cargo test -p promptforge-gateway --lib` and `--features workshop` variant.
+Tests: `cargo test -p runvil-gateway --lib` and `--features workshop` variant.
 
 ## Coder C: gateway-config + shell + docs (3 findings, up to 3 commits)
 
-- `promptforge-gateway-config/src/profile.rs:207` - one combined boot-section loader resolving the include chain once, returning both `[server]` and `[workshop]`; call it from `load_startup`. Existing boot tests stay green.
-- `promptforge-ws/src/main.rs:74` - extract the `Option<&str> -> anyhow::Result<String>` mapping into a testable pure function; assert the error names `[workshop]`.
-- `promptforge-gateway/README.md:15` - add a short `[server]` field table (`bind`, `api_key`) so the shell README's "field reference" pointer is fully served. Docs-only.
+- `runvil-gateway-config/src/profile.rs:207` - one combined boot-section loader resolving the include chain once, returning both `[server]` and `[workshop]`; call it from `load_startup`. Existing boot tests stay green.
+- `runvil-ws/src/main.rs:74` - extract the `Option<&str> -> anyhow::Result<String>` mapping into a testable pure function; assert the error names `[workshop]`.
+- `runvil-gateway/README.md:15` - add a short `[server]` field table (`bind`, `api_key`) so the shell README's "field reference" pointer is fully served. Docs-only.
 
 ## Review and verify
 
 - Review-and-fix runs as a loop, not one round. Each round: a review-and-fix subagent applies `<code-review>` to the full sweep diff (`git diff` from the pre-sweep HEAD) and fixes every finding it raises at every severity, then commits. The next round re-reviews the new diff including the previous round's fixes. The loop ends only when a round raises zero new findings. Hard cap: three rounds; if round three still raises findings, stop and report them rather than looping forever.
 - The review-file contract holds across rounds: every fixed finding leaves `vibe-review.md`; the file ends at zero open findings.
-- Final verify subagent after the loop closes: `cargo build -p promptforge-gateway`, `cargo build -p promptforge-gateway --features workshop`, `cargo build -p promptforge-ws`, `cargo test --workspace`, `cargo test -p promptforge-gateway --features workshop`.
+- Final verify subagent after the loop closes: `cargo build -p runvil-gateway`, `cargo build -p runvil-gateway --features workshop`, `cargo build -p runvil-ws`, `cargo test --workspace`, `cargo test -p runvil-gateway --features workshop`.
 - Done means: vibe-review.md holds zero open findings and the full suite is green.
 
 ## Notes
@@ -119,5 +119,5 @@ The user overrode the single-pass review with: "when you do the fix pass I want 
 
 ## Provenance notes
 
-- The stray `vibe-review.md` at the promptforge repo root that surfaced after the sweep ("there's stuff left?") was a stale, gitignored artifact of an older Step 18 smoke.mjs carve run, not this plan's review file. Its three findings turned out already fixed in a rewritten commit; the file was moved to trash. Not part of this plan's scope, but it explains the plan-file-vs-repo-root review-file distinction the plan relies on.
+- The stray `vibe-review.md` at the runvil repo root that surfaced after the sweep ("there's stuff left?") was a stale, gitignored artifact of an older Step 18 smoke.mjs carve run, not this plan's review file. Its three findings turned out already fixed in a rewritten commit; the file was moved to trash. Not part of this plan's scope, but it explains the plan-file-vs-repo-root review-file distinction the plan relies on.
 - One implementation trap worth keeping with the plan's memory: `Box<dyn Any + Send>` unsize-coerces to `dyn Any` if the box itself is passed to a downcast helper, silently losing the panic message; the fix derefs first (`&*payload`). This landed in the runner.rs join-panic fix.

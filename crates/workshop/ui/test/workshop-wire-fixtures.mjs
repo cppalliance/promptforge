@@ -36,7 +36,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-workshop-wire-fixtures-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-workshop-wire-fixtures-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, WorkshopSocket, WORKSHOP_FRAME_GUARDS } = await import(
   pathToFileURL(bundlePath).href

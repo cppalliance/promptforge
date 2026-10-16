@@ -1,4 +1,4 @@
-# Nextest configuration for PromptForge workspace.
+# Nextest configuration for Runvil workspace.
 
 [profile.default]
 # Report slow tests after 60s and terminate if hung.

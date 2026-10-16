@@ -6,7 +6,7 @@
 // that follows a mouse press does not run it twice); there is no search
 // icon and no ? chevron; further command rows render as toolbar buttons.
 // Also covers the button's tooltip and the WindowTitle helper showing the first granted root's
-// folder name (falling back to "PromptForge" when no root is granted or
+// folder name (falling back to "Runvil" when no root is granted or
 // the listing fails), re-rendering on the workspace-changed event, and
 // tracking document.title. The default listRoots reads the roots through
 // TreeStateService.roots(): a listing already cached there answers with no
@@ -69,7 +69,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 // --- Fixture: a command center in the title bar's center drag region -------
 
 const center = window.document.querySelector(".ws-window-titlebar__center");
-let roots = [{ name: "promptforge" }];
+let roots = [{ name: "runvil" }];
 const commands = new CommandRegistry();
 const ran = [];
 commands.register("workbench.action.quickOpenWithModes", { run: () => ran.push("modes") });
@@ -108,8 +108,8 @@ check("the pill, its search icon, and its ? chevron are gone", container.querySe
 
 // --- Window title: first granted root, then document.title -----------------
 
-check("the button shows the first granted root's folder name", folder.textContent === "promptforge");
-check("document.title tracks the folder name", window.document.title === "promptforge");
+check("the button shows the first granted root's folder name", folder.textContent === "runvil");
+check("document.title tracks the folder name", window.document.title === "runvil");
 
 // --- Press routing: mousedown opens quick open --------------------------------
 
@@ -161,8 +161,8 @@ check("document.title follows the grant change", window.document.title === "othe
 roots = [];
 window.dispatchEvent(new window.CustomEvent(WORKSPACE_CHANGED_EVENT));
 await flush();
-check("no granted roots falls back to PromptForge", folder.textContent === "PromptForge");
-check("document.title falls back to PromptForge", window.document.title === "PromptForge");
+check("no granted roots falls back to Runvil", folder.textContent === "Runvil");
+check("document.title falls back to Runvil", window.document.title === "Runvil");
 
 // --- A failing roots listing keeps the fallback -----------------------------
 
@@ -176,7 +176,7 @@ const failing = new CommandCenter(secondCenter, {
 });
 await flush();
 const failingFolder = secondCenter.querySelector(".ws-command-center__folder");
-check("a failed listing falls back to PromptForge", failingFolder.textContent === "PromptForge");
+check("a failed listing falls back to Runvil", failingFolder.textContent === "Runvil");
 failing.dispose();
 check("dispose removes the command center", secondCenter.querySelector(".ws-command-center") === null);
 

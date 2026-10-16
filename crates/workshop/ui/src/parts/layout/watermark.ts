@@ -103,8 +103,8 @@ class Watermark implements IWatermarkRenderer {
     this.element.className = "ws-watermark";
     const mark = document.createElement("img");
     mark.className = "ws-watermark__mark";
-    mark.src = "/icons/promptforge-icon.png";
-    mark.srcset = "/icons/promptforge-icon.png 1x, /icons/promptforge-icon@2x.png 2x";
+    mark.src = "/icons/runvil-icon.png";
+    mark.srcset = "/icons/runvil-icon.png 1x, /icons/runvil-icon@2x.png 2x";
     mark.alt = "";
     mark.draggable = false;
     this.rows.className = "ws-watermark__rows";

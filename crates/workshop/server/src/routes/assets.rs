@@ -23,8 +23,8 @@ pub(crate) fn routes() -> Router {
         .route("/pcm-worklet.js", get(ui_pcm_worklet))
         .route("/bundle/{*name}", get(ui_bundle))
         .route("/chunks/{*name}", get(ui_chunk))
-        .route("/icons/promptforge-icon.png", get(ui_program_icon))
-        .route("/icons/promptforge-icon@2x.png", get(ui_program_icon_2x))
+        .route("/icons/runvil-icon.png", get(ui_program_icon))
+        .route("/icons/runvil-icon@2x.png", get(ui_program_icon_2x))
 }
 
 /// Serves the chat UI's `index.html`.
@@ -138,7 +138,7 @@ async fn ui_chunk(Path(name): Path<String>) -> Response {
 /// the `src` of the title bar `<img>`.
 async fn ui_program_icon() -> Response {
     assets::ui_asset(
-        "icons/promptforge-icon.png",
+        "icons/runvil-icon.png",
         "image/png",
         CachePolicy::Revalidate,
     )
@@ -148,7 +148,7 @@ async fn ui_program_icon() -> Response {
 /// entry for high-DPI displays.
 async fn ui_program_icon_2x() -> Response {
     assets::ui_asset(
-        "icons/promptforge-icon@2x.png",
+        "icons/runvil-icon@2x.png",
         "image/png",
         CachePolicy::Revalidate,
     )

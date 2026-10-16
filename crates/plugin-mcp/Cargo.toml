@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 # The Plugin contract: the package label, the Plugin trait, the context a
 # call is lent, and the tool, error, and service vocabulary.
-promptforge-plugin.workspace = true
+runvil-plugin.workspace = true
 # The official MCP client. `client` is the handshake and the peer, the
 # reqwest transport is the Streamable HTTP client, and `reqwest` adds
 # rustls with the OS trust store.
@@ -24,7 +24,7 @@ tokio.workspace = true
 [dev-dependencies]
 axum.workspace = true
 # `testing::TestCall`, which lends the Plugin a context without a Harness.
-promptforge-plugin = { workspace = true, features = ["test-support"] }
+runvil-plugin = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

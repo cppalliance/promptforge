@@ -28,10 +28,10 @@
 //! operator without naming the run or the section.
 //!
 //! The operator's answer is trusted, so the ask tool answers with
-//! [`ToolOutput::trusted`](promptforge_plugin::ToolOutput::trusted) and
+//! [`ToolOutput::trusted`](runvil_plugin::ToolOutput::trusted) and
 //! the text is never guard-wrapped. The ask tool's descriptor survives
 //! stops: a stop leaves the question open. The other occasions
-//! [`Plugin::call`](promptforge_plugin::Plugin::call) lists drop it, the
+//! [`Plugin::call`](runvil_plugin::Plugin::call) lists drop it, the
 //! early end of the task that asked included.
 //!
 //! # A run without an operator
@@ -39,7 +39,7 @@
 //! [`PACKAGE`] names [`INPUT_BROKER`] among its needs, so a run whose Host
 //! supplies no broker cannot use the Plugin, and a prompt that declares it
 //! is refused before the run starts with a line naming the Plugin and
-//! `promptforge/input-broker`.
+//! `runvil/input-broker`.
 //!
 //! # Failed and cancelled waits
 //!
@@ -65,7 +65,7 @@
 //!
 //! ## Invariants
 //!
-//! - May depend on: `promptforge-plugin`, `shared-*` crates, and outside
+//! - May depend on: `runvil-plugin`, `shared-*` crates, and outside
 //!   libraries. `cargo test -p build-xtask` enforces the Plugin family's
 //!   allow-list.
 //! - The crate names no async runtime. The Harness polls the ask call
@@ -77,14 +77,14 @@
 
 mod ask;
 
-use promptforge_plugin::{Package, ServiceId, ServiceKey, ToolError};
+use runvil_plugin::{Package, ServiceId, ServiceKey, ToolError};
 
 /// The Plugin's label, which a Host adds to its package registry.
 ///
-/// Its name is `promptforge/user-input`, so a Host that picks no name
+/// Its name is `runvil/user-input`, so a Host that picks no name
 /// installs it as `user-input`. It has a prelude and needs the run's
 /// [`INPUT_BROKER`].
-pub const PACKAGE: Package = Package::new("promptforge/user-input", ask::construct)
+pub const PACKAGE: Package = Package::new("runvil/user-input", ask::construct)
     .description("Ask the person running the prompt")
     .prelude(PRELUDE)
     .needs(NEEDS);
@@ -96,9 +96,9 @@ pub const ASK: &str = "ask";
 /// The service key for the input broker, the per-run service that carries
 /// a question to the operator.
 ///
-/// The key's id is `promptforge/input-broker`. A Host with an operator
+/// The key's id is `runvil/input-broker`. A Host with an operator
 /// provides its broker among each run's services under this key.
-pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("promptforge/input-broker");
+pub const INPUT_BROKER: ServiceKey<dyn InputBroker> = ServiceKey::new("runvil/input-broker");
 
 /// The package's needs: a run without a broker cannot use the Plugin.
 const NEEDS: &[ServiceId] = &[INPUT_BROKER.id()];

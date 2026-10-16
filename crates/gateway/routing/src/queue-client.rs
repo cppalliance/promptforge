@@ -2,7 +2,7 @@
 
 /// A bounded scheduling identity parsed from the client header.
 ///
-/// Callers name themselves via `X-PromptForge-Client` for fair queueing. The
+/// Callers name themselves via `X-Runvil-Client` for fair queueing. The
 /// value is parsed at the boundary into a bounded id (max length, restricted
 /// charset); anything missing, empty, oversized, or containing other characters
 /// maps to the single documented `default` bucket so an authenticated caller

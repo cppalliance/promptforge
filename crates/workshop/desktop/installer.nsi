@@ -19,7 +19,7 @@ ManifestDPIAwareness PerMonitorV2
 !addplugindir "{{signed_plugins_path}}"
 {{/if}}
 
-; PromptForge dark theme - defines must precede MUI2.nsh
+; Runvil dark theme - defines must precede MUI2.nsh
 !define MUI_BGCOLOR "0F0F0F"
 !define MUI_TEXTCOLOR "E0E0E0"
 !define MUI_INSTFILESPAGE_COLORS "E0E0E0 0F0F0F"
@@ -82,7 +82,7 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
-; Set when a running promptforge-gateway.exe was stopped in the Gateway
+; Set when a running runvil-gateway.exe was stopped in the Gateway
 ; section, so the Finalize section can relaunch it after the update.
 Var GatewayWasRunning
 
@@ -475,8 +475,8 @@ Function FinishPageShow
  ; handoff to the gateway's Settings page; hidden when neither landed.
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  ; Default label and target: run the desktop app.
- ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
- SendMessage $mui.FinishPage.Run ${WM_SETTEXT} 0 "STR:Open PromptForge Gateway settings in your browser"
+ ${ElseIf} ${FileExists} "$INSTDIR\runvil-gateway.exe"
+ SendMessage $mui.FinishPage.Run ${WM_SETTEXT} 0 "STR:Open Runvil Gateway settings in your browser"
  ${Else}
  ShowWindow $mui.FinishPage.Run ${SW_HIDE}
  ${EndIf}
@@ -489,8 +489,8 @@ Function RunMainBinary
  ; default browser.
  ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
- ${ElseIf} ${FileExists} "$INSTDIR\promptforge-gateway.exe"
- nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "--browser"
+ ${ElseIf} ${FileExists} "$INSTDIR\runvil-gateway.exe"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\runvil-gateway.exe" "--browser"
  ${EndIf}
 FunctionEnd
 
@@ -725,7 +725,7 @@ Section "-Prepare"
  !endif
 SectionEnd
 
-Section "PromptForge Workshop" SecWorkshop
+Section "Runvil Workshop" SecWorkshop
  SetOutPath $INSTDIR
 
  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
@@ -779,31 +779,31 @@ Section "PromptForge Workshop" SecWorkshop
  ${EndIf}
 SectionEnd
 
-Section "PromptForge Gateway" SecGateway
+Section "Runvil Gateway" SecGateway
  SetOutPath $INSTDIR
 
  ; The updater's passive install only auto-kills the main binary (the
  ; CheckIfAppIsRunning in the Workshop section), so a running gateway
  ; would file-lock its own overwrite and fail the update. Detect it by
  ; process name through nsis_tauri_utils - parsing
- ; %USERPROFILE%\.promptforge\run\gateway.json for the pid in NSIS buys
+ ; %USERPROFILE%\.runvil\run\gateway.json for the pid in NSIS buys
  ; nothing when the image name is unique - stop it through the same
  ; CheckIfAppIsRunning, and relaunch it in the Finalize section. Living inside the Gateway section, the stop runs
  ; only when the component is selected: a declined section leaves the
  ; payload untouched, and a daemon the install does not overwrite is
  ; not the installer's to kill.
  !if "${INSTALLMODE}" == "currentUser"
- nsis_tauri_utils::FindProcessCurrentUser "promptforge-gateway.exe"
+ nsis_tauri_utils::FindProcessCurrentUser "runvil-gateway.exe"
  !else
- nsis_tauri_utils::FindProcess "promptforge-gateway.exe"
+ nsis_tauri_utils::FindProcess "runvil-gateway.exe"
  !endif
  Pop $R0
  ${If} $R0 = 0
  StrCpy $GatewayWasRunning 1
- !insertmacro CheckIfAppIsRunning "$INSTDIR\promptforge-gateway.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\runvil-gateway.exe" "${PRODUCTNAME}"
  ${EndIf}
 
- ; Copy external binaries (promptforge-gateway.exe via bundle.externalBin,
+ ; Copy external binaries (runvil-gateway.exe via bundle.externalBin,
  ; the only entry today - split per-component if that changes)
  {{#each binaries}}
  File /a "/oname={{this}}" "{{no-escape @key}}"
@@ -837,7 +837,7 @@ Section "-Finalize"
  ${If} $0 = ${SF_SELECTED}
  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
  ${Else}
- WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\promptforge-gateway.exe$\""
+ WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\runvil-gateway.exe$\""
  ${EndIf}
  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
  WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
@@ -878,7 +878,7 @@ Section "-Finalize"
 
  ; Update mode installs over the top without uninstalling; delete the
  ; payloads of declined components or they would linger.
- !insertmacro DeleteComponentPayloadIfDeclined ${SecGateway} $INSTDIR\promptforge-gateway.exe
+ !insertmacro DeleteComponentPayloadIfDeclined ${SecGateway} $INSTDIR\runvil-gateway.exe
  !insertmacro DeleteComponentPayloadIfDeclined ${SecWorkshop} $INSTDIR\${MAINBINARYNAME}.exe
 
  ; Relaunch the gateway when the install stopped one and the component
@@ -888,7 +888,7 @@ Section "-Finalize"
  SectionGetFlags ${SecGateway} $0
  IntOp $0 $0 & ${SF_SELECTED}
  ${If} $0 = ${SF_SELECTED}
- nsis_tauri_utils::RunAsUser "$INSTDIR\promptforge-gateway.exe" "--login"
+ nsis_tauri_utils::RunAsUser "$INSTDIR\runvil-gateway.exe" "--login"
  ${EndIf}
  ${EndIf}
 
@@ -940,9 +940,9 @@ Section "un.Gateway"
  !insertmacro NSIS_HOOK_PREUNINSTALL
  !endif
 
- !insertmacro CheckIfAppIsRunning "$INSTDIR\promptforge-gateway.exe" "${PRODUCTNAME}"
+ !insertmacro CheckIfAppIsRunning "$INSTDIR\runvil-gateway.exe" "${PRODUCTNAME}"
 
- ; Delete external binaries (promptforge-gateway.exe)
+ ; Delete external binaries (runvil-gateway.exe)
  {{#each binaries}}
  Delete "$INSTDIR\\{{this}}"
  {{/each}}
@@ -1029,7 +1029,7 @@ Section Uninstall
  ${If} $UpdateMode <> 1
  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
  ; The gateway's Launch at Login entry (the tray writes this value name).
- DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "PromptForgeGateway"
+ DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RunvilGateway"
  ${EndIf}
 
  ; Remove the persisted component selection and the STT first-run gate
@@ -1056,8 +1056,8 @@ Section Uninstall
  RmDir /r "$APPDATA\${BUNDLEID}"
  RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
  ; The gateway and the Workshop keep their configuration, logs, sessions,
- ; and downloaded models in the state directory, %USERPROFILE%\.promptforge.
- RmDir /r "$PROFILE\.promptforge"
+ ; and downloaded models in the state directory, %USERPROFILE%\.runvil.
+ RmDir /r "$PROFILE\.runvil"
  ${EndIf}
 
  !ifmacrodef NSIS_HOOK_POSTUNINSTALL

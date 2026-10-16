@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use harness::{BoxFuture, InferenceBroker};
 use harness_gateway_client::{CompletionError, CompletionErrorKind, GatewayBroker, StreamDelta};
-use promptforge::effect::Round;
-use promptforge::event::ReplyOrigin;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::event::ReplyOrigin;
+use runvil::model::{
     Completion, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 use workshop_agents::{Conversation, DeltaKind};

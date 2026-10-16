@@ -8,10 +8,10 @@ use windows_sys::Win32::System::Registry::{
 };
 
 /// The autostart entry the tray's Launch at Login check item manages:
-/// `HKCU\...\CurrentVersion\Run\PromptForgeGateway`.
+/// `HKCU\...\CurrentVersion\Run\RunvilGateway`.
 const RUN_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 /// The Run-key value name holding the gateway's login command line.
-const RUN_VALUE: &str = "PromptForgeGateway";
+const RUN_VALUE: &str = "RunvilGateway";
 
 /// Opens one of this module's subkeys, returning the live handle. The
 /// caller closes it with [`close_key`] on every path.
@@ -50,11 +50,11 @@ fn status_error(status: u32) -> std::io::Error {
     std::io::Error::from_raw_os_error(status.cast_signed())
 }
 
-/// Reads `HKCU\Software\PromptForge\PromptForge\InstallSTT` as a DWORD,
+/// Reads `HKCU\Software\Runvil\Runvil\InstallSTT` as a DWORD,
 /// or `None` when the key or value is absent, has another type, or
 /// cannot be read.
 pub(super) fn install_stt_dword() -> Option<u32> {
-    let key = open_key("Software\\PromptForge\\PromptForge", KEY_READ).ok()?;
+    let key = open_key("Software\\Runvil\\Runvil", KEY_READ).ok()?;
     let value: Vec<u16> = "InstallSTT".encode_utf16().chain(Some(0)).collect();
     let mut data = 0u32;
     let mut kind = 0u32;

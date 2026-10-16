@@ -227,7 +227,7 @@ pub struct DominionConfig {
 pub struct LocalConfig {
     /// Root directory for GGUF files and the pinned `llama-server` install.
     ///
-    /// Defaults to `~/.promptforge` (Windows: `%USERPROFILE%\.promptforge`).
+    /// Defaults to `~/.runvil` (Windows: `%USERPROFILE%\.runvil`).
     /// Models land in `<cache_dir>/models`; llama.cpp installs in
     /// `<cache_dir>/llama.cpp`.
     #[serde(default)]
@@ -237,7 +237,7 @@ pub struct LocalConfig {
     #[serde(default, skip_serializing_if = "LlamaBackend::is_auto")]
     llama_backend: LlamaBackend,
     /// Explicit `llama-server` executable path. Wins over the
-    /// `PROMPTFORGE_LLAMA_SERVER` environment variable and the managed
+    /// `RUNVIL_LLAMA_SERVER` environment variable and the managed
     /// download.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     llama_server_path: Option<String>,

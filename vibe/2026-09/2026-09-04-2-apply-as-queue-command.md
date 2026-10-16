@@ -1,6 +1,6 @@
 ---
 name: Apply command and keyless loopback
-overview: Two gateway changes in one run. Part A makes `POST /admin/config-apply` an `ApplyConfig` command on the command queue - visible, cancellable, serialized with profile loads, with shadow promotion deferred to the commit so a failed or cancelled apply stays retryable - and fixes the apply overlay that never shows stage progress. Part B lets loopback callers reach every route without a bearer key, guarded by fetch metadata against browser CSRF, on by default with a `[server] trust_loopback = false` opt-out, and stops the SDK requiring `PROMPTFORGE_GATEWAY_API_KEY` for loopback gateways.
+overview: Two gateway changes in one run. Part A makes `POST /admin/config-apply` an `ApplyConfig` command on the command queue - visible, cancellable, serialized with profile loads, with shadow promotion deferred to the commit so a failed or cancelled apply stays retryable - and fixes the apply overlay that never shows stage progress. Part B lets loopback callers reach every route without a bearer key, guarded by fetch metadata against browser CSRF, on by default with a `[server] trust_loopback = false` opt-out, and stops the SDK requiring `RUNVIL_GATEWAY_API_KEY` for loopback gateways.
 todos:
   - id: apply-command
     content: Step 1 (A) - Command::ApplyConfig + DebounceKey::Apply + enqueue rules + cancel_apply; load_profile drops the apply lock; ApplySnapshot/ShadowCapture captured by the route; no-reload fast path; command body; deferred commit at the switch's persistence step; CommandCancelled 503; revert cancels an active Apply; queue + config_apply tests
@@ -20,7 +20,7 @@ isProject: false
 
 # Apply Command and Keyless Loopback
 
-Self-contained: everything an executor needs is in this file or the files it links. Repository: `c:\Users\Vinnie\cursor\promptforge`. Rulebooks: [vibe-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\vibe-rulebook.md), [rust-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md). Rules manifest (AGENTS.md index): `cabinet/_scratch/gateway-sidecar/rules-manifest.md` - reuse it, no fresh survey. Binding AGENTS.md: root, `crates/gateway/AGENTS.md`, `crates/gateway-config/AGENTS.md` (parse/validate only - no promotion logic moves there), `crates/shared-loopback/AGENTS.md` (the sole loopback wall - reuse, never reimplement the peer check), `crates/promptforge-model-client/AGENTS.md`; `crates/gateway-config-ui/ui` has none.
+Self-contained: everything an executor needs is in this file or the files it links. Repository: `c:\Users\Vinnie\cursor\runvil`. Rulebooks: [vibe-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\vibe-rulebook.md), [rust-rulebook.md](c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md). Rules manifest (AGENTS.md index): `cabinet/_scratch/gateway-sidecar/rules-manifest.md` - reuse it, no fresh survey. Binding AGENTS.md: root, `crates/gateway/AGENTS.md`, `crates/gateway-config/AGENTS.md` (parse/validate only - no promotion logic moves there), `crates/shared-loopback/AGENTS.md` (the sole loopback wall - reuse, never reimplement the peer check), `crates/runvil-model-client/AGENTS.md`; `crates/gateway-config-ui/ui` has none.
 
 Two parts, one run, four steps, four commits. Part A (steps 1-2) fixes the hung Apply and makes it a queue command. Part B (steps 3-4) makes loopback callers keyless. Both edit `lib.rs`, so steps run strictly in order; A first because it fixes the observed bug.
 
@@ -55,15 +55,15 @@ Main context stays clean (rule 6): no source, diffs, logs, or review bodies ente
 
 ## Background: the command queue that exists today
 
-The gateway boots instantly and runs everything slow as a `Command` on one worker draining a bounded FIFO channel ([commands.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\src\commands.rs)). Commands: `LoadProfile { name, persist, token }` (the boot command and every profile switch), `ProvisionModel`, `UnloadModel`. Each carries a `CancellationToken` honored at download chunk boundaries and phase boundaries. Debounce: a `LoadProfile` for the same profile attaches to the pending/active one; a different profile replaces the pending one and cancels the active one (latest wins). Queue state (`active_command`, `pending_commands`, `cancel_active`, `cancel_pending`) is read by the tray tick and by `GET /admin/status` (`queue` field), and `POST /admin/queue/cancel` fires the active token. The config UI's bottom status bar swaps its endpoint LED strip for a progress bar plus cancel button while a command is active.
+The gateway boots instantly and runs everything slow as a `Command` on one worker draining a bounded FIFO channel ([commands.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\src\commands.rs)). Commands: `LoadProfile { name, persist, token }` (the boot command and every profile switch), `ProvisionModel`, `UnloadModel`. Each carries a `CancellationToken` honored at download chunk boundaries and phase boundaries. Debounce: a `LoadProfile` for the same profile attaches to the pending/active one; a different profile replaces the pending one and cancels the active one (latest wins). Queue state (`active_command`, `pending_commands`, `cancel_active`, `cancel_pending`) is read by the tray tick and by `GET /admin/status` (`queue` field), and `POST /admin/queue/cancel` fires the active token. The config UI's bottom status bar swaps its endpoint LED strip for a progress bar plus cancel button while a command is active.
 
-The switch body is `run_switch_with_config` in [lib.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\src\lib.rs) (~L1240): takes `state.switch` for the whole switch, registers `loading-profile` / `stopping-models` / `starting-models` leaves on its `ProgressTree`, downloads and spawns via `replace_runtimes`, then commits (`StatePersistence::None | Write | Promote(state_path)`) and swaps the routing table.
+The switch body is `run_switch_with_config` in [lib.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\src\lib.rs) (~L1240): takes `state.switch` for the whole switch, registers `loading-profile` / `stopping-models` / `starting-models` leaves on its `ProgressTree`, downloads and spawns via `replace_runtimes`, then commits (`StatePersistence::None | Write | Promote(state_path)`) and swaps the routing table.
 
 ## The bugs
 
-**1. Apply bypasses the queue and deadlocks on the apply lock.** `admin_config_apply` in [config_apply.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\src\config_apply.rs) takes `state.apply.lock()` (L60), promotes shadows eagerly (`prepare_apply`), then calls `run_switch_with_config` inline (L199) - uncancellable, invisible to the queue, the status bar, and the tray. Meanwhile the `load_profile` command body ALSO holds `state.apply.lock()` for its entire switch (commands.rs L649). So while the boot `LoadProfile` downloads models (minutes to an hour), every Apply, Revert, and shadow-writing PUT save blocks on the apply lock. The user sees the "Applying configuration" overlay hang.
+**1. Apply bypasses the queue and deadlocks on the apply lock.** `admin_config_apply` in [config_apply.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\src\config_apply.rs) takes `state.apply.lock()` (L60), promotes shadows eagerly (`prepare_apply`), then calls `run_switch_with_config` inline (L199) - uncancellable, invisible to the queue, the status bar, and the tray. Meanwhile the `load_profile` command body ALSO holds `state.apply.lock()` for its entire switch (commands.rs L649). So while the boot `LoadProfile` downloads models (minutes to an hour), every Apply, Revert, and shadow-writing PUT save blocks on the apply lock. The user sees the "Applying configuration" overlay hang.
 
-**2. The apply overlay never shows stage progress.** [main.ts](c:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui\src\main.ts) ~L403 subscribes to `GET /admin/progress` and reads `event["stage"]`. But that stream emits raw `ProgressEvent` JSON - `{ operation, path, label, state: { Begun: { weight } } | { Updated: {...} } | { Finished: {...} } }` (see `event_line` in lib.rs ~L1163 and `shared-progress/src/event.rs`) - there is no `stage` key. Only the `POST /admin/switch-profile` SSE response translates events into `{"stage": ...}`. So `beginStage` is never called: the screenshot's three stages sit unchecked with no spinner regardless of what the gateway is doing.
+**2. The apply overlay never shows stage progress.** [main.ts](c:\Users\Vinnie\cursor\runvil\crates\gateway-config-ui\ui\src\main.ts) ~L403 subscribes to `GET /admin/progress` and reads `event["stage"]`. But that stream emits raw `ProgressEvent` JSON - `{ operation, path, label, state: { Begun: { weight } } | { Updated: {...} } | { Finished: {...} } }` (see `event_line` in lib.rs ~L1163 and `shared-progress/src/event.rs`) - there is no `stage` key. Only the `POST /admin/switch-profile` SSE response translates events into `{"stage": ...}`. So `beginStage` is never called: the screenshot's three stages sit unchecked with no spinner regardless of what the gateway is doing.
 
 **3. Retry after a failed apply is broken today (pre-existing, becomes acute with cancellation).** `prepare_apply` promotes the config shadow BEFORE the switch. If the switch fails (or, once cancellable, is cancelled), the real config already holds the new content while the live routing does not; the shadow is gone, so the next Apply finds nothing to reload and no-ops. `LoadProfile` cannot recover it either: with `candidate: None` it reads `state.live.config`, never the disk. Deferring promotion to the commit fixes this class.
 
@@ -120,7 +120,7 @@ On failure or cancellation before the commit: nothing was promoted, the shadows 
 
 ### UI: overlay stage mapping and a Cancel button
 
-- Move the progress-event-to-stage mapping into [apply-overlay.ts](c:\Users\Vinnie\cursor\promptforge\crates\gateway-config-ui\ui\src\components\apply-overlay.ts) as `observe(event: unknown)`: a hub event whose `state` has a `Begun` key and whose `label` is a known stage (`loading-profile`, `stopping-models`, `starting-models`) calls `beginStage(label)`. Verify serde's externally-tagged shape for `EventState` (`{"Begun":{"weight":1.0}}`) against a real `/admin/progress` frame before pinning it in a test. `main.ts`'s subscription then just forwards events to `overlay.observe`. The `applying` guard stays: during an Apply the only switch-stage emitter is the Apply itself, since Apply cancels active loads and later loads queue behind it.
+- Move the progress-event-to-stage mapping into [apply-overlay.ts](c:\Users\Vinnie\cursor\runvil\crates\gateway-config-ui\ui\src\components\apply-overlay.ts) as `observe(event: unknown)`: a hub event whose `state` has a `Begun` key and whose `label` is a known stage (`loading-profile`, `stopping-models`, `starting-models`) calls `beginStage(label)`. Verify serde's externally-tagged shape for `EventState` (`{"Begun":{"weight":1.0}}`) against a real `/admin/progress` frame before pinning it in a test. `main.ts`'s subscription then just forwards events to `overlay.observe`. The `applying` guard stays: during an Apply the only switch-stage emitter is the Apply itself, since Apply cancels active loads and later loads queue behind it.
 - Add a **Cancel** button to the overlay card (it is a non-dismissable modal that covers the status bar, so the bar's cancel button is unreachable while it is up). The button calls the existing `api.cancelActiveCommand()`; the route then rejects `store.apply()` with the cancelled error, `overlay.fail(message)` runs its failure hold, and the toast reads "Apply cancelled - your pending changes are still staged". The button disables once clicked.
 
 ### Test updates the design forces
@@ -152,10 +152,10 @@ Every route accepts keyless connections from a loopback peer, admin surface incl
 
 ## Today
 
-- `check_auth(&AppState, &HeaderMap)` in [lib.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\src\lib.rs) ~L1777 accepts the bearer key or the handoff session cookie (the cookie path additionally requires `Sec-Fetch-Site: same-origin|none` via `handoff::fetch_metadata_allows_cookie`). It never sees the peer address. 33 call sites across 14 files, all `check_auth(&state, &headers)` with `headers: HeaderMap` extracted per handler. Line numbers will have shifted after Part A; grep, do not trust the numbers.
+- `check_auth(&AppState, &HeaderMap)` in [lib.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\src\lib.rs) ~L1777 accepts the bearer key or the handoff session cookie (the cookie path additionally requires `Sec-Fetch-Site: same-origin|none` via `handoff::fetch_metadata_allows_cookie`). It never sees the peer address. 33 call sites across 14 files, all `check_auth(&state, &headers)` with `headers: HeaderMap` extracted per handler. Line numbers will have shifted after Part A; grep, do not trust the numbers.
 - The peer address exists on every request as the `ConnectInfo<SocketAddr>` extension (`serve` uses `into_make_service_with_connect_info`, runner.rs ~L390); today only `shared_loopback::require_loopback` reads it, and it fails closed when the extension is absent.
 - `gateway-config`'s `ServerConfig` (config.rs ~L440) is `deny_unknown_fields` with `bind` and `api_key`.
-- `promptforge-model-client`'s `from_env` (transport.rs ~L429) refuses to build without a non-empty `PROMPTFORGE_GATEWAY_API_KEY`. The workshop-server's `GatewayClient::new(base_url, "")` already sends no `Authorization` header on an empty key.
+- `runvil-model-client`'s `from_env` (transport.rs ~L429) refuses to build without a non-empty `RUNVIL_GATEWAY_API_KEY`. The workshop-server's `GatewayClient::new(base_url, "")` already sends no `Authorization` header on an empty key.
 - `shared-sidecar`'s liveness probe validates the connection file's key with a bearer `GET /v1/models` and treats a 401 as "stale file, delete it".
 
 ## The rule
@@ -192,14 +192,14 @@ Add `handoff::fetch_metadata_allows_ambient(headers)` (absent-or-`same-origin`-o
 - The workshop attaches through the connection file's key (rule 1); nothing changes.
 - `shared-sidecar`'s probe keeps its meaning because of the wrong-bearer edge above.
 
-### promptforge-model-client
+### runvil-model-client
 
-`from_env` makes `PROMPTFORGE_GATEWAY_API_KEY` optional **when `PROMPTFORGE_GATEWAY_URL`'s host is loopback** (`127.0.0.1`, `::1`, `localhost`); a non-loopback URL with no key stays `MissingEnv`. `GatewayClient` carries `Option<SecretString>` (or the crate's equivalent) and sends no `Authorization` header when it is `None`. Update `from_env_missing_gateway_key` and add its loopback twin.
+`from_env` makes `RUNVIL_GATEWAY_API_KEY` optional **when `RUNVIL_GATEWAY_URL`'s host is loopback** (`127.0.0.1`, `::1`, `localhost`); a non-loopback URL with no key stays `MissingEnv`. `GatewayClient` carries `Option<SecretString>` (or the crate's equivalent) and sends no `Authorization` header when it is `None`. Update `from_env_missing_gateway_key` and add its loopback twin.
 
 ### Docs and first run
 
 - The first-run generated config (`boot.rs` default template) gains `trust_loopback = true` under `[server]` with a two-line comment naming the shared-machine caveat and the opt-out.
-- `gateway.local.example.toml`, `crates/gateway/README.md`, the gateway guide's config-file and install chapters, and `crates/workshop-server/README.md` (its `api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"` example becomes "optional for a loopback gateway") follow. Regenerate the guide exports (`cargo run -p build-user-guide`).
+- `gateway.local.example.toml`, `crates/gateway/README.md`, the gateway guide's config-file and install chapters, and `crates/workshop-server/README.md` (its `api_key = "${RUNVIL_GATEWAY_API_KEY}"` example becomes "optional for a loopback gateway") follow. Regenerate the guide exports (`cargo run -p build-user-guide`).
 - If the Settings view renders `[server]` fields (check `settings-view.ts`; `server_key_change_waits_for_restart` proves `[server].api_key` is editable via PUT), add a "Trust loopback connections" toggle beside them with the caveat as help text; otherwise skip the UI.
 
 ## Part B tests
@@ -214,7 +214,7 @@ Add `handoff::fetch_metadata_allows_ambient(headers)` (absent-or-`same-origin`-o
 
 3. **gateway-keyless-loopback** - config field + accessor; `Caller` extractor and the sweep; `check_auth` rule 3 with `fetch_metadata_allows_ambient`; `LiveState.trust_loopback`; first-run template; tests above. Package checks: `cargo test -p gateway -p gateway-config -p shared-sidecar`, `cargo clippy -p gateway -p gateway-config --all-targets --all-features -- -D warnings`, `cargo fmt --all --check`, `cargo check -p gateway --no-default-features`. No scheduled Verify.
    Review focus: the Part B review-focus block below.
-4. **sdk-optional-key-and-docs** - model-client `from_env` loosening; README/guide/example/workshop-server README; optional Settings toggle; `cargo run -p build-user-guide`. Package checks: `cargo test -p promptforge-model-client -p gateway`, clippy on both, fmt; `npm run typecheck && npm test` in `crates/gateway-config-ui/ui` if the toggle landed. **Scheduled Verify (final):** the Final gate below, full suite.
+4. **sdk-optional-key-and-docs** - model-client `from_env` loosening; README/guide/example/workshop-server README; optional Settings toggle; `cargo run -p build-user-guide`. Package checks: `cargo test -p runvil-model-client -p gateway`, clippy on both, fmt; `npm run typecheck && npm test` in `crates/gateway-config-ui/ui` if the toggle landed. **Scheduled Verify (final):** the Final gate below, full suite.
    Review focus: a LAN URL with no key is still `MissingEnv`; no `Authorization` header is sent when the key is `None`; docs state the shared-machine caveat and the opt-out in the same breath.
 
 ## Part B constraints
@@ -251,7 +251,7 @@ Source: the gateway_sidecar creator chat (Sep 3-4, 2026). Verbatim user quotes a
 
 Part A came from a live failure. The user reported (verbatim): "it got stuck when I applied a model download" - a screenshot showed the apply overlay hung with no stage progress. After the diagnosis, the user gave the decisive directive (verbatim): "Apply must be a new command. Plan it for a fresh context." That sentence is why the plan is self-contained and why Apply became a queue command rather than a patched route.
 
-Part B came from a separate irritation minutes later (verbatim): "PROMPTFORGE_GATEWAY_API_KEY should not be required when the incoming connection is on the loopback adaptor"
+Part B came from a separate irritation minutes later (verbatim): "RUNVIL_GATEWAY_API_KEY should not be required when the incoming connection is on the loopback adaptor"
 
 ## One plan, not two
 

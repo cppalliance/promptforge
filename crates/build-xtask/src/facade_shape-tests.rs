@@ -14,17 +14,13 @@ fn workspace_root() -> PathBuf {
 }
 
 /// The dependency crates the source fixtures may re-export from.
-const FIXTURE_CRATES: [&str; 3] = [
-    "promptforge_engine",
-    "promptforge_model_client",
-    "promptforge_types",
-];
+const FIXTURE_CRATES: [&str; 3] = ["runvil_engine", "runvil_model_client", "runvil_types"];
 
 /// A facade manifest declaring exactly [`FIXTURE_CRATES`].
-const FIXTURE_MANIFEST: &str = "[package]\nname = \"promptforge\"\n\n[dependencies]\n\
-    promptforge-engine.workspace = true\n\
-    promptforge-model-client.workspace = true\n\
-    promptforge-types.workspace = true\n";
+const FIXTURE_MANIFEST: &str = "[package]\nname = \"runvil\"\n\n[dependencies]\n\
+    runvil-engine.workspace = true\n\
+    runvil-model-client.workspace = true\n\
+    runvil-types.workspace = true\n";
 
 fn check(text: &str) -> Vec<String> {
     let crates = FIXTURE_CRATES
@@ -45,7 +41,7 @@ fn assert_one(text: &str, line: usize, rule: &str) {
 }
 
 fn facade_dir(root: &Path) -> PathBuf {
-    root.join("crates").join("promptforge")
+    root.join("crates").join("runvil")
 }
 
 /// Writes `manifest`, when given, as `dir/Cargo.toml`, and each
@@ -64,7 +60,7 @@ fn write_facade(dir: &Path, manifest: Option<&str>, files: &[(&str, &str)]) {
     }
 }
 
-/// A fake workspace whose `crates/promptforge/` facade holds `manifest`,
+/// A fake workspace whose `crates/runvil/` facade holds `manifest`,
 /// when given, and each `(path, text)` under its `src/`.
 fn facade_root(manifest: Option<&str>, files: &[(&str, &str)]) -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
@@ -86,7 +82,7 @@ fn the_real_facades_pass_the_shape_check() {
 fn the_harness_facade_is_held_to_the_same_shape() {
     let root = facade_root(
         Some(FIXTURE_MANIFEST),
-        &[("lib.rs", "pub use promptforge_engine::Run;\n")],
+        &[("lib.rs", "pub use runvil_engine::Run;\n")],
     );
     let harness = root.path().join("crates").join("harness");
     write_facade(
@@ -117,9 +113,9 @@ fn the_harness_facade_is_held_to_the_same_shape() {
 fn every_allowed_form_passes() {
     let text = r#"#![doc = include_str!("lib.md")]
 
-pub use promptforge_engine::Run;
-pub use promptforge_model_client::model::CompletionError as ModelFailure;
-pub use ::promptforge_engine::Step;
+pub use runvil_engine::Run;
+pub use runvil_model_client::model::CompletionError as ModelFailure;
+pub use ::runvil_engine::Step;
 
 /// The effects a run issues.
 pub mod effect {
@@ -127,11 +123,11 @@ pub mod effect {
 
     /// A re-export may carry its own docs.
     #[doc(inline)]
-    pub use promptforge_engine::Effect;
+    pub use runvil_engine::Effect;
 
     /// A grouping module may nest.
     pub mod record {
-        pub use promptforge_engine::EffectRecord;
+        pub use runvil_engine::EffectRecord;
     }
 }
 
@@ -144,12 +140,11 @@ pub mod event;
 
 #[test]
 fn a_violation_names_the_file_line_rule_required_and_found() {
-    let violations =
-        check("/// Effects.\npub mod effect {\n    pub use promptforge_engine::*;\n}\n");
+    let violations = check("/// Effects.\npub mod effect {\n    pub use runvil_engine::*;\n}\n");
     assert_eq!(
         violations,
         [format!(
-            "lib.rs:3: glob re-export: required {REEXPORT}, found `pub use promptforge_engine::*;`"
+            "lib.rs:3: glob re-export: required {REEXPORT}, found `pub use runvil_engine::*;`"
         )]
     );
 }
@@ -157,16 +152,13 @@ fn a_violation_names_the_file_line_rule_required_and_found() {
 #[test]
 fn glob_grouped_crate_and_facade_path_re_exports_are_rejected() {
     for (text, rule) in [
-        ("pub use promptforge_engine::*;", "glob re-export"),
-        ("pub use promptforge_engine::input::*;", "glob re-export"),
-        (
-            "pub use promptforge_engine::{Run, Step};",
-            "grouped use list",
-        ),
-        ("pub use promptforge_engine::{Run};", "grouped use list"),
-        ("pub use promptforge_engine;", "crate re-export"),
-        ("pub use promptforge_engine as engine;", "crate re-export"),
-        ("pub use ::promptforge_engine;", "crate re-export"),
+        ("pub use runvil_engine::*;", "glob re-export"),
+        ("pub use runvil_engine::input::*;", "glob re-export"),
+        ("pub use runvil_engine::{Run, Step};", "grouped use list"),
+        ("pub use runvil_engine::{Run};", "grouped use list"),
+        ("pub use runvil_engine;", "crate re-export"),
+        ("pub use runvil_engine as engine;", "crate re-export"),
+        ("pub use ::runvil_engine;", "crate re-export"),
         (
             "pub use crate::effect::Effect;",
             "re-export of a facade path",
@@ -176,8 +168,8 @@ fn glob_grouped_crate_and_facade_path_re_exports_are_rejected() {
             "re-export of a facade path",
         ),
         ("pub use super::Run;", "re-export of a facade path"),
-        ("use promptforge_engine::Run;", "non-public use"),
-        ("pub(crate) use promptforge_engine::Run;", "non-public use"),
+        ("use runvil_engine::Run;", "non-public use"),
+        ("pub(crate) use runvil_engine::Run;", "non-public use"),
     ] {
         assert_one(text, 1, rule);
     }
@@ -194,7 +186,7 @@ fn a_re_export_rooted_outside_the_facade_dependencies_is_rejected() {
         ),
         ("pub use std::fmt::Debug;", 1),
         ("pub use ::serde::Serialize;", 1),
-        ("pub use promptforge_lua::VfsOp;", 1),
+        ("pub use runvil_lua::VfsOp;", 1),
     ] {
         assert_one(text, line, RULE);
     }
@@ -202,19 +194,19 @@ fn a_re_export_rooted_outside_the_facade_dependencies_is_rejected() {
 
 #[test]
 fn the_dependency_crates_are_the_manifest_dependency_keys() {
-    let manifest = "[package]\nname = \"promptforge\"\n\n\
+    let manifest = "[package]\nname = \"runvil\"\n\n\
         [dependencies]\n\
-        promptforge-engine.workspace = true\n\
-        types = { package = \"promptforge-types\", workspace = true }\n\n\
+        runvil-engine.workspace = true\n\
+        types = { package = \"runvil-types\", workspace = true }\n\n\
         [target.'cfg(windows)'.dependencies]\n\
-        promptforge-vfs.workspace = true\n\n\
+        runvil-vfs.workspace = true\n\n\
         [dev-dependencies]\n\
         serde_json.workspace = true\n";
-    let lib = "pub use promptforge_engine::Run;\n\
+    let lib = "pub use runvil_engine::Run;\n\
         pub use types::event::Event;\n\
-        pub use promptforge_vfs::Vfs;\n\
+        pub use runvil_vfs::Vfs;\n\
         pub use serde_json::Value;\n\
-        pub use promptforge_types::ids::RunId;\n";
+        pub use runvil_types::ids::RunId;\n";
     let root = facade_root(Some(manifest), &[("lib.rs", lib)]);
     let violations = facade_violations(&facade_dir(root.path()));
     assert_eq!(violations.len(), 2, "{violations:?}");
@@ -241,7 +233,7 @@ fn every_item_definition_is_rejected_with_its_kind() {
         ("pub type Result = ();", "type alias"),
         ("macro_rules! forward { () => {} }", "macro_rules!"),
         ("pub union Bits { a: u32 }", "union"),
-        ("extern crate promptforge_engine;", "extern crate"),
+        ("extern crate runvil_engine;", "extern crate"),
         ("extern \"C\" {}", "extern block"),
         ("include!(\"items.rs\");", "macro invocation"),
     ] {
@@ -262,21 +254,18 @@ fn an_item_definition_inside_a_grouping_module_is_rejected() {
 fn attributes_other_than_doc_are_rejected() {
     for (text, line) in [
         ("#![forbid(unsafe_code)]\n", 1),
+        ("#[allow(unused_imports)]\npub use runvil_engine::Run;", 1),
+        ("#[cfg(test)]\npub use runvil_engine::Run;", 1),
         (
-            "#[allow(unused_imports)]\npub use promptforge_engine::Run;",
-            1,
-        ),
-        ("#[cfg(test)]\npub use promptforge_engine::Run;", 1),
-        (
-            "#[cfg(feature = \"other\")]\npub use promptforge_engine::Run;",
+            "#[cfg(feature = \"other\")]\npub use runvil_engine::Run;",
             1,
         ),
         (
-            "#[cfg(feature = \"test-support\")]\npub use promptforge_engine::Run;",
+            "#[cfg(feature = \"test-support\")]\npub use runvil_engine::Run;",
             1,
         ),
         (
-            "#[cfg(not(feature = \"test-support\"))]\npub use promptforge_engine::Run;",
+            "#[cfg(not(feature = \"test-support\"))]\npub use runvil_engine::Run;",
             1,
         ),
         ("/// Effects.\n#[path = \"effects.rs\"]\npub mod effect;", 2),
@@ -309,7 +298,7 @@ fn a_module_must_be_public_and_carry_a_doc_comment() {
 #[test]
 fn unparseable_source_is_reported_at_its_line() {
     assert_one(
-        "pub use promptforge_engine::Run;\npub use = Step;\n",
+        "pub use runvil_engine::Run;\npub use = Step;\n",
         2,
         "unparseable source",
     );
@@ -321,7 +310,7 @@ fn every_source_file_under_the_facade_src_is_checked() {
         Some(FIXTURE_MANIFEST),
         &[
             ("lib.rs", "/// Events.\npub mod event;\n"),
-            ("event.rs", "pub use promptforge_types::event::Event;\n"),
+            ("event.rs", "pub use runvil_types::event::Event;\n"),
             ("nested/stray.rs", "pub struct Stray;\n"),
         ],
     );
@@ -338,7 +327,7 @@ fn a_missing_facade_crate_root_is_reported_not_skipped() {
     let root = tempfile::TempDir::new().expect("tempdir");
     let violations = facade_shape_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
-    for (violation, facade) in violations.iter().zip(["promptforge", "harness"]) {
+    for (violation, facade) in violations.iter().zip(["runvil", "harness"]) {
         let lib = root
             .path()
             .join("crates")

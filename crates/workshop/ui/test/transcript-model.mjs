@@ -30,7 +30,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-transcript-model-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-transcript-model-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { buildTranscript, thoughtLabel, toolLabel, toolKind, isToolLoading, groupSummary } =
   await import(pathToFileURL(bundlePath).href);

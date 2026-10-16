@@ -2,9 +2,9 @@
 //! test both drive: the Whisper models the environment names, one registered
 //! Realtime session, and the 24 kHz stream a client sends.
 //!
-//! The models come from `PROMPTFORGE_WHISPER_LIBRARY`,
-//! `PROMPTFORGE_WHISPER_MODEL` for the interim role, and
-//! `PROMPTFORGE_WHISPER_FINAL_MODEL` for the final role, which falls back to
+//! The models come from `RUNVIL_WHISPER_LIBRARY`,
+//! `RUNVIL_WHISPER_MODEL` for the interim role, and
+//! `RUNVIL_WHISPER_FINAL_MODEL` for the final role, which falls back to
 //! the interim model when unset. Each caller owns its own clock: the capture
 //! measures one on audio position plus decode time, and the long-speech test
 //! paces its appends on the wall clock.

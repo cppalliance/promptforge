@@ -1,5 +1,5 @@
 //! Cloud model sheet end-to-end against the production binary: the
-//! `PROMPTFORGE_MODELS_SHEET_URL` override points the launch download at
+//! `RUNVIL_MODELS_SHEET_URL` override points the launch download at
 //! a loopback stub, `GET /admin/cloud-models` serves the fixture sheet,
 //! and a `[[model]]` + `[[endpoint]]` merge of the form the UI writes,
 //! staged through `PUT /admin/config` and promoted by
@@ -276,11 +276,11 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         &config,
         &home,
         &[
-            ("PROMPTFORGE_MODELS_SHEET_URL", sheet_url.as_str()),
+            ("RUNVIL_MODELS_SHEET_URL", sheet_url.as_str()),
             (KEY_ENV, "test-key-secret"),
         ],
     );
-    let connection = wait_for_connection(&home.join(".promptforge").join("run"), PHASE_TIMEOUT);
+    let connection = wait_for_connection(&home.join(".runvil").join("run"), PHASE_TIMEOUT);
     let url = format!("http://127.0.0.1:{}", connection.port);
     let http = reqwest::Client::new();
 
@@ -297,7 +297,7 @@ async fn the_sheet_downloads_and_merged_models_apply_end_to_end() {
         "the launch made exactly one bounded download"
     );
     assert!(
-        home.join(".promptforge")
+        home.join(".runvil")
             .join("cloud-provider-models.json")
             .is_file(),
         "the download landed in the profile cache beside the runtime state"

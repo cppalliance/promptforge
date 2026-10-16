@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Workshop family platform: the browser-side UI mechanics shared by the Workshop's UIs, with no visuals and no product vocabulary.",
+  "description": "Runvil Workshop family platform: the browser-side UI mechanics shared by the Workshop's UIs, with no visuals and no product vocabulary.",
   "exports": {
     "./event": "./event.ts",
     "./lifecycle": "./lifecycle.ts",

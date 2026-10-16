@@ -43,9 +43,9 @@ async fn author_file(path: &Path, root: &Path) -> PathBuf {
 async fn save_as_open_and_duplicate_each_write_the_pointer() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let first = home.path().join("first.pfwork");
-    let theirs = home.path().join("theirs.pfwork");
-    let copy = home.path().join("copy.pfwork");
+    let first = home.path().join("first.rvwork");
+    let theirs = home.path().join("theirs.rvwork");
+    let copy = home.path().join("copy.rvwork");
     let root = tempfile::TempDir::new().expect("tempdir");
     author_file(&theirs, root.path()).await;
     let workspace = Workspace::with_state_dir(state_dir.path());
@@ -82,8 +82,8 @@ async fn save_as_open_and_duplicate_each_write_the_pointer() {
 async fn a_refused_open_leaves_the_pointer_where_it_was() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let mine = home.path().join("mine.pfwork");
-    let alien = home.path().join("alien.pfwork");
+    let mine = home.path().join("mine.rvwork");
+    let alien = home.path().join("alien.rvwork");
     create_alien_database_for_test(&alien)
         .await
         .expect("the alien database creates");
@@ -106,14 +106,14 @@ async fn a_refused_open_leaves_the_pointer_where_it_was() {
 #[tokio::test]
 async fn a_workspace_without_a_state_dir_writes_no_pointer_and_reopens_nothing() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("loose.pfwork");
+    let path = home.path().join("loose.rvwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
     workspace.close_backing_for_test().await;
 
     assert_eq!(
         names_in(home.path()),
-        ["loose.pfwork"],
+        ["loose.rvwork"],
         "no pointer lands beside the file or anywhere else"
     );
     let fresh = Workspace::new();
@@ -128,7 +128,7 @@ async fn a_workspace_without_a_state_dir_writes_no_pointer_and_reopens_nothing()
 async fn reopen_last_restores_the_pointed_workspace() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("mine.pfwork");
+    let path = home.path().join("mine.rvwork");
     let root = tempfile::TempDir::new().expect("tempdir");
     let granted = author_file(&path, root.path()).await;
     LastWorkspacePointer::new(state_dir.path())
@@ -201,7 +201,7 @@ async fn reopen_last_with_an_empty_pointer_stays_ephemeral() {
 async fn reopen_last_with_a_vanished_target_stays_ephemeral() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let gone = home.path().join("gone.pfwork");
+    let gone = home.path().join("gone.rvwork");
     LastWorkspacePointer::new(state_dir.path())
         .write(&gone)
         .expect("the pointer writes");
@@ -224,7 +224,7 @@ async fn reopen_last_with_a_vanished_target_stays_ephemeral() {
 async fn reopen_last_with_an_alien_target_stays_ephemeral() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let alien = home.path().join("alien.pfwork");
+    let alien = home.path().join("alien.rvwork");
     create_alien_database_for_test(&alien)
         .await
         .expect("the alien database creates");
@@ -246,7 +246,7 @@ async fn reopen_last_with_an_alien_target_stays_ephemeral() {
 fn the_pointer_round_trips_a_path_and_tolerates_a_trailing_newline() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let pointer = LastWorkspacePointer::new(state_dir.path());
-    let target = state_dir.path().join("somewhere").join("mine.pfwork");
+    let target = state_dir.path().join("somewhere").join("mine.rvwork");
 
     pointer.write(&target).expect("the pointer writes");
     assert_eq!(pointer.read(), Some(target.clone()));
@@ -271,7 +271,7 @@ fn the_pointer_write_creates_a_missing_state_dir() {
     let parent = tempfile::TempDir::new().expect("tempdir");
     let state_dir = parent.path().join("state");
     let pointer = LastWorkspacePointer::new(&state_dir);
-    let target = parent.path().join("mine.pfwork");
+    let target = parent.path().join("mine.rvwork");
 
     pointer
         .write(&target)

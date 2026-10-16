@@ -1,5 +1,5 @@
 //! Embeds the program icon and an application manifest into
-//! `promptforge-gateway.exe` on Windows, so Explorer, Task Manager, and
+//! `runvil-gateway.exe` on Windows, so Explorer, Task Manager, and
 //! the taskbar show the orange-P shield instead of the generic executable
 //! glyph. On every other platform this script only runs the file-size
 //! check, declares its input, and exits.
@@ -72,7 +72,7 @@ fn embed_resources(icon: &Path) -> anyhow::Result<()> {
     let icon = icon
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("the icon path {} is not UTF-8", icon.display()))?;
-    let manifest_path = out_dir.join("promptforge-gateway.manifest.xml");
+    let manifest_path = out_dir.join("runvil-gateway.manifest.xml");
     std::fs::write(&manifest_path, MANIFEST)
         .map_err(|error| anyhow::anyhow!("write {}: {error}", manifest_path.display()))?;
     let manifest = manifest_path.to_str().ok_or_else(|| {
@@ -88,7 +88,7 @@ fn embed_resources(icon: &Path) -> anyhow::Result<()> {
         icon.replace('\\', "\\\\"),
         manifest.replace('\\', "\\\\")
     );
-    let script_path = out_dir.join("promptforge-gateway.rc");
+    let script_path = out_dir.join("runvil-gateway.rc");
     std::fs::write(&script_path, script)
         .map_err(|error| anyhow::anyhow!("write {}: {error}", script_path.display()))?;
     match embed_resource::compile(&script_path, embed_resource::NONE) {

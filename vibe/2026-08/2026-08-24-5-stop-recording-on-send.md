@@ -102,7 +102,7 @@ The composer's `.mur-chat-form-container` is `position: absolute` (overlaying th
 
 ## Verify
 
-`npm run build; npm run typecheck; npm test` in `crates/promptforge-wb-server/ui`, plus `cargo fmt --all --check`, `cargo clippy -p promptforge-wb-server --all-targets --all-features -- -D warnings`, `cargo test -p promptforge-wb-server` (should be untouched - UI-only change, but build.rs rebundles).
+`npm run build; npm run typecheck; npm test` in `crates/runvil-wb-server/ui`, plus `cargo fmt --all --check`, `cargo clippy -p runvil-wb-server --all-targets --all-features -- -D warnings`, `cargo test -p runvil-wb-server` (should be untouched - UI-only change, but build.rs rebundles).
 
 Commit message: "Discard the voice take when a message is sent mid-recording". Design log entry for the close-without-stop decision.
 

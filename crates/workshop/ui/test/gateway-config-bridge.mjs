@@ -105,25 +105,25 @@ function dispatch(data, origin = WORKSHOP_ORIGIN) {
 
 // --- Origin pinning: a foreign origin is ignored ------------------------------
 
-dispatch({ type: "pf-api", id: "evil", method: "GET", path: "/admin/status", body: null }, "https://evil.example");
+dispatch({ type: "rv-api", id: "evil", method: "GET", path: "/admin/status", body: null }, "https://evil.example");
 await flush();
 check("a message from a foreign origin is never forwarded", proxyCalls().length === 0);
 check("a message from a foreign origin is never answered", replies.length === 0);
 
 // --- The gateway's own origin is foreign: the iframe is proxied same-origin ----
 
-dispatch({ type: "pf-bridge-ready" }, GATEWAY_ORIGIN);
+dispatch({ type: "rv-bridge-ready" }, GATEWAY_ORIGIN);
 await flush();
 check("a ready announcement from the gateway origin is refused", replies.length === 0);
 
 // --- The ready announcement is answered with the pinned context ---------------
 
-dispatch({ type: "pf-bridge-ready" });
+dispatch({ type: "rv-bridge-ready" });
 await flush();
 check("the ready announcement is answered", replies.length === 1);
 check(
   "the answer is a context message holding theme and initial route",
-  replies[0]?.message.type === "pf-context" &&
+  replies[0]?.message.type === "rv-context" &&
     replies[0]?.message.theme === "dark" &&
     replies[0]?.message.route === "#/local",
 );
@@ -134,13 +134,13 @@ check(
 
 // --- The API-forward round trip -----------------------------------------------
 
-dispatch({ type: "pf-api", id: "r1", method: "GET", path: "/admin/status", body: null });
+dispatch({ type: "rv-api", id: "r1", method: "GET", path: "/admin/status", body: null });
 await flush();
 check(
   "an api request forwards through the workshop server proxy route",
   proxyCalls().length === 1 && proxyCalls()[0].url === "/gateway/api/admin/status",
 );
-const apiReply = replies.find((entry) => entry.message.type === "pf-api-result");
+const apiReply = replies.find((entry) => entry.message.type === "rv-api-result");
 check(
   "the proxy's answer comes back with the request id, status, and body",
   apiReply !== undefined &&
@@ -153,7 +153,7 @@ check("the api reply pins the workshop origin", apiReply?.targetOrigin === WORKS
 
 // --- A transport failure answers status 0 --------------------------------------
 
-dispatch({ type: "pf-api", id: "r2", method: "GET", path: "/admin/system", body: null });
+dispatch({ type: "rv-api", id: "r2", method: "GET", path: "/admin/system", body: null });
 await flush();
 const failureReply = replies.find((entry) => entry.message.id === "r2");
 check(
@@ -163,9 +163,9 @@ check(
 
 // --- Action notifications land on the status bar --------------------------------
 
-dispatch({ type: "pf-action", action: "apply" });
-dispatch({ type: "pf-action", action: "download-started" });
-dispatch({ type: "pf-action", action: "reboot-the-machine" });
+dispatch({ type: "rv-action", action: "apply" });
+dispatch({ type: "rv-action", action: "download-started" });
+dispatch({ type: "rv-action", action: "reboot-the-machine" });
 await flush();
 check(
   "apply and download-started reach the status bar as local info lines",
@@ -178,7 +178,7 @@ check(
 
 const repliesBefore = replies.length;
 bridge.dispose();
-dispatch({ type: "pf-bridge-ready" });
+dispatch({ type: "rv-bridge-ready" });
 await flush();
 check("a disposed bridge answers nothing", replies.length === repliesBefore);
 

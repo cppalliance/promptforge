@@ -26,11 +26,11 @@ isProject: false
 
 ## Product Requirements
 
-Prompt authors name tools through frontmatter aliases that also become Lua globals, find role labels installed as globals too, and cannot see which plugins a run has. This plan names every tool by its canonical id, makes the frontmatter declare plugins only, stops the frontmatter from creating any Lua global, and adds a `plugins` table that reports what the run has. It also records each model's provider in its catalog entry, the input a later per-model tool-naming feature needs. The work lands as four changes in the promptforge repository, and every path below is relative to that repository's root.
+Prompt authors name tools through frontmatter aliases that also become Lua globals, find role labels installed as globals too, and cannot see which plugins a run has. This plan names every tool by its canonical id, makes the frontmatter declare plugins only, stops the frontmatter from creating any Lua global, and adds a `plugins` table that reports what the run has. It also records each model's provider in its catalog entry, the input a later per-model tool-naming feature needs. The work lands as four changes in the runvil repository, and every path below is relative to that repository's root.
 
 - Problem and users:
-  - Prompt authors. Each `tools:` alias and each `models:` role label is installed as a bare Lua global (`crates/promptforge-internal/lua/src/vm/install.rs`, `install_captured_bindings`, lines 29 to 64). The owner intended Lua-facing names to come from plugin preludes, and these globals block prelude names (`crates/promptforge-internal/engine/src/execute/context.rs`, lines 123 to 126).
-  - Tools live in two systems with different rules: frontmatter slots, and the offering of undeclared plugins' tools under generated names (`crates/promptforge-internal/engine/src/execute/context-bound.rs`, lines 38 to 64). Declaring a plugin hides its tools from the offering (line 50), so a required plugin cannot be offered whole.
+  - Prompt authors. Each `tools:` alias and each `models:` role label is installed as a bare Lua global (`crates/runvil-internal/lua/src/vm/install.rs`, `install_captured_bindings`, lines 29 to 64). The owner intended Lua-facing names to come from plugin preludes, and these globals block prelude names (`crates/runvil-internal/engine/src/execute/context.rs`, lines 123 to 126).
+  - Tools live in two systems with different rules: frontmatter slots, and the offering of undeclared plugins' tools under generated names (`crates/runvil-internal/engine/src/execute/context-bound.rs`, lines 38 to 64). Declaring a plugin hides its tools from the offering (line 50), so a required plugin cannot be offered whole.
   - A prompt cannot ask which plugins the run has.
   - Engine maintainers, who keep the slot fill, the alias and label globals, and the reserved-name checks and prelude collision lists that exist only because of those globals.
 - Goals:
@@ -48,7 +48,7 @@ Prompt authors name tools through frontmatter aliases that also become Lua globa
   - The rest of that landed plan's work, the Rust state machine behind `models.loop` and its contract tests, and the models-loop debt-removal plan that follows it.
   - The per-model rewrite of model-facing tool names, such as `WebSearch` for Grok and `web_search` for OpenAI models. Only its provider input lands here.
   - Canonical tool ids inside message-list records.
-  - The `promptforge-docs` guide.
+  - The `runvil-docs` guide.
 - Success criteria:
   - Every surface in Functional Specification behaves as specified, and every removed form fails with the specified error.
   - Both shipped prompts, `prompts/research-person.md` and `crates/workshop/agents/agents/chat.md`, run on the new surface.
@@ -56,7 +56,7 @@ Prompt authors name tools through frontmatter aliases that also become Lua globa
   - The repository's verification commands pass after each change, and the facade listing changes only in the tools change and the provider change, exactly as Technical Design lists.
 - Constraints:
   - The Engine stays sans-IO and deterministic. Every list in this plan is fixed before Lua runs: the catalog, MCP tool lists included, is a Host snapshot taken once plugins are ready (`crates/harness-internal/runner/src/host-run.rs`, lines 1 to 7 and 49 to 56; `crates/plugin-mcp/src/connect.rs`, lines 78 to 91).
-  - The change is a clean break: prompts are at language version `promptforge: 0`, and removed forms fail at their call or at parse.
+  - The change is a clean break: prompts are at language version `runvil: 0`, and removed forms fail at their call or at parse.
   - The 500-line ceiling on `.rs` files (`crates/build-ceiling/src/lib.rs`, line 14) and the flat-directory rule in `AGENTS.md` hold for every new and edited file.
 - Open questions: None
 
@@ -65,7 +65,7 @@ Prompt authors name tools through frontmatter aliases that also become Lua globa
 Authors offer tools to the model by id or by tool object, taken from two lists or from a plugin, and call and count them by id. Each tool and each plugin is one shared, read-only object, so the same tool is the same value in every list. A role's handle comes only from `models.get`, `models.use`, or `models.default`, and carries the model's provider. A `plugins` table lists the declared plugins and the Host's other plugins. Every removed form fails at its call or at parse with a named error, and the model still sees each tool under a generated wire name.
 
 - Actors and workflows:
-  - A prompt author writes Lua in section blocks, the H1 body, and the shared library. Section VMs and the H1 VM share one setup path (`crates/promptforge-internal/engine/src/execute/section_vm.rs`, lines 121 to 180), so every surface here exists in both.
+  - A prompt author writes Lua in section blocks, the H1 body, and the shared library. Section VMs and the H1 VM share one setup path (`crates/runvil-internal/engine/src/execute/section_vm.rs`, lines 121 to 180), so every surface here exists in both.
   - The Host supplies the plugin catalog and the model catalog. For gateway Hosts, the model catalog is the gateway's `GET /v1/models` (`crates/harness-gateway-client/src/catalog.rs`).
 - Inputs and outputs:
   - The new surface at a glance, frontmatter first:
@@ -131,23 +131,23 @@ Authors offer tools to the model by id or by tool object, taken from two lists o
   - What the model sees: each offered catalog tool under its generated wire name, the id with `/` and `.` replaced by `_` (`web/fetch` becomes `web_fetch`), as the offering names tools today (`context-bound.rs`, line 56). Message-list records keep the wire name the model returned.
   - Frontmatter: `plugins:` lists the required plugin ids, and `tools:` no longer exists.
 - States and validation:
-  - Every declared plugin is required: `plugins:` is a plain list of ids (`crates/promptforge-internal/parser/src/build-frontmatter.rs`, lines 189 to 193).
+  - Every declared plugin is required: `plugins:` is a plain list of ids (`crates/runvil-internal/parser/src/build-frontmatter.rs`, lines 189 to 193).
   - Role labels keep the name grammar, but the reserved-name check and the tool-and-model clash check, which exist only because labels became globals, no longer apply to them.
   - `tools.offer` and `tools.always_offer` check every entry before recording any, so one bad entry records nothing.
   - Scope order stays as today: prompt-wide tools first, then the section's offers in first-offer order, each tool once.
-  - Wire-name conflicts keep today's rules. A catalog tool whose wire name repeats an earlier one, matches a task built-in, or fails the schema check is left out with a log line (`context-bound.rs`, `offer_refusal`, lines 70 to 93, without its alias rule). A local tool wins over a catalog tool with the same wire name (`crates/promptforge-internal/engine/src/execute/scope.rs`, lines 66 to 74). A script can still call a catalog tool that was left out, by its id.
+  - Wire-name conflicts keep today's rules. A catalog tool whose wire name repeats an earlier one, matches a task built-in, or fails the schema check is left out with a log line (`context-bound.rs`, `offer_refusal`, lines 70 to 93, without its alias rule). A local tool wins over a catalog tool with the same wire name (`crates/runvil-internal/engine/src/execute/scope.rs`, lines 66 to 74). A script can still call a catalog tool that was left out, by its id.
   - A provider id is lowercase `[a-z0-9._-]+`, checked by the gateway's capability validation for `[[model]]` and `[[local_model]]` alike.
 - Errors and recovery: each error below is raised at the call, so `pcall` catches it, and is a `lua`-kind error value unless it names another kind.
   - `tools.offer: "{id}" is not a catalog tool in this run`, with `tools.always_offer` in place of `tools.offer` for that function. A string that fails the tool-id grammar, or names a local tool, gets the same error.
-  - `Tool objects are frozen: cannot assign field {key:?}` and `Plugin objects are frozen: cannot assign field {key:?}` for an assignment to either object, the first being today's Tool object text (`crates/promptforge-internal/lua/src/tools/userdata.rs`, lines 64 to 70).
-  - The argument-shape errors of today's `tools.add` (`crates/promptforge-internal/lua/src/tools/decode.rs`, lines 67, 90, 97, and 105), renamed for the function that raises them.
-  - A `tools.call` name that is neither a local tool nor a catalog id raises kind `unbound_tool` with `tool {name:?} is not a tool in this run; catalog tools: {ids:?}`, in place of today's list of bound aliases (`crates/promptforge-internal/engine/src/error.rs`, lines 253 to 260). The list holds the id of every catalog tool the run can offer.
-  - Reading `tools.calls[key]` for a key with no count raises `tools.calls: {key:?} has no seeded count; seeded names: {names:?}`, followed by ` (a catalog tool that was neither offered in this section nor called with tools.call)` when the key is the id of a tool the run can offer, by nothing when no name is seeded, and otherwise by ` - check for typos or offer it with tools.offer`. These replace today's bound-slot and `tools.add` suffixes (`crates/promptforge-internal/lua/src/tools.rs`, lines 99 to 110).
+  - `Tool objects are frozen: cannot assign field {key:?}` and `Plugin objects are frozen: cannot assign field {key:?}` for an assignment to either object, the first being today's Tool object text (`crates/runvil-internal/lua/src/tools/userdata.rs`, lines 64 to 70).
+  - The argument-shape errors of today's `tools.add` (`crates/runvil-internal/lua/src/tools/decode.rs`, lines 67, 90, 97, and 105), renamed for the function that raises them.
+  - A `tools.call` name that is neither a local tool nor a catalog id raises kind `unbound_tool` with `tool {name:?} is not a tool in this run; catalog tools: {ids:?}`, in place of today's list of bound aliases (`crates/runvil-internal/engine/src/error.rs`, lines 253 to 260). The list holds the id of every catalog tool the run can offer.
+  - Reading `tools.calls[key]` for a key with no count raises `tools.calls: {key:?} has no seeded count; seeded names: {names:?}`, followed by ` (a catalog tool that was neither offered in this section nor called with tools.call)` when the key is the id of a tool the run can offer, by nothing when no name is seeded, and otherwise by ` - check for typos or offer it with tools.offer`. These replace today's bound-slot and `tools.add` suffixes (`crates/runvil-internal/lua/src/tools.rs`, lines 99 to 110).
   - A model call to a catalog tool its section did not offer keeps today's out-of-scope error, with the suffix ` (a catalog tool that was not offered in this section)` in place of the bound-slot one (`error.rs`, line 235).
   - `tools.add`, `tools.always`, `tools.offered`, and `tools.add_local` no longer exist, so calling one fails as a call of nil.
   - A leftover `tools:` key fails the parse as an unknown frontmatter key, through `deny_unknown_fields` on the frontmatter struct (`build-frontmatter.rs`, line 43).
 - Security and privacy behavior:
-  - Trust rules stay as they are. Untrusted tool output is wrapped as today, and tool access is unchanged, since any prompt can already reach any catalog tool through the offering or by full id (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`, lines 178 to 182).
+  - Trust rules stay as they are. Untrusted tool output is wrapped as today, and tool access is unchanged, since any prompt can already reach any catalog tool through the offering or by full id (`crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`, lines 178 to 182).
   - The provider is catalog metadata: Lua sees the provider id alone, while credentials and endpoints stay in the gateway.
 - Acceptance criteria:
   - Every surface and error above has a test in Testing Plan.
@@ -177,38 +177,38 @@ Each change builds on code that already does most of its job. The tools change r
   - Tool objects and plugin objects are built once per VM at install and kept in registry tables, one keyed by tool id and one by plugin name, the way `tools.rs` already keeps local handlers (`LOCAL_HANDLERS_REGISTRY`, lines 44 to 47).
 - Modules and interfaces:
   - Role globals (role-globals change):
-    - `install_captured_bindings` (`crates/promptforge-internal/lua/src/vm/install.rs`, lines 29 to 64) loses its role-label half (lines 48 to 63). The tools change deletes the rest, the function, and its call (`crates/promptforge-internal/engine/src/execute/section_vm.rs`, line 180).
-    - The parser sets `installs_global` to false for model labels (`crates/promptforge-internal/parser/src/contract/models.rs`, lines 127 to 142), which also turns off their reserved-name checks, and removes the tool-and-model clash check (`crates/promptforge-internal/parser/src/contract.rs`, lines 255 to 263). `frontmatter_aliases` (`context-bound.rs`, lines 115 to 124) drops the model labels.
+    - `install_captured_bindings` (`crates/runvil-internal/lua/src/vm/install.rs`, lines 29 to 64) loses its role-label half (lines 48 to 63). The tools change deletes the rest, the function, and its call (`crates/runvil-internal/engine/src/execute/section_vm.rs`, line 180).
+    - The parser sets `installs_global` to false for model labels (`crates/runvil-internal/parser/src/contract/models.rs`, lines 127 to 142), which also turns off their reserved-name checks, and removes the tool-and-model clash check (`crates/runvil-internal/parser/src/contract.rs`, lines 255 to 263). `frontmatter_aliases` (`context-bound.rs`, lines 115 to 124) drops the model labels.
   - Tools (tools change):
-    - `ToolSet` (`crates/promptforge-internal/lua/src/handles.rs`, lines 140 to 153) swaps `bindings`, the slots, for `declared`, the frontmatter's plugin ids. `offered` keeps its name and type and now holds every offerable catalog tool, and `always` keeps holding wire names. `offered_binding` (lines 209 to 213) matches a wire name or a canonical id. `ToolBinding` is unchanged: its `alias` already holds the wire name of every offered tool. `ToolView::bindings` swaps for `declared`, which `RunState::tool_set_snapshot` reads (`context.rs`, lines 303 to 309).
+    - `ToolSet` (`crates/runvil-internal/lua/src/handles.rs`, lines 140 to 153) swaps `bindings`, the slots, for `declared`, the frontmatter's plugin ids. `offered` keeps its name and type and now holds every offerable catalog tool, and `always` keeps holding wire names. `offered_binding` (lines 209 to 213) matches a wire name or a canonical id. `ToolBinding` is unchanged: its `alias` already holds the wire name of every offered tool. `ToolView::bindings` swaps for `declared`, which `RunState::tool_set_snapshot` reads (`context.rs`, lines 303 to 309).
     - `bound_tool_set` (`context-bound.rs`, lines 24 to 36) drops the slot loop and fills `declared`. `offered_bindings` (lines 42 to 64) drops the declared-plugin filter (line 50) and the alias set (lines 45 and 46), and `offer_refusal` drops its alias rule (lines 76 to 78). `catalog_bindings` and `RunState::catalog_binding` (`context.rs`, lines 314 to 316) stay, so a script still reaches, by id, a catalog tool that could not be offered.
-    - Each new Lua function is today's function in `crates/promptforge-internal/lua/src/tools.rs` with its lookup widened:
+    - Each new Lua function is today's function in `crates/runvil-internal/lua/src/tools.rs` with its lookup widened:
       - `offer` is `add` (lines 177 to 214): each entry resolves through `offered_binding` in place of the alias grammar and the slot lookup, and the binding's wire name is recorded in section scope and overrides as today.
       - `always_offer` is `always` (lines 216 to 244): it decodes its arguments like `offer`, finds the binding in `offered` instead of `bindings`, keeps the prompt-wide override on that binding as today, and records its wire name in `always`.
       - `required` and `extras` are `offered` (lines 252 to 273), split by whether the tool's plugin is in `declared` and returning tool objects in place of records.
       - `get` reads the tool-object table.
       - `offer_local` is `add_local` (lines 275 to 318) without its slot-duplicate check.
-      - `calls` counts are keyed by `binding.id()` in place of `binding.alias()` at the sites that seed and increment them (`tools.rs`, line 146; `crates/promptforge-internal/engine/src/execute/section_context.rs`, line 233; `scheduler/tool_call.rs`, lines 190 and 191), while local tools keep their alias. The unseeded-key diagnostic (`tools.rs`, lines 99 to 110) takes the text in Errors and recovery, built from the offered tools' ids in place of the slot aliases.
-    - `LuaToolHandle` (`crates/promptforge-internal/lua/src/tools/userdata.rs`) becomes the tool object, built from a binding, and keeps its frozen-assignment refusal (lines 64 to 70). `tool_alias` (`crates/promptforge-internal/lua/src/tools/decode.rs`, lines 36 to 54) already accepts it. `collect_tools_add_entries` (lines 80 to 123) takes the calling function's name for its errors, and its record branch and `record_name` (lines 18 to 23) go, since tool objects replace records.
-    - The engine's slot lookups go: `.binding(alias)` in dispatch (`scheduler/tool_call.rs`, line 179) and in `binding_for_scope` (`crates/promptforge-internal/lua/src/vm/state.rs`, line 237). `unbound_tool_call` (`scheduler/dispatch.rs`, lines 33 to 42) lists the ids in `ToolSet.offered`, every catalog tool the run can offer, and the out-of-scope check (`scheduler/chat.rs`, lines 269 to 271) asks `offered_binding`.
-    - Deleted: slot fill (`crates/promptforge-internal/engine/src/execute/fill.rs`, `fill_tool_bindings`, called at `environment.rs`, line 123), `ToolBindings` (`bindings.rs`), `RunContext.tool_bindings` and its accessor (`config.rs`, lines 102, 142, 308 to 310, and 366), `Requirements.missing_tools`, the parser's `tools:` key and slot types, `frontmatter_aliases` with the alias list passed to prelude collision checks (`crates/promptforge-internal/lua/src/prelude.rs`), and the slot-plugin chain in Host requirements (`crates/harness-internal/runner/src/host-run.rs`, lines 128 to 167).
+      - `calls` counts are keyed by `binding.id()` in place of `binding.alias()` at the sites that seed and increment them (`tools.rs`, line 146; `crates/runvil-internal/engine/src/execute/section_context.rs`, line 233; `scheduler/tool_call.rs`, lines 190 and 191), while local tools keep their alias. The unseeded-key diagnostic (`tools.rs`, lines 99 to 110) takes the text in Errors and recovery, built from the offered tools' ids in place of the slot aliases.
+    - `LuaToolHandle` (`crates/runvil-internal/lua/src/tools/userdata.rs`) becomes the tool object, built from a binding, and keeps its frozen-assignment refusal (lines 64 to 70). `tool_alias` (`crates/runvil-internal/lua/src/tools/decode.rs`, lines 36 to 54) already accepts it. `collect_tools_add_entries` (lines 80 to 123) takes the calling function's name for its errors, and its record branch and `record_name` (lines 18 to 23) go, since tool objects replace records.
+    - The engine's slot lookups go: `.binding(alias)` in dispatch (`scheduler/tool_call.rs`, line 179) and in `binding_for_scope` (`crates/runvil-internal/lua/src/vm/state.rs`, line 237). `unbound_tool_call` (`scheduler/dispatch.rs`, lines 33 to 42) lists the ids in `ToolSet.offered`, every catalog tool the run can offer, and the out-of-scope check (`scheduler/chat.rs`, lines 269 to 271) asks `offered_binding`.
+    - Deleted: slot fill (`crates/runvil-internal/engine/src/execute/fill.rs`, `fill_tool_bindings`, called at `environment.rs`, line 123), `ToolBindings` (`bindings.rs`), `RunContext.tool_bindings` and its accessor (`config.rs`, lines 102, 142, 308 to 310, and 366), `Requirements.missing_tools`, the parser's `tools:` key and slot types, `frontmatter_aliases` with the alias list passed to prelude collision checks (`crates/runvil-internal/lua/src/prelude.rs`), and the slot-plugin chain in Host requirements (`crates/harness-internal/runner/src/host-run.rs`, lines 128 to 167).
   - Provider (provider change):
     - `Capabilities` (`crates/gateway-api-types/src/metadata.rs`, lines 78 to 117) gains `provider`. It is already flattened into `[[model]]` and `[[local_model]]` (`crates/gateway/config/src/config.rs`, lines 317 and 387), copied into the routing table (`crates/gateway/app/src/routing.rs`, line 144; `crates/gateway/local/src/runtime/start.rs`, line 245), and flattened into the catalog's `ModelInfo` (`metadata.rs`, line 194), so this one field reaches the config, the routing table, and `/v1/models`. `validate_capabilities` (`crates/gateway/config/src/config/validate.rs`, lines 212 to 259) checks it for both model kinds.
     - The client's `ModelsListEntry` (`crates/harness-gateway-client/src/catalog.rs`, lines 20 to 28) reads it and passes it to the descriptor.
-    - `ModelDescriptor` (`crates/promptforge-internal/types/src/models.rs`, line 147) and `ModelBinding` (`crates/promptforge-internal/model-client/src/model/options.rs`, lines 89 to 99) hold it, `bound_model_set` (`context-bound.rs`, lines 148 to 183) copies it, and `LuaModelHandle` (`crates/promptforge-internal/lua/src/models-userdata.rs`) exposes it.
+    - `ModelDescriptor` (`crates/runvil-internal/types/src/models.rs`, line 147) and `ModelBinding` (`crates/runvil-internal/model-client/src/model/options.rs`, lines 89 to 99) hold it, `bound_model_set` (`context-bound.rs`, lines 148 to 183) copies it, and `LuaModelHandle` (`crates/runvil-internal/lua/src/models-userdata.rs`) exposes it.
   - Plugins (plugins change):
     - A new lua-crate module, `plugins.rs`, installs `plugins` right after the `install_tools` call in section setup (`vm/install.rs`, line 135). It builds one plugin object per declared plugin and per other plugin with offered tools, keeps them in its registry table, and the three functions and a tool object's `plugin` getter read that table.
-    - `plugins` joins `RESERVED_NAMES` (`crates/promptforge-internal/lua/src/globals.rs`, line 157). The prelude sandbox's `VISIBLE_GLOBALS` (`prelude.rs`, line 31) is unchanged.
+    - `plugins` joins `RESERVED_NAMES` (`crates/runvil-internal/lua/src/globals.rs`, line 157). The prelude sandbox's `VISIBLE_GLOBALS` (`prelude.rs`, line 31) is unchanged.
 - File and public API changes:
-  - The tools change removes these items from the facade listing (`crates/promptforge/public-api.txt`): `ToolSlot` (line 18), `ToolSlots` (63) and its methods (600 to 603), `ToolBindings` (64) and its methods (605 to 609), `RunContext::tool_bindings` (438), `Frontmatter::tools` (592), `Requirements::missing_tools` (723), and `ToolSlot::Exact` (1220 and 1221). Each exists only for slot fill (`fill.rs`, lines 13 to 52), and these are the change's only facade edits. `ToolSet`, `ToolBinding`, and `ToolView` are outside the facade.
+  - The tools change removes these items from the facade listing (`crates/runvil/public-api.txt`): `ToolSlot` (line 18), `ToolSlots` (63) and its methods (600 to 603), `ToolBindings` (64) and its methods (605 to 609), `RunContext::tool_bindings` (438), `Frontmatter::tools` (592), `Requirements::missing_tools` (723), and `ToolSlot::Exact` (1220 and 1221). Each exists only for slot fill (`fill.rs`, lines 13 to 52), and these are the change's only facade edits. `ToolSet`, `ToolBinding`, and `ToolView` are outside the facade.
   - The provider change adds `ModelDescriptor::with_provider`, `ModelDescriptor::provider`, `ModelBinding::with_provider`, and `ModelBinding::provider` to the listing; both types are public today (`public-api.txt`, lines 518 to 527, 539 to 543, and 1374).
   - The role-globals change and the plugins change leave the facade unchanged.
   - Consumers moved to the new surface:
     - the Workshop prompt DTO's `tools` field (`crates/workshop/server/src/routes/prompts.rs`, lines 59 and 230 to 234), the run panel's tool rows that read it (`crates/workshop/ui/src/parts/run/run-rows.ts`, lines 184 to 188), and their UI tests (`crates/workshop/ui/test/run-api.mjs`, lines 104 to 107; `crates/workshop/ui/test/run-panel.mjs`, line 199);
     - `prompts/research-person.md`, `crates/workshop/agents/agents/chat.md`, and the fixture in `crates/harness-gateway-client/src/wire/request-tests.rs`;
-    - the shim comment that names `tools.add` (`crates/promptforge-internal/lua/src/__impl_coro.lua`, line 71). The shim's code is unchanged.
+    - the shim comment that names `tools.add` (`crates/runvil-internal/lua/src/__impl_coro.lua`, line 71). The shim's code is unchanged.
 - Data, persistence, failure, security, and privacy constraints:
-  - `ModelDescriptor` and `ModelBinding` live in memory only. `EffectRecord::Chat` records selected binding fields (`crates/promptforge-internal/engine/src/execute/run/effect.rs`, lines 172 to 198 and 230 to 256), and the provider stays out of it.
+  - `ModelDescriptor` and `ModelBinding` live in memory only. `EffectRecord::Chat` records selected binding fields (`crates/runvil-internal/engine/src/execute/run/effect.rs`, lines 172 to 198 and 230 to 256), and the provider stays out of it.
   - Effect and event `alias` fields keep their shape. Because a script call by id now resolves through `offered_binding`, they hold the wire name for every call to an offerable tool, model or script, and the id only for a script call to a catalog tool that could not be offered (`effect.rs`, lines 113 to 117 and 257 to 262).
   - The `/v1/models` response gains one optional field, which clients that ignore unknown fields skip.
 
@@ -216,7 +216,7 @@ Each change builds on code that already does most of its job. The tools change r
 
 Every new or changed declaration, checked against `master` at `2b53936e6`. Bodies are elided, and declarations not listed keep their current form.
 
-**`promptforge-lua`, `handles.rs`** (tools change). `ToolBinding` is unchanged apart from its docs. `ToolSet::bindings`, `ToolSet::binding`, and `ToolView::bindings` go.
+**`runvil-lua`, `handles.rs`** (tools change). `ToolBinding` is unchanged apart from its docs. `ToolSet::bindings`, `ToolSet::binding`, and `ToolView::bindings` go.
 
 ```rust
 /// The run's tool set: the declared plugins, the prompt-wide offers, and
@@ -254,13 +254,13 @@ pub trait ToolView: Send + Sync {
 }
 ```
 
-**`promptforge-lua`, `tools.rs`, `tools/decode.rs`, and `tools/userdata.rs`** (tools change). `install_tools`, `ToolsAddEntry`, and `tool_alias` keep their signatures.
+**`runvil-lua`, `tools.rs`, `tools/decode.rs`, and `tools/userdata.rs`** (tools change). `install_tools`, `ToolsAddEntry`, and `tool_alias` keep their signatures.
 
 ```rust
 // tools.rs
 /// The registry key of the VM's tool-object table: one object per offered
 /// tool, keyed by id, built when `install_tools` runs.
-const TOOL_OBJECTS_REGISTRY: &str = "promptforge.tools.objects";
+const TOOL_OBJECTS_REGISTRY: &str = "runvil.tools.objects";
 
 /// The VM's tool object for the catalog id `id`, or `None` when the run
 /// cannot offer that tool.
@@ -290,13 +290,13 @@ impl LuaToolHandle {
 
 The `UserData` impl for `LuaToolHandle` keeps its `__newindex` refusal and swaps the field getters `name`, `parameters`, `wire_name`, and `untrusted` for `id` and `description`.
 
-**`promptforge-lua`, `plugins.rs`, new** (plugins change)
+**`runvil-lua`, `plugins.rs`, new** (plugins change)
 
 ```rust
 //! The `plugins` table: one read-only object per plugin the run knows.
 
 /// The registry key of the VM's plugin-object table, keyed by name.
-const PLUGIN_OBJECTS_REGISTRY: &str = "promptforge.plugins.objects";
+const PLUGIN_OBJECTS_REGISTRY: &str = "runvil.plugins.objects";
 
 /// One plugin as Lua sees it: `name`, and `tools`, which reads a fresh
 /// array of the plugin's tool objects in id order.
@@ -351,7 +351,7 @@ pub fn install_preludes(lua: &Lua, preludes: &[Prelude]) -> Result<()>;
     #[serde(default)]
     provider: Option<String>,
 
-// promptforge-types, models.rs, on `ModelDescriptor`: a `provider: Option<String>` field, and
+// runvil-types, models.rs, on `ModelDescriptor`: a `provider: Option<String>` field, and
 impl ModelDescriptor {
     /// Sets the provider id the catalog names for this model.
     #[must_use]
@@ -361,7 +361,7 @@ impl ModelDescriptor {
     pub fn provider(&self) -> Option<&str>;
 }
 
-// promptforge-model-client, model/options.rs, on `ModelBinding`: a `provider: Option<String>` field, and
+// runvil-model-client, model/options.rs, on `ModelBinding`: a `provider: Option<String>` field, and
 impl ModelBinding {
     /// Sets the model's provider id.
     #[must_use]
@@ -392,17 +392,17 @@ Each change migrates the tests its removals break and adds a test for every new 
     - `tools.offer_local` creating, offering, and answering a local tool as `tools.add_local` did, with its registration errors under the new name;
     - `calls` keyed by id, with a model call and a script call of one tool counting under it, and a local tool under its alias;
     - the `unbound_tool` and out-of-scope texts; a leftover `tools:` key refused at parse.
-    - The fresh-record test `tools_offered_returns_a_fresh_plain_record_per_offered_tool_in_order` (`crates/promptforge-internal/lua/src/tools/tests-offering.rs`) gives way to the identity test.
+    - The fresh-record test `tools_offered_returns_a_fresh_plain_record_per_offered_tool_in_order` (`crates/runvil-internal/lua/src/tools/tests-offering.rs`) gives way to the identity test.
   - Provider: a `[[model]]` and a `[[local_model]]` with and without `provider`, and a refused one; `/v1/models` with and without the field; client decode with and without it; `handle.provider` nil and set.
-  - Plugins: `required` lists a declared plugin with no tools; `extras` excludes declared plugins; `get` hit and miss; `plugins.get(name) == plugins.get(name)`, and the same object appears in `required` or `extras`; a plugin's `tools` holds the shared tool objects in a new array per read and passes to `tools.offer`; assignment to a plugin object refused; every tool object's `plugin` is `==` to its plugin's object; the table exists in the H1 VM; the reserved-name two-way test (`crates/promptforge-internal/engine/src/lua/tests/globals.rs`, lines 86 to 118) passes with `plugins` listed.
+  - Plugins: `required` lists a declared plugin with no tools; `extras` excludes declared plugins; `get` hit and miss; `plugins.get(name) == plugins.get(name)`, and the same object appears in `required` or `extras`; a plugin's `tools` holds the shared tool objects in a new array per read and passes to `tools.offer`; assignment to a plugin object refused; every tool object's `plugin` is `==` to its plugin's object; the table exists in the H1 VM; the reserved-name two-way test (`crates/runvil-internal/engine/src/lua/tests/globals.rs`, lines 86 to 118) passes with `plugins` listed.
 - Integration and end-to-end:
   - A run offers a declared plugin with `tools.offer(plugins.get(name).tools)`, and the model calls one of its tools by wire name. Another run offers an extra the same way after checking `plugins.get`.
   - A script calls by id a catalog tool that was left out of the offering, and the call still runs.
   - Both shipped prompts run end to end, and the Workshop run panel shows no tool rows.
 - Regression, security, and performance:
-  - Tools change migration: about 27 files embed `tools:` frontmatter and about 15 call `tools.add`, and every `tools.add_local` call moves to `tools.offer_local`. The heaviest are `crates/promptforge-internal/lua/src/tests/tool_scoping.rs`, `crates/promptforge-internal/lua/src/tools/tests-offering.rs`, the engine tests `debug_and_counts.rs`, `models_loop.rs`, `chat_record_rebuild.rs`, `model_and_reply.rs`, and `offering.rs` under `crates/promptforge-internal/engine/src/execute/tests/`, and the parser's `contract/tests*.rs`. Tests that build a `ToolSet` move their slot bindings into `offered` under wire names and pass `declared`. The Workshop UI tests `run-api.mjs` and `run-panel.mjs` drop their tool-slot expectations.
-  - Role-globals change migration: at `2b53936e6`, 2 method calls on a role-label global, `writer:loop(msgs)` (`crates/harness/tests/suite/host.rs`, line 55) and `fast:infer("yo")` (`crates/promptforge-internal/engine/src/lua/tests/shims.rs`, line 377), and 3 other bare reads of one (`host.rs`, line 43; `crates/promptforge-internal/engine/src/execute/tests/live_infer.rs`, line 160; `shims.rs`, lines 401 and 402), move to `models.get`. The other `writer:` and `other:` calls in the engine tests already run on a local from `models.get` or `models.default`, or on a global the test assigns itself, and stay as they are.
-  - Tests that pin the removed error texts (`crates/promptforge-internal/lua/src/tools.rs`, lines 103 to 108, 188, 228, and 298; `crates/promptforge-internal/engine/src/error.rs`, lines 235 and 253) move to the new texts.
+  - Tools change migration: about 27 files embed `tools:` frontmatter and about 15 call `tools.add`, and every `tools.add_local` call moves to `tools.offer_local`. The heaviest are `crates/runvil-internal/lua/src/tests/tool_scoping.rs`, `crates/runvil-internal/lua/src/tools/tests-offering.rs`, the engine tests `debug_and_counts.rs`, `models_loop.rs`, `chat_record_rebuild.rs`, `model_and_reply.rs`, and `offering.rs` under `crates/runvil-internal/engine/src/execute/tests/`, and the parser's `contract/tests*.rs`. Tests that build a `ToolSet` move their slot bindings into `offered` under wire names and pass `declared`. The Workshop UI tests `run-api.mjs` and `run-panel.mjs` drop their tool-slot expectations.
+  - Role-globals change migration: at `2b53936e6`, 2 method calls on a role-label global, `writer:loop(msgs)` (`crates/harness/tests/suite/host.rs`, line 55) and `fast:infer("yo")` (`crates/runvil-internal/engine/src/lua/tests/shims.rs`, line 377), and 3 other bare reads of one (`host.rs`, line 43; `crates/runvil-internal/engine/src/execute/tests/live_infer.rs`, line 160; `shims.rs`, lines 401 and 402), move to `models.get`. The other `writer:` and `other:` calls in the engine tests already run on a local from `models.get` or `models.default`, or on a global the test assigns itself, and stay as they are.
+  - Tests that pin the removed error texts (`crates/runvil-internal/lua/src/tools.rs`, lines 103 to 108, 188, 228, and 298; `crates/runvil-internal/engine/src/error.rs`, lines 235 and 253) move to the new texts.
 - Exit criteria:
   - The repository's verification commands, listed in `AGENTS.md`, pass after each change.
   - The facade surface check shows no diff after the role-globals change and the plugins change, and exactly the Technical Design items after the tools change and the provider change, with the listing regenerated.
@@ -443,7 +443,7 @@ The owner set the direction for each surface in conversation, and the implementa
   - A new tool list with renamed fields: a `wire_name` field and a `default_wire_name` function on `ToolBinding`, `ToolSet.tools`, `ToolSet::tool`, `ToolSet::is_required`, and `always` as ids. Reason: `alias` already holds the wire name, and everything keyed by it would have to move for no change in behavior. Revisit: with the per-model rename, which replaces the wire name anyway.
   - Translating `tools.calls` keys from id to wire name at read time. Reason: keying the counts by id at the sites that seed and increment them keeps every listed key in the names authors use. Revisit: never.
   - The `plugins` table as a Lua chunk. Reason: tool objects are Rust userdata whose `plugin` getter must return the plugin object, and the crate has been moving table-building chunks into Rust. Revisit: never.
-  - Plugin objects as read-only proxy tables (`crates/promptforge-internal/lua/src/proxy.rs`). Reason: a proxy iterated as an array is empty, so a plugin object passed to `tools.offer` by mistake would silently offer nothing, where userdata raises a type error. Revisit: never.
+  - Plugin objects as read-only proxy tables (`crates/runvil-internal/lua/src/proxy.rs`). Reason: a proxy iterated as an array is empty, so a plugin object passed to `tools.offer` by mistake would silently offer nothing, where userdata raises a type error. Revisit: never.
   - Provider fields on `ModelConfig`, `LocalModelConfig`, the routing `Model`, and `ModelInfo`, with their accessors and copies. Reason: `Capabilities` already reaches all four. Revisit: if the provider must stop appearing among capability fields.
   - `plugins` in the prelude sandbox's `VISIBLE_GLOBALS`. Reason: no prelude needs it. Revisit: when a prelude does.
   - `tools.offer_required()` and `tools.offer_extras()`. Reason: they would need `always_offer` twins, four functions to save one call. Revisit: if authors misuse the composed form.
@@ -461,11 +461,11 @@ The owner set the direction for each surface in conversation, and the implementa
   - Every line citation in this plan was checked at `2b53936e6`. The models-loop debt-removal plan, recorded in `vibe/2026-10-09-4-models-loop-debt-removal.md`, closed there on `master`, and the citations into the files its commits touched were re-checked at that commit.
   - The shipped prompts' tools change names for the model: `search` and `fetch` become `web_search` and `web_fetch`.
   - Until the per-model rename lands, list records hold wire names (`web_fetch`) while Lua uses ids (`web/fetch`).
-  - An undeclared plugin with no tools is invisible to `plugins.extras()`, because the Engine learns of plugins only through the catalog and the declared list (`crates/promptforge-internal/engine/src/execute/config.rs`, lines 91 to 108).
+  - An undeclared plugin with no tools is invisible to `plugins.extras()`, because the Engine learns of plugins only through the catalog and the declared list (`crates/runvil-internal/engine/src/execute/config.rs`, lines 91 to 108).
   - Existing run logs are disposable, so the effect `alias` of a script call by id, which becomes the wire name, takes effect on the next run.
   - `Capabilities` describes "what a model can do rather than how the gateway reaches it" (`metadata.rs`, lines 78 to 83). The provider describes the model too, and its doc says so.
   - The two `ModelBinding` facade items exist only to expose `handle.provider`. Without that field, the provider change would add two facade items, not four.
-  - The `promptforge-docs` guide still documents three-segment tool paths, optional plugins, slots, and alias and role globals, and stays stale after these changes.
+  - The `runvil-docs` guide still documents three-segment tool paths, optional plugins, slots, and alias and role globals, and stays stale after these changes.
 
 ### Deferred and Out of Scope
 
@@ -475,7 +475,7 @@ The owner set the direction for each surface in conversation, and the implementa
 - Deferred: plugin metadata beyond tool ids, such as an MCP server's reported name and version. Revisit when a prompt needs it.
 - Out of scope: handle methods and the namespace forms without a handle, already on `master` from the models-loop-in-Rust plan.
 - Out of scope: the rest of the models-loop-in-Rust plan's work, and the models-loop debt-removal plan.
-- Out of scope: the `promptforge-docs` guide.
+- Out of scope: the `runvil-docs` guide.
 
 </decision-record>
 <project-survey>
@@ -485,20 +485,20 @@ The owner set the direction for each surface in conversation, and the implementa
 - Status: complete
 - Build command: `cargo build --locked -p <crate>` for any one crate. Plain `cargo build --locked` builds only the default member, the gateway (`crates/gateway/app`). The desktop app builds with `cargo workshop [--release]` (alias for `build-workshop`, which builds the gateway, stages it as the Tauri sidecar, builds Workshop, and removes the staged sidecar). Crates that bundle a UI through `build-ui` (`gateway-config-ui`, `workshop-server`) need `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` first. Toolchain is stable (`rust-toolchain.toml`); the Windows target links with `rust-lld` and a static CRT (`.cargo/config.toml`).
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; add `--test <binary>` (`suite` or `it`, see test placement) to target one integration binary. For `workshop`, `workshop-server`, and `workshop-server-api`, drop `--all-features`. CI's own single-test form is `cargo test --locked -p <crate> [--features ...] --test it <exact_test_name>`. cargo-nextest 0.9.128 is installed locally.
-- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, repeating `-p` per crate (for the Engine family: `-p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin`; workshop app crates without `--all-features`). Structural and boundary checks alone: `cargo test -p build-xtask`. Workshop UI: `npm test --workspaces --if-present` from `crates/workshop`; gateway config UI: `npm test` from `crates/gateway/config-ui/ui`.
+- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, repeating `-p` per crate (for the Engine family: `-p runvil -p runvil-engine -p runvil-lua -p runvil-parser -p runvil-plugin`; workshop app crates without `--all-features`). Structural and boundary checks alone: `cargo test -p build-xtask`. Workshop UI: `npm test --workspaces --if-present` from `crates/workshop`; gateway config UI: `npm test` from `crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`. The first run includes `build-xtask`'s structural checks. CI additionally runs `cargo check -p gateway --no-default-features` (headless gateway shape), `cargo nextest run --locked -p workshop-server --features headless`, the two UI `npm test` runs above, and `cargo +nightly-2026-09-05 xtask api --check` plus `cargo nextest run --locked -p build-xtask --run-ignored only` on the pinned nightly.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, both with environment variable `CARGO_BUILD_WARNINGS=deny` (PowerShell: `$env:CARGO_BUILD_WARNINGS='deny'`). Never add a standalone `cargo check --workspace`; clippy covers it. Supply chain (CI and pre-push): `cargo deny check`; CI also runs `cargo audit` and `cargo hakari verify`. UI typecheck: `npm run typecheck --workspaces --if-present` in `crates/workshop`, `npm run typecheck` in `crates/gateway/config-ui/ui`.
 - Formatter check command: `cargo fmt --all --check` (`rustfmt.toml`: `style_edition = "2024"`; also the pre-commit hook).
-- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with environment variable `RUSTDOCFLAGS=-D warnings`, plus the facade without features: `cargo doc -p promptforge --no-deps` (same flags). CI also builds `cargo doc -p harness --no-deps` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. Facade surface check: `cargo +nightly-2026-09-05 xtask api --check`, which compares against the committed `crates/promptforge/public-api.txt`. The user-guide site (`cargo xtask site`) needs an outside `promptforge-docs` checkout named by `PROMPTFORGE_DOCS` and `mdbook`.
+- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with environment variable `RUSTDOCFLAGS=-D warnings`, plus the facade without features: `cargo doc -p runvil --no-deps` (same flags). CI also builds `cargo doc -p harness --no-deps` and `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`. Facade surface check: `cargo +nightly-2026-09-05 xtask api --check`, which compares against the committed `crates/runvil/public-api.txt`. The user-guide site (`cargo xtask site`) needs an outside `runvil-docs` checkout named by `RUNVIL_DOCS` and `mdbook`.
 - Test placement and naming conventions:
   - Unit tests sit beside their module in a sibling file `<module>-tests.rs`, wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;`; large groups split further (`messages-tests-list.rs`, `messages-tests-view.rs`) or become a `tests/` subdirectory inside `src/` once there are three or more files.
-  - Integration tests compile as one binary per crate: `tests/suite/main.rs` (`promptforge`, `harness`) or `tests/it/main.rs` (most others), with one module file per topic and a shared `support` module. Prompt fixtures are `.md` files under `tests/prompts/<category>/` (for example `crates/promptforge-internal/engine/tests/prompts/execution/`). Benches use `harness = false` and `required-features = ["test-support"]`.
+  - Integration tests compile as one binary per crate: `tests/suite/main.rs` (`runvil`, `harness`) or `tests/it/main.rs` (most others), with one module file per topic and a shared `support` module. Prompt fixtures are `.md` files under `tests/prompts/<category>/` (for example `crates/runvil-internal/engine/tests/prompts/execution/`). Benches use `harness = false` and `required-features = ["test-support"]`.
   - Test functions are full-sentence snake_case behavior statements (`a_run_can_move_between_threads_between_calls`, `each_getter_returns_the_value_the_context_was_built_from`), usually returning `Result<(), Box<dyn Error>>`. `unwrap`/`expect` are allowed only in tests (`clippy.toml`); suite roots opt in with `#![expect(clippy::expect_used, reason = "...")]`.
-  - Test-only helpers live behind per-crate features (`test-support` in the Engine crates and `promptforge-plugin`, `test-fixtures` in gateway and workshop crates); `build-xtask` checks they do not leak.
+  - Test-only helpers live behind per-crate features (`test-support` in the Engine crates and `runvil-plugin`, `test-fixtures` in gateway and workshop crates); `build-xtask` checks they do not leak.
   - UI tests use `node --test`: `crates/workshop/ui/test/*.mjs` and `crates/gateway/config-ui/ui/src/**/*.test.mjs`, with jsdom.
 - Directory map:
-  - `crates/` holds every crate (Cargo workspace, resolver 3, edition 2024, version 0.3.0). Public crates sit at the top level; the manifestless containers `promptforge-internal/`, `harness-internal/`, `gateway/` (with nested `gateway/stt/`), and `workshop/` hold each family's private crates.
-  - Engine: `crates/promptforge` (facade with `examples/greeter`, `public-api.txt`) and `crates/promptforge-internal/{types,parser,lua,engine,vfs,model-client}`; `crates/promptforge-plugin` is the Plugin API.
+  - `crates/` holds every crate (Cargo workspace, resolver 3, edition 2024, version 0.3.0). Public crates sit at the top level; the manifestless containers `runvil-internal/`, `harness-internal/`, `gateway/` (with nested `gateway/stt/`), and `workshop/` hold each family's private crates.
+  - Engine: `crates/runvil` (facade with `examples/greeter`, `public-api.txt`) and `crates/runvil-internal/{types,parser,lua,engine,vfs,model-client}`; `crates/runvil-plugin` is the Plugin API.
   - Harness: `crates/harness` (facade), `crates/harness-internal/runner`, `crates/harness-gateway-client`.
   - Plugins: `crates/plugin-web`, `crates/plugin-mcp`, `crates/plugin-user-input`.
   - Gateway: `crates/gateway/{app,config,config-ui,protocol,routing,local,cloud-providers,logging,progress,web-search,stt/*}` plus the public pair `crates/gateway-api-types` and `crates/gateway-api-discovery`.
@@ -506,16 +506,16 @@ The owner set the direction for each surface in conversation, and the implementa
   - Shared and tooling: `crates/shared-error-source`, `crates/shared-loopback`, `crates/workspace-hack` (cargo-hakari), and `crates/build-{ceiling,ui,workshop,xtask,user-guide,llama-cuda}`.
   - Outside `crates/`: `guide/` (mdBook config and chrome for the gateway, language, and workshop books, plus the site landing page), `prompts/` (sample prompt files), `tools/` (Node scripts for sidecar staging and a live TTS check), `vibe/` (dated plan files `YYYY-MM-DD-N-slug.md`, plus `scratch/`), `images/` (README banners), `.github/workflows/` (CI, release, nightly, site), `.githooks/` (pre-commit fmt, pre-push clippy and deny), `.config/` (nextest and hakari config). `local/`, `target/`, and `target-msrv/` are gitignored; `cabinet/` is present but untracked.
 - Component boundaries:
-  - Engine (`promptforge`, `promptforge-*`) depends on no gateway, workshop, Harness, or Plugin crate. Internal direction: `types` and `vfs` at the bottom; `model-client` -> `types`; `lua` -> `model-client`, `types`, `vfs`; `parser` -> `lua`, `types`; `engine` -> all five; `promptforge` facade re-exports `engine` and the rest. Outside crates reach the Engine only through `promptforge` and `promptforge-plugin` (`promptforge-plugin` -> `types`, `vfs`).
-  - Harness: `harness-runner` -> `promptforge`, `promptforge-plugin`; `harness` -> `harness-runner`, `promptforge`, `promptforge-plugin`; `harness-gateway-client` -> `harness`, `promptforge`, `plugin-web` (the one allowed Plugin edge, for web's `SearchProvider`). Outside its family the Harness may name only `promptforge`, `promptforge-plugin`, and `workspace-hack`.
-  - Plugins depend only on `promptforge-plugin`, `shared-*`, and outside libraries.
-  - Gateway depends on no promptforge, workshop, or Harness crate. `gateway` (app) -> config, config-ui, local, logging, progress, protocol, routing, stt, web-search, the public pair, and `shared-loopback`. `gateway-stt` is the only member of `gateway/stt/` the rest of the family may name.
+  - Engine (`runvil`, `runvil-*`) depends on no gateway, workshop, Harness, or Plugin crate. Internal direction: `types` and `vfs` at the bottom; `model-client` -> `types`; `lua` -> `model-client`, `types`, `vfs`; `parser` -> `lua`, `types`; `engine` -> all five; `runvil` facade re-exports `engine` and the rest. Outside crates reach the Engine only through `runvil` and `runvil-plugin` (`runvil-plugin` -> `types`, `vfs`).
+  - Harness: `harness-runner` -> `runvil`, `runvil-plugin`; `harness` -> `harness-runner`, `runvil`, `runvil-plugin`; `harness-gateway-client` -> `harness`, `runvil`, `plugin-web` (the one allowed Plugin edge, for web's `SearchProvider`). Outside its family the Harness may name only `runvil`, `runvil-plugin`, and `workspace-hack`.
+  - Plugins depend only on `runvil-plugin`, `shared-*`, and outside libraries.
+  - Gateway depends on no runvil, workshop, or Harness crate. `gateway` (app) -> config, config-ui, local, logging, progress, protocol, routing, stt, web-search, the public pair, and `shared-loopback`. `gateway-stt` is the only member of `gateway/stt/` the rest of the family may name.
   - Workshop: the desktop app `workshop` -> `workshop-server-api` -> `workshop-server` only. Inside the server, tiers flow one way: server (`workshop-server`) -> features (`agents`, `workspace`, `user-state`, `run-log`) -> services (`gateway`, `menu`, `status`) -> vocabulary (`protocol`, `registry`, `support`); same-tier crates do not depend on each other except `registry` -> `protocol`. Workshop may use gateway crates only through `gateway-api-types` and `gateway-api-discovery`; `workshop-server` composes the Harness, all three Plugins, and `harness-gateway-client`.
-  - `shared-*` depend on no product crate. Every crate's build script runs `build-ceiling`'s check, as a build dependency or, where a `build-*` dependency is banned (Harness and Plugin crates), by `#[path]` include; every crate except `promptforge-vfs` depends on `workspace-hack`. `cargo test -p build-xtask` enforces this matrix, container privacy, the Workshop tiers, and lint inheritance.
+  - `shared-*` depend on no product crate. Every crate's build script runs `build-ceiling`'s check, as a build dependency or, where a `build-*` dependency is banned (Harness and Plugin crates), by `#[path]` include; every crate except `runvil-vfs` depends on `workspace-hack`. `cargo test -p build-xtask` enforces this matrix, container privacy, the Workshop tiers, and lint inheritance.
 - Conventions summary:
   - Engine, Harness, Host, and Plugin are capitalized defined terms with one meaning each (`AGENTS.md`); Engine crates say "the caller" and never mention the Host. `crates/workshop/ui/test/docs-claims.mjs` enforces the wording in `AGENTS.md`, crate `## Invariants` docs, and `.cursor/rules`.
   - The Engine is sans-IO: a run emits effects (model reply, tool result, timer, file) and the caller answers them through `Run::step`/`Run::resume`; the Harness performs every effect in production.
-  - Each crate's `lib.rs` opens with a `//!` crate doc, often with a `## Invariants` section listing allowed dependencies and tier; workshop `lib.rs` files are facade-only (docs, attributes, `mod`, `pub use`). Several crates carry their own `AGENTS.md` (including `promptforge-internal/{engine,lua,types,vfs}`).
+  - Each crate's `lib.rs` opens with a `//!` crate doc, often with a `## Invariants` section listing allowed dependencies and tier; workshop `lib.rs` files are facade-only (docs, attributes, `mod`, `pub use`). Several crates carry their own `AGENTS.md` (including `runvil-internal/{engine,lua,types,vfs}`).
   - Strict workspace lints inherited by every crate: clippy `all` and `pedantic` denied, `unwrap_used`/`expect_used` denied outside tests, `allow_attributes` denied so suppressions use `#[expect(..., reason = "...")]`, `unsafe_code` denied, `missing_docs` and `unreachable_pub` warned (denied in the gate). Process-global installers are banned outside binary entry points (`clippy.toml`).
   - Source directories are flat: one or two related files are kebab siblings `parent-label.rs` wired with `#[path]`, three or more become a subdirectory; `build-ceiling` fails the build on any Rust file over 500 lines.
   - Comments explain only non-obvious constraints; platform or external-bug workarounds cite the upstream issue URL. Error messages are written for model consumption: concise, naming required versus actual.
@@ -538,17 +538,17 @@ The owner set the direction for each surface in conversation, and the implementa
 - Piece: Role-label globals, the component's only piece, built as one step. The parser edit and the install edit land together: turning off the reserved-name check while labels still install as raw globals would let a label such as `tools` overwrite an Engine global.
 - Depends on: `master` at `2b53936e6`, where the models-loop debt-removal plan closed and every line citation in this plan was checked. It was still `HEAD` when these steps were written.
 - Work:
-  - `crates/promptforge-internal/lua/src/vm/install.rs`: delete the role-label half of `install_captured_bindings` (lines 48 to 63) and drop model labels from its doc comment and from the module doc. The tool-alias half stays until step 3.
-  - `crates/promptforge-internal/parser/src/contract/models.rs` (lines 127 to 142): set `installs_global` to false for model labels, which also turns off their reserved-name checks. The name grammar still applies.
-  - `crates/promptforge-internal/parser/src/contract.rs` (lines 255 to 263): remove the tool-and-model clash check.
-  - `crates/promptforge-internal/engine/src/execute/context-bound.rs`, `frontmatter_aliases` (lines 115 to 124): drop the model-label chain, so prelude collision checks see tool aliases only.
-  - Move the 5 role-label global reads to `models.get(label)`: `crates/harness/tests/suite/host.rs` lines 43 and 55; `crates/promptforge-internal/engine/src/lua/tests/shims.rs` lines 377, 401, and 402; and the `writer` read in `crates/promptforge-internal/engine/src/execute/tests/live_infer.rs` line 160 (the `echo` tool-alias read on the same line moves in step 3). The other `writer:` and `other:` calls in the engine tests already run on locals and stay.
+  - `crates/runvil-internal/lua/src/vm/install.rs`: delete the role-label half of `install_captured_bindings` (lines 48 to 63) and drop model labels from its doc comment and from the module doc. The tool-alias half stays until step 3.
+  - `crates/runvil-internal/parser/src/contract/models.rs` (lines 127 to 142): set `installs_global` to false for model labels, which also turns off their reserved-name checks. The name grammar still applies.
+  - `crates/runvil-internal/parser/src/contract.rs` (lines 255 to 263): remove the tool-and-model clash check.
+  - `crates/runvil-internal/engine/src/execute/context-bound.rs`, `frontmatter_aliases` (lines 115 to 124): drop the model-label chain, so prelude collision checks see tool aliases only.
+  - Move the 5 role-label global reads to `models.get(label)`: `crates/harness/tests/suite/host.rs` lines 43 and 55; `crates/runvil-internal/engine/src/lua/tests/shims.rs` lines 377, 401, and 402; and the `writer` read in `crates/runvil-internal/engine/src/execute/tests/live_infer.rs` line 160 (the `echo` tool-alias read on the same line moves in step 3). The other `writer:` and `other:` calls in the engine tests already run on locals and stay.
 - Tests:
   - No role-label global exists after setup, in a section VM and in the H1 VM.
   - `models.get(label)` returns the role's handle.
   - A role label that is a reserved name, and one equal to a tool alias, now parse.
   - A plugin prelude global with the same name as a role label installs, because labels left the collision list.
-- Verification: `cargo nextest run --locked -p promptforge-lua -p promptforge-parser -p promptforge-engine -p harness --all-features`, then the full verification commands listed in Project Survey. The facade surface check shows no diff.
+- Verification: `cargo nextest run --locked -p runvil-lua -p runvil-parser -p runvil-engine -p harness --all-features`, then the full verification commands listed in Project Survey. The facade surface check shows no diff.
 - Commit: `Stop installing role labels as Lua globals`
 
 </step-1>
@@ -567,7 +567,7 @@ The owner set the direction for each surface in conversation, and the implementa
   - `crates/workshop/ui/src/services/run-api.ts`: delete `RunContract.tools` (line 72), the `RunContractTool` type, and its parse (near line 251).
   - `crates/workshop/ui/src/parts/run/run-rows.ts`: delete the tool rows (lines 184 to 188) and drop tools from the header comment (line 7).
   - `crates/workshop/ui/test/run-api.mjs` (lines 43, 104 to 107, 151, 184, and 204) and `crates/workshop/ui/test/run-panel.mjs` (lines 130, 198 and 199, and 451): drop the tool-slot fixtures and expectations.
-  - Prerequisite fix: the module doc of `crates/promptforge-internal/engine/src/execute/tests/models_loop-author-shapes.rs` (line 3) names the Workshop, which `crates/workshop/ui/test/docs-claims.mjs` refuses in Engine crates, so the Workshop `npm test` this step runs has failed on `master` since `2e15892a6`. Reword it to name the shipped chat agent without naming a Host application.
+  - Prerequisite fix: the module doc of `crates/runvil-internal/engine/src/execute/tests/models_loop-author-shapes.rs` (line 3) names the Workshop, which `crates/workshop/ui/test/docs-claims.mjs` refuses in Engine crates, so the Workshop `npm test` this step runs has failed on `master` since `2e15892a6`. Reword it to name the shipped chat agent without naming a Host application.
 - Tests:
   - The run panel renders no `ws-run-panel__row--tool` row.
   - The run API parses a contract without `tools`.
@@ -585,46 +585,46 @@ The owner set the direction for each surface in conversation, and the implementa
 - Piece: Id-keyed tools, second of the component's two pieces, built after the Workshop consumer, as one step. Deleting the slots forces every slot-using test, prompt, and consumer to migrate in the same commit, and moving each call site only once requires the final surface (ids, tool objects, `required` and `extras`, counts by id) in that commit. `LuaToolHandle` is built today only for tool alias globals, so removing those globals without making it the tool object would leave it dead under the warnings-denied clippy gate. Any finer split either moves call sites twice or breaks the gate.
 - Depends on: step 1, because this step deletes the remainder of `install_captured_bindings`, and step 2, because Workshop no longer reads `Frontmatter::tools`.
 - Work:
-  - Tool set, `crates/promptforge-internal/lua/src/handles.rs`:
+  - Tool set, `crates/runvil-internal/lua/src/handles.rs`:
     - `ToolSet` swaps `bindings` for `declared: Vec<PluginId>`. `offered` keeps its name and type and now holds every offerable catalog tool in id order under its wire name. `always` keeps holding wire names.
     - `ToolSet::for_test` and `ToolSet::from_parts` take `(declared, always, offered)`. Add `declared()`. `offered_binding` (lines 209 to 213) matches a wire name or a canonical id. `ToolSet::bindings` and `ToolSet::binding` go.
-    - `ToolView::bindings` becomes `ToolView::declared`, which `RunState::tool_set_snapshot` reads (`crates/promptforge-internal/engine/src/execute/context.rs`, lines 303 to 309). `ToolBinding` changes only in its docs.
-  - Offering, `crates/promptforge-internal/engine/src/execute/context-bound.rs`: `bound_tool_set` drops the slot loop and fills `declared`. `offered_bindings` drops the declared-plugin filter (line 50) and the alias set (lines 45 and 46). `offer_refusal` drops its alias rule and becomes `offer_refusal(name, tool, taken)`. `frontmatter_aliases` goes. `catalog_bindings` and `RunState::catalog_binding` stay.
-  - Lua `tools` table, `crates/promptforge-internal/lua/src/tools.rs`, `tools/decode.rs`, and `tools/userdata.rs`:
+    - `ToolView::bindings` becomes `ToolView::declared`, which `RunState::tool_set_snapshot` reads (`crates/runvil-internal/engine/src/execute/context.rs`, lines 303 to 309). `ToolBinding` changes only in its docs.
+  - Offering, `crates/runvil-internal/engine/src/execute/context-bound.rs`: `bound_tool_set` drops the slot loop and fills `declared`. `offered_bindings` drops the declared-plugin filter (line 50) and the alias set (lines 45 and 46). `offer_refusal` drops its alias rule and becomes `offer_refusal(name, tool, taken)`. `frontmatter_aliases` goes. `catalog_bindings` and `RunState::catalog_binding` stay.
+  - Lua `tools` table, `crates/runvil-internal/lua/src/tools.rs`, `tools/decode.rs`, and `tools/userdata.rs`:
     - `tools.offer` comes from `add` (lines 177 to 214), and `tools.always_offer` from `always` (lines 216 to 244). Both decode through `collect_tools_add_entries(call, args)`, which names the calling function in every argument-shape error and accepts a description override only with a single id or tool object.
     - Each string entry must parse as a tool id before `offered_binding` resolves it, so a wire name, a malformed id, or a local alias raises `{call}: "{id}" is not a catalog tool in this run`. Every entry is checked before any is recorded.
     - `offer` records the binding's wire name in section scope and the section's overrides. `always_offer` sets the prompt-wide override on the binding in `offered` and records its wire name in `always`. Precedence stays: section override, then prompt-wide override, then catalog text. Scope order stays: prompt-wide tools first, then the section's offers in first-offer order, each tool once.
     - Tool objects: `TOOL_OBJECTS_REGISTRY` and `tool_object(lua, id)` hold one `LuaToolHandle` per offered tool, built in `install_tools`. `LuaToolHandle` becomes `{ id: ToolId, description: String }` with `from_binding(&ToolBinding)` and `id()`. Its field getters become `id` and `description` (the catalog text), and it keeps its frozen-assignment refusal. The `name`, `parameters`, `wire_name`, and `untrusted` getters go. `tool_alias` (decode.rs lines 36 to 54) decodes it through `id()`. The record branch and `record_name` (decode.rs lines 18 to 23) go.
     - `tools.required()` and `tools.extras()` come from `install_offered` (lines 252 to 273), split by whether the tool's plugin is in `declared`. Each returns a fresh array of the shared tool objects in id order. `tools.get(id)` reads the registry and returns the object or nil, and raises `tools.get takes a tool id, got {type}` for a non-string.
-    - `tools.offer_local` comes from `install_add_local` (lines 275 to 318) without the slot-duplicate check, with `tools.offer_local` in its error texts. A local alias may equal a catalog tool's wire name, and the local tool wins in scope as today (`crates/promptforge-internal/engine/src/execute/scope.rs`, lines 66 to 74).
+    - `tools.offer_local` comes from `install_add_local` (lines 275 to 318) without the slot-duplicate check, with `tools.offer_local` in its error texts. A local alias may equal a catalog tool's wire name, and the local tool wins in scope as today (`crates/runvil-internal/engine/src/execute/scope.rs`, lines 66 to 74).
     - `tools.call` resolves a local alias first, then a parsed catalog id through `offered_binding` and then `RunState::catalog_binding`. Anything else, a wire name included, raises kind `unbound_tool`.
-    - `tools.calls`: `install_tool_call_counts` seeds from offered ids in place of slot aliases. Counts key by `binding.id()` at `tools.rs` line 146, `crates/promptforge-internal/engine/src/execute/section_context.rs` line 233, and `crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs` lines 190 and 191, while local tools keep their alias. The unseeded-key diagnostic (`tools.rs`, lines 99 to 110) reads exactly `tools.calls: {key:?} has no seeded count; seeded names: {names:?}`, followed by ` (a catalog tool that was neither offered in this section nor called with tools.call)` when the key is the id of a tool the run can offer, by nothing when no name is seeded, and otherwise by ` - check for typos or offer it with tools.offer`.
+    - `tools.calls`: `install_tool_call_counts` seeds from offered ids in place of slot aliases. Counts key by `binding.id()` at `tools.rs` line 146, `crates/runvil-internal/engine/src/execute/section_context.rs` line 233, and `crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs` lines 190 and 191, while local tools keep their alias. The unseeded-key diagnostic (`tools.rs`, lines 99 to 110) reads exactly `tools.calls: {key:?} has no seeded count; seeded names: {names:?}`, followed by ` (a catalog tool that was neither offered in this section nor called with tools.call)` when the key is the id of a tool the run can offer, by nothing when no name is seeded, and otherwise by ` - check for typos or offer it with tools.offer`.
     - `tools.add`, `tools.always`, `tools.offered`, and `tools.add_local` are no longer installed. `tools.allow_tasks` and the task built-ins are unchanged.
     - Keep `tools.rs` (384 lines at `2b53936e6`) under the 500-line ceiling by placing the tool-object registry and the list functions in a sibling under the existing `tools/` directory if it would pass the ceiling.
-  - Engine dispatch and errors: remove `.binding(alias)` from `scheduler/tool_call.rs` (line 179) and from `binding_for_scope` (`crates/promptforge-internal/lua/src/vm/state.rs`, line 237). `unbound_tool_call` (`crates/promptforge-internal/engine/src/execute/scheduler/dispatch.rs`, lines 33 to 42) lists the ids in `ToolSet.offered`, every catalog tool the run can offer, and its error at `crates/promptforge-internal/engine/src/error.rs` lines 253 to 260 keeps kind `unbound_tool` and reads exactly `tool {name:?} is not a tool in this run; catalog tools: {ids:?}`. The out-of-scope check (`scheduler/chat.rs`, lines 269 to 271) asks `offered_binding`, and the bound-slot suffix at `error.rs` line 235 becomes exactly ` (a catalog tool that was not offered in this section)`. Effect and event `alias` fields keep their shape.
+  - Engine dispatch and errors: remove `.binding(alias)` from `scheduler/tool_call.rs` (line 179) and from `binding_for_scope` (`crates/runvil-internal/lua/src/vm/state.rs`, line 237). `unbound_tool_call` (`crates/runvil-internal/engine/src/execute/scheduler/dispatch.rs`, lines 33 to 42) lists the ids in `ToolSet.offered`, every catalog tool the run can offer, and its error at `crates/runvil-internal/engine/src/error.rs` lines 253 to 260 keeps kind `unbound_tool` and reads exactly `tool {name:?} is not a tool in this run; catalog tools: {ids:?}`. The out-of-scope check (`scheduler/chat.rs`, lines 269 to 271) asks `offered_binding`, and the bound-slot suffix at `error.rs` line 235 becomes exactly ` (a catalog tool that was not offered in this section)`. Effect and event `alias` fields keep their shape.
   - Deletions:
-    - `install_captured_bindings` and its call (`crates/promptforge-internal/engine/src/execute/section_vm.rs`, line 180).
-    - `fill_tool_bindings` (`crates/promptforge-internal/engine/src/execute/fill.rs`) and its call (`environment.rs`, line 123), and `ToolBindings` (`bindings.rs`).
+    - `install_captured_bindings` and its call (`crates/runvil-internal/engine/src/execute/section_vm.rs`, line 180).
+    - `fill_tool_bindings` (`crates/runvil-internal/engine/src/execute/fill.rs`) and its call (`environment.rs`, line 123), and `ToolBindings` (`bindings.rs`).
     - `RunContext.tool_bindings` and its accessor (`config.rs`, lines 102, 142, 308 to 310, and 366).
     - `Requirements.missing_tools` with its uses in `requirements.rs` (the emptiness check, the merge, and the notice text) and in `requirements-tests.rs`.
     - The parser's `tools:` key, `ToolSlot`, `ToolSlots`, `Frontmatter::tools`, and `ContractKeys.installs_global`.
-    - The alias-list parameter of `install_preludes` (`crates/promptforge-internal/lua/src/prelude.rs`).
+    - The alias-list parameter of `install_preludes` (`crates/runvil-internal/lua/src/prelude.rs`).
     - The slot chain in Host requirements (`crates/harness-internal/runner/src/host-run.rs`, lines 128 to 167). Keep the declared-plugin loop, so a missing declared plugin still lands in `missing_required`.
   - Consumers:
     - `prompts/research-person.md` and `crates/workshop/agents/agents/chat.md` drop `tools:` and offer by id with `tools.offer` and `tools.always_offer`.
-    - The fixture in `crates/harness-gateway-client/src/wire/request-tests.rs`, and the shim comment at `crates/promptforge-internal/lua/src/__impl_coro.lua` line 71.
-    - Docs that describe slots or the old functions: `crates/promptforge-internal/lua/src/lib.rs` lines 36 and 37, `crates/promptforge-internal/lua/src/tools/decode.rs` lines 75 to 78, `crates/promptforge-internal/lua/src/vm/run.rs` line 369, `crates/plugin-web/src/lib.rs` lines 5 to 14, `crates/plugin-user-input/src/lib.rs` lines 59 to 63, and the `tools.always` comments in `context.rs` lines 93 and 345.
-  - Facade: regenerate `crates/promptforge/public-api.txt`. The diff is exactly the removals in Technical Design: `ToolSlot`, `ToolSlots` and its methods, `ToolBindings` and its methods, `RunContext::tool_bindings`, `Frontmatter::tools`, `Requirements::missing_tools`, and `ToolSlot::Exact`.
+    - The fixture in `crates/harness-gateway-client/src/wire/request-tests.rs`, and the shim comment at `crates/runvil-internal/lua/src/__impl_coro.lua` line 71.
+    - Docs that describe slots or the old functions: `crates/runvil-internal/lua/src/lib.rs` lines 36 and 37, `crates/runvil-internal/lua/src/tools/decode.rs` lines 75 to 78, `crates/runvil-internal/lua/src/vm/run.rs` line 369, `crates/plugin-web/src/lib.rs` lines 5 to 14, `crates/plugin-user-input/src/lib.rs` lines 59 to 63, and the `tools.always` comments in `context.rs` lines 93 and 345.
+  - Facade: regenerate `crates/runvil/public-api.txt`. The diff is exactly the removals in Technical Design: `ToolSlot`, `ToolSlots` and its methods, `ToolBindings` and its methods, `RunContext::tool_bindings`, `Frontmatter::tools`, `Requirements::missing_tools`, and `ToolSlot::Exact`.
 - Tests:
   - Tool objects: `id` and `description`, with the catalog text kept when an override is set; assignment refused.
   - Offering: decoding ids, tool objects, and arrays; all-or-nothing recording; the not-found error for an absent id, a malformed string, a wire name, and a local alias; `offered_binding` resolving a wire name and an id to the same binding; `tools.offer(tools.get(id))` matching `tools.offer(id)`; `always_offer` with an array and an extra, with its prompt-wide override and a section override in today's precedence.
-  - Lists: `required` and `extras` membership, with a declared plugin's tools in `required`; identity, so the same tool is `==` across `tools.required()`, `tools.extras()`, and `tools.get`, while each list call returns a new array. This identity test replaces `tools_offered_returns_a_fresh_plain_record_per_offered_tool_in_order` in `crates/promptforge-internal/lua/src/tools/tests-offering.rs`. `tools.get` hit, miss, local alias, malformed id, and non-string argument.
+  - Lists: `required` and `extras` membership, with a declared plugin's tools in `required`; identity, so the same tool is `==` across `tools.required()`, `tools.extras()`, and `tools.get`, while each list call returns a new array. This identity test replaces `tools_offered_returns_a_fresh_plain_record_per_offered_tool_in_order` in `crates/runvil-internal/lua/src/tools/tests-offering.rs`. `tools.get` hit, miss, local alias, malformed id, and non-string argument.
   - Local tools and counts: `tools.offer_local` creating, offering, and answering a local tool as `tools.add_local` did, with its registration errors under the new name; `calls` keyed by id, with a model call and a script call of one tool counting under it, and a local tool under its alias.
   - Errors and removals: the `unbound_tool`, unseeded `tools.calls`, and out-of-scope texts; a leftover `tools:` key refused at parse; `tools.add`, `tools.always`, `tools.offered`, and `tools.add_local` are nil; no tool alias global after setup, so the global table holds only Lua, Engine, and prelude names.
   - Integration: a script calls by id a catalog tool that was left out of the offering, and the call runs; both shipped prompts run end to end.
   - Migration: the roughly 27 files that embed `tools:` frontmatter and the roughly 15 that call `tools.add`; every `tools.add_local`, `tools.always`, and `tools.offered` call; every test that builds a `ToolSet` with slot bindings, which moves them into `offered` under wire names and passes `declared`; every tool alias global read, including `echo.name` in `live_infer.rs` line 160; and the tests that pin the old texts (`tools.rs` lines 103 to 108, 188, 228, and 298; `error.rs` lines 235 and 253).
-  - The heaviest migrations: `crates/promptforge-internal/lua/src/tests/tool_scoping.rs`, `lua/src/tools/tests-offering.rs`, and `lua/src/tests/shared_replay.rs`; `crates/promptforge-internal/engine/src/execute/tests.rs`; the engine tests under `crates/promptforge-internal/engine/src/execute/tests/`, namely `debug_and_counts.rs`, `models_loop.rs`, `models_loop_contract-rounds.rs`, `chat_record_rebuild.rs`, `model_and_reply.rs`, `offering.rs`, `local_tools.rs`, `tool_call_arm-local-handlers.rs`, `full_id_calls.rs`, `tool_scoping.rs`, `unified_pipeline.rs`, and `suite/exec_flow/run_setup.rs`; the parser's `contract/tests*.rs`; `crates/promptforge/tests/suite/prepare.rs` (line 371); and the Harness runner tests `prepare.rs`, `prepare-ready.rs`, and `harness-stop.rs` under `crates/harness-internal/runner/tests/it/`.
-- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin -p harness -p harness-runner -p harness-gateway-client --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check matches exactly the removals above.
+  - The heaviest migrations: `crates/runvil-internal/lua/src/tests/tool_scoping.rs`, `lua/src/tools/tests-offering.rs`, and `lua/src/tests/shared_replay.rs`; `crates/runvil-internal/engine/src/execute/tests.rs`; the engine tests under `crates/runvil-internal/engine/src/execute/tests/`, namely `debug_and_counts.rs`, `models_loop.rs`, `models_loop_contract-rounds.rs`, `chat_record_rebuild.rs`, `model_and_reply.rs`, `offering.rs`, `local_tools.rs`, `tool_call_arm-local-handlers.rs`, `full_id_calls.rs`, `tool_scoping.rs`, `unified_pipeline.rs`, and `suite/exec_flow/run_setup.rs`; the parser's `contract/tests*.rs`; `crates/runvil/tests/suite/prepare.rs` (line 371); and the Harness runner tests `prepare.rs`, `prepare-ready.rs`, and `harness-stop.rs` under `crates/harness-internal/runner/tests/it/`.
+- Verification: `cargo nextest run --locked -p runvil -p runvil-engine -p runvil-lua -p runvil-parser -p runvil-plugin -p harness -p harness-runner -p harness-gateway-client --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check matches exactly the removals above.
 - Commit: `Name tools by canonical id and remove tool slots`
 
 </step-3>
@@ -638,14 +638,14 @@ The owner set the direction for each surface in conversation, and the implementa
 - Piece: Plugin objects, the component's only piece, built as one step. The `plugins` global, the tool object's `plugin` getter, and the `plugins` reserved name are checked together by the identity tests, and the reserved-name two-way test fails if the global installs without its `RESERVED_NAMES` entry.
 - Depends on: step 3.
 - Work:
-  - New `crates/promptforge-internal/lua/src/plugins.rs`, a flat sibling with its tests in `plugins-tests.rs` wired by `#[path]`, declared as `mod plugins` in the lua crate's `lib.rs`:
+  - New `crates/runvil-internal/lua/src/plugins.rs`, a flat sibling with its tests in `plugins-tests.rs` wired by `#[path]`, declared as `mod plugins` in the lua crate's `lib.rs`:
     - `PLUGIN_OBJECTS_REGISTRY`, the registry table keyed by plugin name.
     - `LuaPluginHandle { name: PluginId, tools: Vec<String> }` with field getters `name` and `tools`, where `tools` reads a fresh array of the shared tool objects from `tool_object`, in id order. Its `__newindex` raises `Plugin objects are frozen: cannot assign field {key:?}`.
     - `plugin_object(lua, name)`, read by `plugins.get` and by the tool object's `plugin` getter.
     - `install_plugins(lua, globals, set)`, which builds one object per declared plugin, even one with no tools, and one per other plugin with offered tools, then installs `plugins.required()` (declared plugins, name order), `plugins.extras()` (the others, name order), and `plugins.get(name)` (the object or nil). Each list returns a fresh array.
-  - `crates/promptforge-internal/lua/src/vm/install.rs`: call `install_plugins` right after the `install_tools` call (line 135). That path sets up section VMs and the H1 VM alike.
-  - `crates/promptforge-internal/lua/src/tools/userdata.rs`: `LuaToolHandle` gains a `plugin` getter that reads `plugin_object` at access time.
-  - `crates/promptforge-internal/lua/src/globals.rs` (line 157): `RESERVED_NAMES` becomes `[(&str, Reserved); 61]` with `("plugins", Reserved::EngineGlobal)`. `VISIBLE_GLOBALS` in `prelude.rs` stays unchanged.
+  - `crates/runvil-internal/lua/src/vm/install.rs`: call `install_plugins` right after the `install_tools` call (line 135). That path sets up section VMs and the H1 VM alike.
+  - `crates/runvil-internal/lua/src/tools/userdata.rs`: `LuaToolHandle` gains a `plugin` getter that reads `plugin_object` at access time.
+  - `crates/runvil-internal/lua/src/globals.rs` (line 157): `RESERVED_NAMES` becomes `[(&str, Reserved); 61]` with `("plugins", Reserved::EngineGlobal)`. `VISIBLE_GLOBALS` in `prelude.rs` stays unchanged.
 - Tests:
   - `plugins.required()` lists a declared plugin with no tools; `plugins.extras()` excludes declared plugins; `plugins.get` hit and miss.
   - `plugins.get(name) == plugins.get(name)`, and the same object appears in `required` or `extras`.
@@ -653,9 +653,9 @@ The owner set the direction for each surface in conversation, and the implementa
   - Assignment to a plugin object is refused.
   - Every tool object's `plugin` is `==` to its plugin's object.
   - The table exists in the H1 VM.
-  - The reserved-name two-way test (`crates/promptforge-internal/engine/src/lua/tests/globals.rs`, lines 86 to 118) passes with `plugins` listed.
+  - The reserved-name two-way test (`crates/runvil-internal/engine/src/lua/tests/globals.rs`, lines 86 to 118) passes with `plugins` listed.
   - Integration: a run offers a declared plugin with `tools.offer(plugins.get(name).tools)`, and the model calls one of its tools by wire name. Another run offers an extra the same way after checking `plugins.get`.
-- Verification: `cargo nextest run --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-plugin --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check shows no diff.
+- Verification: `cargo nextest run --locked -p runvil -p runvil-engine -p runvil-lua -p runvil-parser -p runvil-plugin --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop`, which holds the `docs-claims` wording check. The facade surface check shows no diff.
 - Commit: `Add the plugins table over shared plugin objects`
 
 </step-4>
@@ -688,16 +688,16 @@ The owner set the direction for each surface in conversation, and the implementa
 - Depends on: step 5 for the wire field, not for compilation.
 - Work:
   - `crates/harness-gateway-client/src/catalog.rs`: `ModelsListEntry` (lines 20 to 28) gains `#[serde(default)] provider: Option<String>` and passes it to the descriptor through `ModelDescriptor::with_provider` when set.
-  - `crates/promptforge-internal/types/src/models.rs`: `ModelDescriptor` (line 147) gains `provider: Option<String>`, `with_provider`, and `provider()`. `ModelDescriptor::new` keeps its signature.
-  - `crates/promptforge-internal/model-client/src/model/options.rs`: `ModelBinding` (lines 89 to 99) gains the same field, `with_provider`, and `provider()`. `ModelBinding::new` keeps its signature.
-  - `crates/promptforge-internal/engine/src/execute/context-bound.rs`, `bound_model_set` (lines 148 to 183): call `with_provider` when the descriptor names one.
-  - `crates/promptforge-internal/lua/src/models-userdata.rs`: `LuaModelHandle` gains a `provider` field getter returning `Option<String>` from `binding().provider()`.
-  - `EffectRecord::Chat` (`crates/promptforge-internal/engine/src/execute/run/effect.rs`, lines 172 to 198 and 230 to 256) stays without the provider.
-  - Facade: regenerate `crates/promptforge/public-api.txt`. The diff adds exactly `ModelDescriptor::with_provider`, `ModelDescriptor::provider`, `ModelBinding::with_provider`, and `ModelBinding::provider`.
+  - `crates/runvil-internal/types/src/models.rs`: `ModelDescriptor` (line 147) gains `provider: Option<String>`, `with_provider`, and `provider()`. `ModelDescriptor::new` keeps its signature.
+  - `crates/runvil-internal/model-client/src/model/options.rs`: `ModelBinding` (lines 89 to 99) gains the same field, `with_provider`, and `provider()`. `ModelBinding::new` keeps its signature.
+  - `crates/runvil-internal/engine/src/execute/context-bound.rs`, `bound_model_set` (lines 148 to 183): call `with_provider` when the descriptor names one.
+  - `crates/runvil-internal/lua/src/models-userdata.rs`: `LuaModelHandle` gains a `provider` field getter returning `Option<String>` from `binding().provider()`.
+  - `EffectRecord::Chat` (`crates/runvil-internal/engine/src/execute/run/effect.rs`, lines 172 to 198 and 230 to 256) stays without the provider.
+  - Facade: regenerate `crates/runvil/public-api.txt`. The diff adds exactly `ModelDescriptor::with_provider`, `ModelDescriptor::provider`, `ModelBinding::with_provider`, and `ModelBinding::provider`.
 - Tests:
   - Client catalog decode with and without `provider`.
   - `handle.provider` is nil when the catalog names none and the provider id when it does, in a section VM.
-- Verification: `cargo nextest run --locked -p harness-gateway-client -p promptforge-types -p promptforge-model-client -p promptforge-engine -p promptforge-lua -p promptforge --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop` and `npm test` in `crates/gateway/config-ui/ui`. The facade surface check matches exactly the four additions above.
+- Verification: `cargo nextest run --locked -p harness-gateway-client -p runvil-types -p runvil-model-client -p runvil-engine -p runvil-lua -p runvil --all-features`, then the full verification commands listed in Project Survey, then `npm test --workspaces --if-present` in `crates/workshop` and `npm test` in `crates/gateway/config-ui/ui`. The facade surface check matches exactly the four additions above.
 - Commit: `Expose the model provider on model handles`
 
 </step-6>

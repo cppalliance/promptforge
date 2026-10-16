@@ -27,7 +27,7 @@ isProject: false
 - [tools-public/rulebooks/vibe-rulebook.md](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\vibe-rulebook.md) - bind for shape and discipline; execution uses the lean protocol below so the loop stays fast.
 - [tools-public/rulebooks/rust-rulebook.md](C:\Users\Vinnie\src\cursor\tools-public\rulebooks\rust-rulebook.md) - tests land with code; `Result` for expected failures; fmt + clippy clean; documented public items with `# Errors`.
 
-Scratch review file: `cabinet/_scratch/vibe-review-promptforge-models/vibe-review.md` (overwrite each cycle; empty when clean).
+Scratch review file: `cabinet/_scratch/vibe-review-runvil-models/vibe-review.md` (overwrite each cycle; empty when clean).
 
 Do not touch `design-core-orig.md` (byte-frozen).
 
@@ -104,12 +104,12 @@ flowchart LR
 
 **Goal:** Hosts can opt into raw request/response capture without widening `Observer`.
 
-In [promptforge-core](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core):
+In [runvil-core](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core):
 
 - Add `DebugCapture: Send + Sync` trait with a single method that receives `(execution, section, turn_index, event)` where `event` is an owned enum carrying request body and/or response body as `serde_json::Value` (and finish_reason / reasoning_content when present). `NullDebugCapture` or `Option<&dyn DebugCapture>` on `RunOptions` - prefer `Option` so production runs pay zero.
 - Extend `RunOptions` with `debug: Option<&'a dyn DebugCapture>`.
-- In [client.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\client.rs) / the tool loop in [execute.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\execute.rs): after building the request body and after parsing the response, call the capture when `Some`. Parsing must surface `finish_reason` and optional `reasoning_content` alongside today's `CompletionResult` (internal fields or a richer result type) so later steps can observe them; still do not put those payloads on the Observer.
-- Dev runner in [promptforge-core-tests](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core-tests): implement a capture that writes `turn-N-request.json` and `turn-N-response.json` under `<prompt-stem>.store/.trace/` (same dump directory as store files; announce on stderr). Wire it in `run_once` always for dev mode.
+- In [client.rs](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\src\client.rs) / the tool loop in [execute.rs](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\src\execute.rs): after building the request body and after parsing the response, call the capture when `Some`. Parsing must surface `finish_reason` and optional `reasoning_content` alongside today's `CompletionResult` (internal fields or a richer result type) so later steps can observe them; still do not put those payloads on the Observer.
+- Dev runner in [runvil-core-tests](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core-tests): implement a capture that writes `turn-N-request.json` and `turn-N-response.json` under `<prompt-stem>.store/.trace/` (same dump directory as store files; announce on stderr). Wire it in `run_once` always for dev mode.
 
 **Tests:** offline fake HTTP - capture receives request/response when set; `None` changes nothing; dump lands beside the prompt under `.trace/`.
 
@@ -121,7 +121,7 @@ In [promptforge-core](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-
 
 **Goal:** payload-free signals that would have named today's empty `evidence.md`.
 
-In [observe.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\src\observe.rs) `detail`:
+In [observe.rs](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\src\observe.rs) `detail`:
 
 - `MODEL_REPLY_EMPTY` = `"Model reply was empty"`
 - `MODEL_TURN_TRUNCATED` = `"Model turn truncated"` (when `finish_reason == "length"`)
@@ -138,14 +138,14 @@ Emit from the tool loop when binding final text: empty `content` after a success
 
 **Goal:** the Harness fetches authoritative model metadata from the gateway.
 
-In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-gateway):
+In [runvil-gateway](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-gateway):
 
-- Extend `ModelConfig` in [config.rs](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-gateway\src\config.rs):
+- Extend `ModelConfig` in [config.rs](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-gateway\src\config.rs):
   - `description: String` (required for catalogued models - bind needs prose)
   - `context: u32` (context window size)
   - `thinking: ThinkingMode` enum: `never` | `always` | `switchable` (default `never` for today's Anthropic entry)
-- Add `GET /v1/models` (bearer-authed like chat) returning OpenAI-shaped list plus PromptForge extensions in each object: `id` (= caller `name`), `description`, `context`, `thinking`.
-- Update [gateway.toml](C:\Users\Vinnie\src\cursor\promptforge\gateway.toml) with description/context/thinking for `claude-sonnet-4-6`.
+- Add `GET /v1/models` (bearer-authed like chat) returning OpenAI-shaped list plus Runvil extensions in each object: `id` (= caller `name`), `description`, `context`, `thinking`.
+- Update [gateway.toml](C:\Users\Vinnie\src\cursor\runvil\gateway.toml) with description/context/thinking for `claude-sonnet-4-6`.
 - Leave chat passthrough unchanged (`rest` already carries temperature / max_tokens / chat_template_kwargs).
 
 **Tests:** config load rejects missing description/context; `/v1/models` returns the configured entries; unknown key still fails load.
@@ -158,7 +158,7 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 
 **Goal:** prompt-local model bindings mirror tools.
 
-### Types (promptforge-core)
+### Types (runvil-core)
 
 - `ModelId` - stable identity (`server` + `name`, or single gateway-facing name; match ToolId shape if a server namespace helps multi-gateway later - for v0 use one namespace `"gateway"` + model name).
 - `ModelDescriptor` - id, description, context, thinking mode.
@@ -176,7 +176,7 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 ### Resolve
 
 1. Filter catalog by hard constraints from opts (`context >= N`; if `thinking == false` require `switchable` or `never`; if `thinking == true` require `switchable` or `always`).
-2. Semantic resolve description against filtered catalog via existing `promptforge-tool-picker` (build a `Catalog` of descriptors from model descriptions - reuse picker, do not fork a second embedding stack).
+2. Semantic resolve description against filtered catalog via existing `runvil-tool-picker` (build a `Catalog` of descriptors from model descriptions - reuse picker, do not fork a second embedding stack).
 3. Outcomes: Bind / Absent / Duplicate / Ambiguous - all-but-Bind fatal at `bind_prompt`, same as tools.
 4. Do **not** run tool-style near-duplicate rejection across model aliases that share weights with different invocation params.
 
@@ -199,10 +199,10 @@ In [promptforge-gateway](C:\Users\Vinnie\src\cursor\promptforge\crates\promptfor
 
 ## Step 5 - User-facing docs pass and fixture
 
-- Root [README.md](C:\Users\Vinnie\src\cursor\promptforge\README.md): consolidate Prompt language (tools + models), Gateway `[[model]]` + `/v1/models`, Watching a run (new details), Dev loop (`.store` + `.trace`).
-- [design-core.md](C:\Users\Vinnie\src\cursor\promptforge\crates\promptforge-core\design-core.md): authoritative lifecycle paragraphs for DebugCapture, model bind/execute, observer details.
+- Root [README.md](C:\Users\Vinnie\src\cursor\runvil\README.md): consolidate Prompt language (tools + models), Gateway `[[model]]` + `/v1/models`, Watching a run (new details), Dev loop (`.store` + `.trace`).
+- [design-core.md](C:\Users\Vinnie\src\cursor\runvil\crates\runvil-core\design-core.md): authoritative lifecycle paragraphs for DebugCapture, model bind/execute, observer details.
 - Crate READMEs for gateway and core-tests as needed.
-- Update [briefer.md](C:\Users\Vinnie\src\cursor\promptforge\briefer.md) (user prompt, keep untracked via exclude if needed) or add a tracked example under `prompts/` demonstrating:
+- Update [briefer.md](C:\Users\Vinnie\src\cursor\runvil\briefer.md) (user prompt, keep untracked via exclude if needed) or add a tracked example under `prompts/` demonstrating:
 
 ```lua
 models.need("analyst", "A model suited for careful analysis", { thinking = false, temperature = 0, context = 40000 })

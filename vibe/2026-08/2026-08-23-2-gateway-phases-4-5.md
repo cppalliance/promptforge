@@ -36,7 +36,7 @@ todos:
     content: "Step 23: move Gemma3ToolCode dialect from core to gateway"
     status: completed
   - id: step-24
-    content: "Step 24: delete dialect machinery from promptforge-core [Verify]"
+    content: "Step 24: delete dialect machinery from runvil-core [Verify]"
     status: completed
   - id: step-25
     content: "Step 25: split UpstreamTransport into connect vs mid-flight"
@@ -57,7 +57,7 @@ Execution: `tools-public/rulebooks/vibe-rulebook.md` + `tools-public/rulebooks/r
 
 Dispatch pattern: the subagent receives the path to the plan file, and instructions to GREP for the specific xml tag, and read ONLY what is inbetween the tags, do NOT read the entire plan file. Each step's content lives in a `<step-N>` tag; the entropy rules live in the `<entropy-rules>` tag. Every dispatch references the execution-context tag; a coder dispatch also references its step tag and the entropy-rules tag; a review dispatch references its step tag and the entropy-rules tag (check 7 is exactly what the rules target).
 
-Guide sync: edit `guide/src/gateway.md` and `crates/promptforge-gateway/user-guide-promptforge-gateway.md` manually, then regenerate `guide/promptforge-user-guide.md` via `cargo run -p make-user-guide`.
+Guide sync: edit `guide/src/gateway.md` and `crates/runvil-gateway/user-guide-runvil-gateway.md` manually, then regenerate `guide/runvil-user-guide.md` via `cargo run -p make-user-guide`.
 
 </execution-context>
 
@@ -131,7 +131,7 @@ Core has two dialects: `OpenAi` (identity) and `Gemma3ToolCode` (content-fence p
 
 <step-23>
 
-**Step 23: move Gemma3ToolCode to gateway.** `tool_dialect` is currently hardcoded `"openai"` in `Routing::from_config`; this step makes it a real config field on `ModelConfig` (default `"openai"`, only other value `"gemma3_tool_code"`). When `tool_dialect = "gemma3_tool_code"`: the chat handler injects the Gemma3 tool-code system guide (ported from `promptforge-core/src/dialects/gemma3_tool_code/guide.rs`) into the system message, strips tool definitions from the outgoing request, and parses the response content for `tool_code` fences (codec from `codec.rs`/`content.rs`) into `tool_calls` objects. Malformed fences become empty content + a `gateway_warning` field that is always present on recovery and logged at warn - never silent. The `gateway_warning` field is a gateway-specific extension on the OpenAI shape; downstream serde ignores unknown fields, and the wire docs note it. (litellm-rust's discipline is decline-rather-than-drop; the gateway is terminal with no fallback, so warn-and-continue is the adaptation, but the warning must be surfaced). Post-receipt parse failures stay distinct from pre-call translation errors (litellm-rust `as_response_error` pattern, `crates/core/src/chat_completions/handler.rs`: errors raised while normalizing an already-received response collapse into one invalid-response class, never confused with never-reached-the-provider failures). No `response_format: json_object` - the Gemma dialect uses content-fence parsing, not JSON mode. Move the codec into the gateway as a plain module (no trait - a `match` on the dialect string). Test: request with tools gets the guide injected; response with tool_code fence parsed into `tool_calls`; malformed fence produces warning; config rejects an unknown `tool_dialect` value. Docs: emulated tools section.
+**Step 23: move Gemma3ToolCode to gateway.** `tool_dialect` is currently hardcoded `"openai"` in `Routing::from_config`; this step makes it a real config field on `ModelConfig` (default `"openai"`, only other value `"gemma3_tool_code"`). When `tool_dialect = "gemma3_tool_code"`: the chat handler injects the Gemma3 tool-code system guide (ported from `runvil-core/src/dialects/gemma3_tool_code/guide.rs`) into the system message, strips tool definitions from the outgoing request, and parses the response content for `tool_code` fences (codec from `codec.rs`/`content.rs`) into `tool_calls` objects. Malformed fences become empty content + a `gateway_warning` field that is always present on recovery and logged at warn - never silent. The `gateway_warning` field is a gateway-specific extension on the OpenAI shape; downstream serde ignores unknown fields, and the wire docs note it. (litellm-rust's discipline is decline-rather-than-drop; the gateway is terminal with no fallback, so warn-and-continue is the adaptation, but the warning must be surfaced). Post-receipt parse failures stay distinct from pre-call translation errors (litellm-rust `as_response_error` pattern, `crates/core/src/chat_completions/handler.rs`: errors raised while normalizing an already-received response collapse into one invalid-response class, never confused with never-reached-the-provider failures). No `response_format: json_object` - the Gemma dialect uses content-fence parsing, not JSON mode. Move the codec into the gateway as a plain module (no trait - a `match` on the dialect string). Test: request with tools gets the guide injected; response with tool_code fence parsed into `tool_calls`; malformed fence produces warning; config rejects an unknown `tool_dialect` value. Docs: emulated tools section.
 
 </step-23>
 
@@ -149,7 +149,7 @@ Core has two dialects: `OpenAi` (identity) and `Gemma3ToolCode` (content-fence p
 
 <step-26>
 
-**Step 26: final sweep.** Obsolescence sweep over the whole workspace. Remove "streaming" and "Anthropic protocol shim" from the crate-docs deferred list. Fix the recurring guide-generator drift at the source: `make-user-guide` writes to the repo root while the checked-in aggregate lives at `guide/promptforge-user-guide.md`, and other crates' per-crate guide sources have drifted from the aggregate (two hunks kept reappearing on regen: the run fall-through wording and the `tools.add_local` alias paragraph) - regenerate the aggregate into the right path and commit the reconciliation as its own sweep commit. Verify (final step). Manual checks: a Gemma3 model returns `tool_calls` to the client; a chat model with `stream: true` receives SSE chunks.
+**Step 26: final sweep.** Obsolescence sweep over the whole workspace. Remove "streaming" and "Anthropic protocol shim" from the crate-docs deferred list. Fix the recurring guide-generator drift at the source: `make-user-guide` writes to the repo root while the checked-in aggregate lives at `guide/runvil-user-guide.md`, and other crates' per-crate guide sources have drifted from the aggregate (two hunks kept reappearing on regen: the run fall-through wording and the `tools.add_local` alias paragraph) - regenerate the aggregate into the right path and commit the reconciliation as its own sweep commit. Verify (final step). Manual checks: a Gemma3 model returns `tool_calls` to the client; a chat model with `stream: true` receives SSE chunks.
 
 </step-26>
 

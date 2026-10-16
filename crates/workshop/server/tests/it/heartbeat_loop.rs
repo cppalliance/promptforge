@@ -66,7 +66,7 @@ fn wired_push(status: &StatusBus, catalog: &CatalogBus, menu: &MenuBus) -> (Push
 const TEST_INTERVAL: Duration = Duration::from_millis(25);
 
 const CATALOG: &str =
-    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
+    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"runvil"}]}"#;
 
 /// A mock `/health` answer under test control, and the count of probes
 /// served. The loop is sequential - wait, probe, announce, refresh - so

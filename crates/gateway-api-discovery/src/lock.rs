@@ -122,7 +122,7 @@ pub fn launch_or_attach_cancellable(
 
 /// [`launch_or_attach`] against a caller-named process image, so tests
 /// can run the full liveness gauntlet from a test binary, which is never
-/// named `promptforge-gateway`.
+/// named `runvil-gateway`.
 fn launch_or_attach_named(
     run_dir: &Path,
     image_name: &str,

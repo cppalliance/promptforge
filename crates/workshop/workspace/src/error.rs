@@ -130,7 +130,7 @@ pub enum WorkspaceError {
     #[error("file changed on disk since it was read")]
     ModifiedConflict,
 
-    /// A workspace file was refused: not a PromptForge workspace, or one
+    /// A workspace file was refused: not a Runvil workspace, or one
     /// at a schema version this build does not read. The message is the
     /// refusal's own required-versus-actual text.
     #[non_exhaustive]

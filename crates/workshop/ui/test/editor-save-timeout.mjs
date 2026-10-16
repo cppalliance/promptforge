@@ -70,7 +70,7 @@ for (const key of [
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-editor-save-timeout-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-editor-save-timeout-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, EditorPanel, CatalogError, ErrorCatalog } = await import(
   pathToFileURL(bundlePath).href

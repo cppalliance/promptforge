@@ -129,7 +129,7 @@ console.error = (...args) => {
   consoleErrors.push(args.join(" "));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-files-actions-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-files-actions-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   Commands,
@@ -193,7 +193,7 @@ globalThis.fetch = async (url, init) => {
 };
 
 let workspaceChanges = 0;
-window.addEventListener("promptforge:workspace-changed", () => {
+window.addEventListener("runvil:workspace-changed", () => {
   workspaceChanges += 1;
 });
 

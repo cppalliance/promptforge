@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Gateway Config UI: TypeScript sources bundled by esbuild into dist/ and served by gateway-config-ui.",
+  "description": "Runvil Gateway Config UI: TypeScript sources bundled by esbuild into dist/ and served by gateway-config-ui.",
   "engines": {
     "node": ">=22"
   },

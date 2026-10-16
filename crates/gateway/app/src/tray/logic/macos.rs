@@ -42,7 +42,7 @@ pub(super) fn bundle_principal(bundle: &Path) -> Option<String> {
 /// `mainApp` registration launches the principal executable at login,
 /// so the store only exists when that executable is the gateway
 /// itself; inside the workshop's bundle the principal is
-/// `promptforge-workshop` and registration would open the workshop
+/// `runvil-workshop` and registration would open the workshop
 /// window at every login.
 pub(crate) fn gateway_is_bundle_principal(bundle: &Path, exe: &Path) -> bool {
     let Some(principal) = bundle_principal(bundle) else {

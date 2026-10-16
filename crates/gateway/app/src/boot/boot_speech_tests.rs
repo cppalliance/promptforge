@@ -244,7 +244,7 @@ async fn the_parked_boot_speech_load_never_blocks_the_control_plane() {
         ("/config/", "text/html"),
         ("/config/app.js", "text/javascript"),
         ("/config/app.css", "text/css"),
-        ("/config/icons/promptforge-icon.png", "image/png"),
+        ("/config/icons/runvil-icon.png", "image/png"),
     ] {
         let response = get(addr, path).await;
         assert_eq!(response.status(), reqwest::StatusCode::OK, "GET {path}");

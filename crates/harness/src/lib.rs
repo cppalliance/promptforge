@@ -34,8 +34,8 @@ pub mod plugin {
     pub use harness_runner::InstallError;
     pub use harness_runner::PackageRegistry;
     pub use harness_runner::PluginKind;
-    pub use promptforge_plugin::HostServices;
-    pub use promptforge_plugin::PluginId;
+    pub use runvil_plugin::HostServices;
+    pub use runvil_plugin::PluginId;
 }
 
 pub mod record {
@@ -51,7 +51,7 @@ pub mod record {
     pub use harness_runner::recorder::RunMeta;
     pub use harness_runner::recorder::RunOutcome;
     pub use harness_runner::recorder::RunRecorder;
-    pub use promptforge::RunSeed;
+    pub use runvil::RunSeed;
 }
 
 pub mod vfs {
@@ -59,8 +59,8 @@ pub mod vfs {
     //! access each tool call receives through its context, and the origin
     //! each file operation carries to say who asked for it.
 
-    pub use promptforge::vfs::Access;
-    pub use promptforge::vfs::Origin;
-    pub use promptforge::vfs::VfsError;
-    pub use promptforge::vfs::VfsRef;
+    pub use runvil::vfs::Access;
+    pub use runvil::vfs::Origin;
+    pub use runvil::vfs::VfsError;
+    pub use runvil::vfs::VfsRef;
 }

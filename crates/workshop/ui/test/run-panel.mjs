@@ -120,7 +120,7 @@ function contractFor(name) {
   return {
     name,
     description: `contract for ${name}`,
-    promptforge: 1,
+    runvil: 1,
     max_tool_iterations: 12,
     input: { path: "in/papers.md", description: "the papers" },
     output: { path: "out/verdicts.md", description: "the verdicts" },
@@ -563,7 +563,7 @@ osEl.addEventListener("workshop:file-drop", (event) => targetDrops.push(event.de
 const grantsBefore = calls.filter((c) => c.url === "/workspace/grant").length;
 syntheticDrag("drop", osEl.querySelector(".ws-run-panel__body"), { types: ["Files"] });
 window.dispatchEvent(
-  new window.CustomEvent("promptforge:file-drop", {
+  new window.CustomEvent("runvil:file-drop", {
     detail: { paths: [`${ROOT}\\notes.txt`, OSDROP] },
   }),
 );

@@ -136,7 +136,7 @@ fn an_env_shadow_requires_a_restart() {
         "config-version = 0\n[server]\nbind = \"127.0.0.1:0\"\napi_key = \"k\"\n",
     )
     .expect("writing config file should succeed");
-    write_shadow(&config.with_extension("env"), "PF_TEST_KEY=value\n")
+    write_shadow(&config.with_extension("env"), "RV_TEST_KEY=value\n")
         .expect("staging env shadow should succeed");
 
     let reply = dirty_reply(&config).expect("generating a dirty reply should succeed");

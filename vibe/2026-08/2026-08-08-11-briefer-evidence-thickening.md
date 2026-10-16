@@ -1,6 +1,6 @@
 ---
 name: Briefer evidence thickening
-overview: "Prompt- and context-engineer promptforge/briefer.md for thick, clean evidence.md on local Qwen: cut Report until evidence is thick, beat the current Qwen baseline using Opus structure plus subagent web research, log every experiment in gitignored research.md, then Boost and Bloomberg with a 3-round no-improvement stop per subject."
+overview: "Prompt- and context-engineer runvil/briefer.md for thick, clean evidence.md on local Qwen: cut Report until evidence is thick, beat the current Qwen baseline using Opus structure plus subagent web research, log every experiment in gitignored research.md, then Boost and Bloomberg with a 3-round no-improvement stop per subject."
 todos:
   - id: cut-report
     content: Stub Report/Epilog for evidence-only speed; fix lua fence if needed
@@ -36,7 +36,7 @@ isProject: false
 
 ## Understanding (locked)
 
-- Deliverable is thick, clean `evidence.md` from [`promptforge/briefer.md`](promptforge/briefer.md) on **local Qwen**.
+- Deliverable is thick, clean `evidence.md` from [`runvil/briefer.md`](runvil/briefer.md) on **local Qwen**.
 - Gold shape / density reference: Opus packet [`cabinet/_scratch/2026-08-08-briefer-cpp-alliance/2026-08-08-briefer-cpp-alliance-evidence.md`](cabinet/_scratch/2026-08-08-briefer-cpp-alliance/2026-08-08-briefer-cpp-alliance-evidence.md) (Subject Profile fields, Domain Primer, Domain Landscape, Public Record, Vulnerabilities, Source Log).
 - Staged beauty: (1) match best current local-Qwen evidence quality (clean, structured, no fence garbage / wrong-entity disasters); (2) surpass that baseline with more detail via prompt + context engineering informed by my own deeper web research.
 - **Minimize turns per Web Search arm.** Target path: 1 search → 1-2 fetch rounds (batch URLs) → 1 final write. Prefer sharper queries and URL hints over extra model round-trips. A thicker packet that costs many more turns is a regression unless the score gain is large; log median/max tool turns per arm each round.
@@ -44,11 +44,11 @@ isProject: false
 - Log every change and verdict in gitignored [`cabinet/_research/2026-08-08-briefer-evidence-tuning.md`](cabinet/_research/2026-08-08-briefer-evidence-tuning.md) (user-facing name: research notes; not committed).
 - Subjects in order: **C++ Alliance** → **Boost C++ Library Collection** → **Bloomberg**. Per subject: iterate facets + whole until **3 consecutive rounds with no meaningful improvement**, then advance. Global stop when all three subjects are exhausted under that rule.
 - **Source Log deferred.** Do not require a consolidated Source Log in `evidence.md` during the main loop (fanout arms cannot safely merge one log without store append races). After evidence quality plateaus, try a late experiment: arms `store.append` to a separate `log.md` (or equivalent), then optionally fold into the packet. Until then, inline URL citations in body text are enough.
-- **Git:** On every kept quality step-up (meaningful score gain on `briefer.md`), commit in `promptforge` with a short why-focused message. Do not commit research.md, stores, or scratch rounds. Squash/fold those commits later when you ask.
+- **Git:** On every kept quality step-up (meaningful score gain on `briefer.md`), commit in `runvil` with a short why-focused message. Do not commit research.md, stores, or scratch rounds. Squash/fold those commits later when you ask.
 
 ## Baseline and scoring
 
-Capture once before edits (or use latest [`promptforge/briefer.store/evidence.md`](promptforge/briefer.store/evidence.md) if fresh):
+Capture once before edits (or use latest [`runvil/briefer.store/evidence.md`](runvil/briefer.store/evidence.md) if fresh):
 
 Score each run 0-2 per facet against Opus shape (Alliance) or against subagent-sourced truth packs (Boost/Bloomberg):
 
@@ -66,7 +66,7 @@ Also record per round: median and max model turns per arm (from traces / `tools.
 
 ## Prompt engineering direction (concrete)
 
-Edit only [`promptforge/briefer.md`](promptforge/briefer.md) unless a tiny harness bug blocks iteration.
+Edit only [`runvil/briefer.md`](runvil/briefer.md) unless a tiny harness bug blocks iteration.
 
 1. **Speed cut:** Comment out or stub `## Report` (and keep Epilog as pure ` ```lua ` return). Main ends after `store.write("evidence.md", ...)`.
 2. **Output contract:** Force each arm to emit a fixed heading matching Opus sections (or a mapped topic→section table). Ban wrapping the whole reply in markdown fences. Ban process commentary.
@@ -80,7 +80,7 @@ Edit only [`promptforge/briefer.md`](promptforge/briefer.md) unless a tiny harne
 ```mermaid
 flowchart TD
     research[Subagent web research by facet] --> edit[Edit briefer.md]
-    edit --> run[Run promptforge-dev on subject]
+    edit --> run[Run runvil-dev on subject]
     run --> score[Score evidence vs baseline]
     score --> log[Append research.md]
     log --> decide{Improved?}
@@ -94,7 +94,7 @@ flowchart TD
 ```
 
 - **Subagents:** For each facet, search/fetch what is publicly knowable; write findings into the research log and into prompt query/URL hints (not into fabricated evidence).
-- **Runs:** Gateway on `qwen.toml`; `cargo run -p promptforge-dev -- briefer.md "<subject>"`. Archive each round's evidence under `cabinet/_scratch/briefer-evidence-rounds/` (gitignored via cabinet).
+- **Runs:** Gateway on `qwen.toml`; `cargo run -p runvil-dev -- briefer.md "<subject>"`. Archive each round's evidence under `cabinet/_scratch/briefer-evidence-rounds/` (gitignored via cabinet).
 - **C++ Alliance Stage 1:** Fix fences, wrong-entity disasters, thin profile until score ≥ current Qwen best and structure matches Opus outline.
 - **C++ Alliance Stage 2:** Thicken using Opus source log as a treasure map (ProPublica EIN 82-2439331, bylaws PDF, transparency reports, fiscal sponsor vote). Stop after 3 no-improve rounds.
 - **Restore Report** once Alliance evidence is thick; one smoke run that report does not invent beyond packet.
@@ -103,7 +103,7 @@ flowchart TD
 
 ## Git discipline
 
-- Commit `briefer.md` (and only related promptforge prompt files if needed) after each **kept** improvement.
+- Commit `briefer.md` (and only related runvil prompt files if needed) after each **kept** improvement.
 - Skip commits for rollbacks and no-op experiments (still log them in research.md).
 - Leave history granular; folding/squash is a later user-directed step.
 

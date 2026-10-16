@@ -1,6 +1,6 @@
 ---
 name: local.toml bigger model
-overview: Create inherited local profiles under `C:\Users\Vinnie\cursor\` (common/gemma/qwen), wire HF_TOKEN for official Gemma downloads, and purge stale model caches in `~/.promptforge` and the promptforge repo.
+overview: Create inherited local profiles under `C:\Users\Vinnie\cursor\` (common/gemma/qwen), wire HF_TOKEN for official Gemma downloads, and purge stale model caches in `~/.runvil` and the runvil repo.
 todos:
   - id: hf-token-download
     content: "Gateway: send HF_TOKEN/HUGGING_FACE_HUB_TOKEN on Hugging Face downloads"
@@ -9,7 +9,7 @@ todos:
     content: Write C:\Users\Vinnie\cursor\{common,gemma,qwen}.toml with include inheritance
     status: completed
   - id: purge-stale-caches
-    content: Purge stale ~/.promptforge and repo .model-cache leftovers against the keep-set
+    content: Purge stale ~/.runvil and repo .model-cache leftovers against the keep-set
     status: completed
 isProject: false
 ---
@@ -29,8 +29,8 @@ Directory: `C:\Users\Vinnie\cursor\` (outside the repo; not committed).
 Serve a leaf file, not common:
 
 ```text
-promptforge-gateway serve C:\Users\Vinnie\cursor\gemma.toml
-promptforge-gateway serve C:\Users\Vinnie\cursor\qwen.toml
+runvil-gateway serve C:\Users\Vinnie\cursor\gemma.toml
+runvil-gateway serve C:\Users\Vinnie\cursor\qwen.toml
 ```
 
 Includes resolve relative to the file (gateway design). Array merge: child `[[local_model]]` appends; same `name` replaces.
@@ -42,7 +42,7 @@ No Anthropic endpoint in this hierarchy (local-only profiles).
 ```toml
 [server]
 bind = "127.0.0.1:8081"
-key = "${PROMPTFORGE_GATEWAY_KEY}"
+key = "${RUNVIL_GATEWAY_KEY}"
 
 [queue]
 max_depth = 100
@@ -95,7 +95,7 @@ Description matches briefer’s `models.always` so either profile binds as the w
 
 ## Gateway change (needed for official Gemma)
 
-In [`promptforge/crates/promptforge-gateway/src/local/artifacts.rs`](promptforge/crates/promptforge-gateway/src/local/artifacts.rs) `download`: if `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` is set, add `Authorization: Bearer <token>`. Prefer `HF_TOKEN`. Never log the token. Cover with a unit test (header present when set, absent when unset).
+In [`runvil/crates/runvil-gateway/src/local/artifacts.rs`](runvil/crates/runvil-gateway/src/local/artifacts.rs) `download`: if `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` is set, add `Authorization: Bearer <token>`. Prefer `HF_TOKEN`. Never log the token. Cover with a unit test (header present when set, absent when unset).
 
 Operator still needs the Gemma license accepted on the model page and `HF_TOKEN` in the environment when serving `gemma.toml`. Qwen does not need a Hugging Face token.
 
@@ -110,18 +110,18 @@ Operator still needs the Gemma license accepted on the model page and `HF_TOKEN`
 | `Qwen3-0.6B-Q8_0.gguf` (+ scenario digest) | core-tests scenarios still pin it |
 | Current `llama.cpp/b10082-*` install tree | current gateway pin |
 
-**Operator cache** (`%USERPROFILE%\.promptforge` / `~/.promptforge`):
+**Operator cache** (`%USERPROFILE%\.runvil` / `~/.runvil`):
 
 - Under `models/` and `downloads/`: remove GGUFs, `.part` partials, and other blobs whose basename or recorded digest is not in the keep-set.
 - Under `llama.cpp/`: remove install trees that are not the current `b10082-*` pin.
 - Leave lock files alone if a gateway is running; do this with gateway stopped.
-- Report what was removed (names + sizes); do not delete the whole `~/.promptforge` root.
+- Report what was removed (names + sizes); do not delete the whole `~/.runvil` root.
 
-**Repo** ([`promptforge/`](promptforge/)):
+**Repo** ([`runvil/`](runvil/)):
 
-- Delete legacy root [`.model-cache/`](promptforge/.model-cache/) if present (gitignored; superseded by `~/.promptforge`).
+- Delete legacy root [`.model-cache/`](runvil/.model-cache/) if present (gitignored; superseded by `~/.runvil`).
 - Delete stray `*.part` / orphan download dirs under the repo if any.
 - Do not delete `target/`, `*.store/`, or git-tracked sources.
-- Leave [`gateway.toml`](promptforge/gateway.toml) and [`profiles/`](promptforge/profiles/) alone unless a file is only a cache dump (none expected).
+- Leave [`gateway.toml`](runvil/gateway.toml) and [`profiles/`](runvil/profiles/) alone unless a file is only a cache dump (none expected).
 
 Stale means “not referenced by the keep-set above,” not “older than N days.”

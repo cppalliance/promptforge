@@ -73,7 +73,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/promptforge-gateway "$ARTIFACT/"
+          cp target/release/runvil-gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:
@@ -106,7 +106,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p "$ARTIFACT"
-          cp target/release/promptforge-gateway "$ARTIFACT/"
+          cp target/release/runvil-gateway "$ARTIFACT/"
           tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
       - uses: actions/upload-artifact@v4
         with:
@@ -178,7 +178,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev librsvg2-dev xdg-utils
 
       # tauri.conf.json ships the gateway via bundle.externalBin, which
-      # resolves binaries/promptforge-gateway-<target-triple> at bundle
+      # resolves binaries/runvil-gateway-<target-triple> at bundle
       # time; build and stage it before tauri-action runs.
       - name: Build and stage the gateway sidecar
         shell: bash
@@ -194,15 +194,15 @@ jobs:
           case "${{ matrix.args }}" in
             *--target*)
               cargo build --release --locked -p gateway --target "$triple"
-              src="target/$triple/release/promptforge-gateway$ext"
+              src="target/$triple/release/runvil-gateway$ext"
               ;;
             *)
               cargo build --release --locked -p gateway
-              src="target/release/promptforge-gateway$ext"
+              src="target/release/runvil-gateway$ext"
               ;;
           esac
           mkdir -p crates/workshop/desktop/binaries
-          cp "$src" "crates/workshop/desktop/binaries/promptforge-gateway-$triple$ext"
+          cp "$src" "crates/workshop/desktop/binaries/runvil-gateway-$triple$ext"
 
       - name: Build the app
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0

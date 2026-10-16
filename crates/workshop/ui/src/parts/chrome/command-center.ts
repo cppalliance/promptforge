@@ -16,7 +16,7 @@
 // other surface.
 //
 // The WindowTitle helper owns the title text: the first granted root's
-// folder name, or "PromptForge" when no root is granted or the listing
+// folder name, or "Runvil" when no root is granted or the listing
 // cannot be read. It reads the roots through the tree-state service's
 // shared roots() load - the same load the tree panel renders from, so a
 // boot costs one GET /workspace/tree - re-reads them on the
@@ -33,7 +33,7 @@ import { TREE_STATE } from "../../services/tree-state-service";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The title shown when no workspace folder is granted. */
-const FALLBACK_TITLE = "PromptForge";
+const FALLBACK_TITLE = "Runvil";
 
 /** One granted root, narrowed to the field the title reads. */
 interface GrantedRoot {
@@ -54,7 +54,7 @@ export interface CommandCenterDependencies {
 
 /**
  * The window title label. Shows the first granted root's folder name,
- * falling back to "PromptForge", and keeps document.title in step. A
+ * falling back to "Runvil", and keeps document.title in step. A
  * failed listing renders the fallback rather than throwing at boot.
  */
 export class WindowTitle extends Disposable {

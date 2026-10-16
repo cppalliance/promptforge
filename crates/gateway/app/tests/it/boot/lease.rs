@@ -22,13 +22,9 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
-    let logs = temp.path().join(".promptforge").join("logs");
-    let connection = temp
-        .path()
-        .join(".promptforge")
-        .join("run")
-        .join("gateway.json");
-    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let logs = temp.path().join(".runvil").join("logs");
+    let connection = temp.path().join(".runvil").join("run").join("gateway.json");
+    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")
@@ -59,7 +55,7 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
     // The second launch: the handoff prints the running gateway's URL and
     // exits. A regression to a normal boot would serve instead, so the
     // exit wait is bounded and the kill is the failure path.
-    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")
@@ -116,7 +112,7 @@ fn a_second_instance_hands_off_without_rotating_the_log() {
 fn a_silent_process_lease_owner_causes_a_bounded_console_only_failure() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let state_dir = temp.path().join(".promptforge");
+    let state_dir = temp.path().join(".runvil");
     let run_dir = state_dir.join("run");
     let logs = state_dir.join("logs");
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
@@ -162,7 +158,7 @@ fn a_silent_process_lease_owner_causes_a_bounded_console_only_failure() {
 fn a_connection_resolution_failure_is_console_only() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let state_dir = temp.path().join(".promptforge");
+    let state_dir = temp.path().join(".runvil");
     let run_dir = state_dir.join("run");
     let logs = state_dir.join("logs");
     std::fs::create_dir_all(&logs).expect("create seeded log directory");
@@ -206,7 +202,7 @@ fn a_connection_resolution_failure_is_console_only() {
 fn a_direct_launch_recovers_the_lease_from_a_terminated_owner() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let run_dir = temp.path().join(".promptforge").join("run");
+    let run_dir = temp.path().join(".runvil").join("run");
     let mut first = GatewayProcess::spawn(&config, temp.path());
     let first_connection = wait_for_connection(&run_dir, Duration::from_secs(30));
     assert_eq!(first_connection.pid, first.id());
@@ -256,13 +252,9 @@ fn a_supervised_second_instance_hands_off_silently() {
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
-    let connection = temp
-        .path()
-        .join(".promptforge")
-        .join("run")
-        .join("gateway.json");
+    let connection = temp.path().join(".runvil").join("run").join("gateway.json");
 
-    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")
@@ -289,7 +281,7 @@ fn a_supervised_second_instance_hands_off_silently() {
     // stdin is a held-open pipe, as a real supervisor gives it. With a
     // closed stdin, a regression that boots instead of handing off would
     // be stopped at once by its watchdog and exit 0, passing this test.
-    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let mut second = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")

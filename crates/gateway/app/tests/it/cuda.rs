@@ -3,7 +3,7 @@
 //!
 //! The test is `#[ignore]`d and additionally opt-in: even when forced with
 //! `--ignored`, it prints a skip notice and returns `Ok` unless
-//! `PROMPTFORGE_LIVE_CUDA=1` is set. `PROMPTFORGE_LLAMA_SERVER` names the
+//! `RUNVIL_LIVE_CUDA=1` is set. `RUNVIL_LLAMA_SERVER` names the
 //! CUDA `llama-server.exe` under test (for example one unpacked from the
 //! `llama-cuda-blackwell` release); without it the gateway's managed
 //! download decides the backend. Run it with:
@@ -26,7 +26,7 @@ use completions::{base64_encode, prove_image_completion, prove_mtp, prove_tool_c
 
 /// Opt-in gate: the run downloads three multi-gigabyte GGUF artifacts and
 /// loads them onto a real GPU.
-const LIVE_ENV: &str = "PROMPTFORGE_LIVE_CUDA";
+const LIVE_ENV: &str = "RUNVIL_LIVE_CUDA";
 
 const MAIN_URL: &str = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-UD-Q4_K_XL.gguf";
 const MAIN_SHA256: &str = "b52f438017efaec5debf1c0d8be690571e212a07c312f1102bbce927258cfc32";
@@ -177,16 +177,16 @@ async fn diagnostics_until(gateway: &Gateway, predicate: impl Fn(&str) -> bool) 
     }
 }
 
-/// The `llama-server.exe` under test. With `PROMPTFORGE_LLAMA_SERVER` set
+/// The `llama-server.exe` under test. With `RUNVIL_LLAMA_SERVER` set
 /// (the release workflow's smoke job points it at the freshly built binary),
 /// the gateway runs exactly that executable and stages nothing; without it,
 /// the managed download must have installed one into the cache.
 fn staged_cuda_executable(cache: &Path) -> PathBuf {
-    if let Some(path) = std::env::var_os("PROMPTFORGE_LLAMA_SERVER") {
+    if let Some(path) = std::env::var_os("RUNVIL_LLAMA_SERVER") {
         let executable = PathBuf::from(path);
         assert!(
             executable.is_file(),
-            "PROMPTFORGE_LLAMA_SERVER names no file at {}",
+            "RUNVIL_LLAMA_SERVER names no file at {}",
             executable.display()
         );
         assert!(
@@ -309,7 +309,7 @@ async fn prove_staging_offload_and_pins(gateway: &Gateway, cache: &Path) {
 /// device report, GPU offload of both models, digest markers, MTP
 /// acceptance, cache reuse, a tool call, and a projector completion.
 #[tokio::test]
-#[ignore = "requires an NVIDIA GPU and multi-gigabyte model downloads; set PROMPTFORGE_LIVE_CUDA=1 to opt in"]
+#[ignore = "requires an NVIDIA GPU and multi-gigabyte model downloads; set RUNVIL_LIVE_CUDA=1 to opt in"]
 async fn live_cuda_mtp_multimodal_end_to_end() {
     if std::env::var_os(LIVE_ENV).is_none() {
         eprintln!(

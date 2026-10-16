@@ -25,7 +25,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-reconnect-backoff-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-reconnect-backoff-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { ReconnectBackoff } = await import(pathToFileURL(bundlePath).href);
 

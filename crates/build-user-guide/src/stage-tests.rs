@@ -122,18 +122,18 @@ fn stage_writes_each_books_export_beside_the_trees() {
 
     let mut exports: Vec<String> = BOOKS
         .iter()
-        .map(|(book, _)| format!("promptforge-{book}-guide.md"))
+        .map(|(book, _)| format!("runvil-{book}-guide.md"))
         .collect();
     exports.sort_unstable();
     assert_eq!(names(out.path(), false), exports);
     for (book, title) in BOOKS {
-        let export = read(&out.path().join(format!("promptforge-{book}-guide.md")));
+        let export = read(&out.path().join(format!("runvil-{book}-guide.md")));
         assert!(
             export.starts_with(&format!("# {title}\n")),
             "{book}: {export}"
         );
     }
-    let workshop = read(&out.path().join("promptforge-workshop-guide.md"));
+    let workshop = read(&out.path().join("runvil-workshop-guide.md"));
     assert!(
         workshop.contains("# The Window") && workshop.contains("# The Editor"),
         "{workshop}"
@@ -157,7 +157,7 @@ fn staging_reads_chapters_from_the_docs_root_it_is_given() {
 
     let staged = out.path().join("gateway").join("src").join("01-start.md");
     assert_eq!(read(&staged), chapter);
-    let export = read(&out.path().join("promptforge-gateway-guide.md"));
+    let export = read(&out.path().join("runvil-gateway-guide.md"));
     assert!(
         export.contains("From the docs root.") && !export.contains("Old copy."),
         "{export}"
@@ -165,22 +165,22 @@ fn staging_reads_chapters_from_the_docs_root_it_is_given() {
 }
 
 #[test]
-fn staging_without_a_docs_root_fails_naming_promptforge_docs() {
+fn staging_without_a_docs_root_fails_naming_runvil_docs() {
     let fake = fake_guide();
     let out = tempfile::tempdir().expect("tempdir");
     let error = stage(&fake.guide, None, out.path()).expect_err("must fail");
-    assert!(error.to_string().contains("PROMPTFORGE_DOCS"), "{error}");
+    assert!(error.to_string().contains("RUNVIL_DOCS"), "{error}");
     assert!(snapshot(out.path()).is_empty());
 }
 
 #[test]
-fn staging_with_a_missing_docs_root_fails_naming_promptforge_docs_and_the_path() {
+fn staging_with_a_missing_docs_root_fails_naming_runvil_docs_and_the_path() {
     let fake = fake_guide();
     let missing = fake.docs.join("no-such-checkout");
     let out = tempfile::tempdir().expect("tempdir");
     let error = stage(&fake.guide, Some(&missing), out.path()).expect_err("must fail");
     let message = error.to_string();
-    assert!(message.contains("PROMPTFORGE_DOCS"), "{message}");
+    assert!(message.contains("RUNVIL_DOCS"), "{message}");
     assert!(
         message.contains(&missing.display().to_string()),
         "{message}"
@@ -248,7 +248,7 @@ fn staging_is_deterministic() {
     stage_fake(&fake, first.path()).expect("first");
     stage_fake(&fake, second.path()).expect("second");
     let staged = snapshot(first.path());
-    for key in ["language/src/SUMMARY.md", "promptforge-language-guide.md"] {
+    for key in ["language/src/SUMMARY.md", "runvil-language-guide.md"] {
         assert!(staged.contains_key(key), "{key}: {:?}", staged.keys());
     }
     assert_eq!(staged, snapshot(second.path()));

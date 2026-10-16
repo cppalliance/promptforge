@@ -2,7 +2,7 @@
 // server to an OS-assigned loopback port, so the page origin - and with it
 // every origin-scoped storage entry - changes on each launch. This module
 // replaces that storage with two server-backed buckets of opaque JSON
-// values: the "workspace" bucket lives in the open .pfwork file (GET and
+// values: the "workspace" bucket lives in the open .rvwork file (GET and
 // PUT under /workspace/file/state), the "user" bucket in the per-user
 // ui-state.json (GET and PUT under /user/state). The composition root
 // preloads both once before any store is built; stores then read

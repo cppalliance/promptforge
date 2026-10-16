@@ -12,7 +12,7 @@ bind = "127.0.0.1:8081"
 api_key = "server-secret-value"
 
 [local]
-cache_dir = "/tmp/pf-cache"
+cache_dir = "/tmp/rv-cache"
 llama_backend = "cuda-blackwell"
 llama_server_path = "/opt/llama/llama-server.exe"
 

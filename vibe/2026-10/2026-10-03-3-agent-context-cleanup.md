@@ -3,7 +3,7 @@ name: Agent context cleanup
 overview: Hide stale docs from the agent, one audited item at a time.
 todos:
   - id: "1"
-    content: Remove all rustdoc markdown includes (promptforge, harness, engine) and archive them, plus tools/cicerone, in promptforge-design/saved-docs/
+    content: Remove all rustdoc markdown includes (runvil, harness, engine) and archive them, plus tools/cicerone, in runvil-design/saved-docs/
     status: completed
   - id: "2"
     content: Move or delete every remaining doctest, remove the doctest steps, and add a tidy check that rejects new doctests
@@ -18,7 +18,7 @@ todos:
     content: Remove all crates.io metadata from every Cargo.toml
     status: completed
   - id: "6"
-    content: Move the three guides' chapters to promptforge-docs; promptforge CI clones it and builds the whole site
+    content: Move the three guides' chapters to runvil-docs; runvil CI clones it and builds the whole site
     status: completed
   - id: "7"
     content: Remove stale enforcement code and config
@@ -50,7 +50,7 @@ isProject: false
 
 ## Product Requirements
 
-PromptForge is at version 0 and changes fast: one vibe-coding session can land a hundred commits, after which hand-written docs are out of date, and agents that read them write code against wrong information. This plan tunes the `promptforge` repository for fast, accurate agent-driven development, while keeping what a human needs to verify the agents' work. It removes prose that drifts from code, moves the long-form guides out of the agents' working tree, replaces `AGENTS.md` rules with structural enforcement, and makes the 500-line file limit absolute and compiler-enforced without loosening encapsulation.
+Runvil is at version 0 and changes fast: one vibe-coding session can land a hundred commits, after which hand-written docs are out of date, and agents that read them write code against wrong information. This plan tunes the `runvil` repository for fast, accurate agent-driven development, while keeping what a human needs to verify the agents' work. It removes prose that drifts from code, moves the long-form guides out of the agents' working tree, replaces `AGENTS.md` rules with structural enforcement, and makes the 500-line file limit absolute and compiler-enforced without loosening encapsulation.
 
 - Problem and users:
   - The users are the coding agents that edit the repository and the repository owner, who reviews their output.
@@ -60,7 +60,7 @@ PromptForge is at version 0 and changes fast: one vibe-coding session can land a
   - Optimize for build speed and correctness.
   - Remove things that can go stale with fast-changing code.
   - Prefer structural checks over `AGENTS.md` prose, and shrink `AGENTS.md` rather than expand it.
-  - Inside `promptforge`, the only documentation is doc comments on declarations plus deliberately generic READMEs.
+  - Inside `runvil`, the only documentation is doc comments on declarations plus deliberately generic READMEs.
 - Non-goals:
   - Polished docs for outside readers.
   - Publishing to crates.io, now or later.
@@ -68,15 +68,15 @@ PromptForge is at version 0 and changes fast: one vibe-coding session can land a
   - Custom compiler lints (Dylint), ast-grep, Cursor hooks, a unified `cargo xtask check` command, and generators beyond the ones this plan names.
 - Success criteria:
   - No markdown file is included as rustdoc anywhere in the workspace, no doctest remains or runs, and a tidy check rejects any new one.
-  - The `tools/cicerone` doc generator, which wrote the deleted rustdoc pages, is archived out of promptforge.
+  - The `tools/cicerone` doc generator, which wrote the deleted rustdoc pages, is archived out of runvil.
   - Every `README.md` states only broad responsibility.
   - The docs landing page is a generated table with one row per published rustdoc site and per guide.
   - No crates.io metadata remains except `description` on the two shipped binaries.
-  - The three guides' chapters live in `cppalliance/promptforge-docs`, and promptforge's CI still publishes the whole site at the same URL.
+  - The three guides' chapters live in `cppalliance/runvil-docs`, and runvil's CI still publishes the whole site at the same URL.
   - Every crate inherits one strict workspace lint table, the enforcement this plan names exists, and the `AGENTS.md` text it replaces is gone.
   - No Rust file in any crate exceeds 500 lines, a violation fails the build with split guidance, and no `pub(crate)` or `pub(super)` item is wider than its uses need.
 - Constraints:
-  - Changes land in the `promptforge` repository (`c:\Users\Vinnie\cursor\promptforge`), with two named exceptions. Archived rustdoc pages go to the `promptforge-design` repository (`c:\Users\Vinnie\cursor\promptforge-design`) under `saved-docs/<crate>/`, and `tools/cicerone` goes under `saved-docs/cicerone/`. Guide chapters go to the `promptforge-docs` repository (`c:\Users\Vinnie\cursor\promptforge-docs`). Touch nothing else in the surrounding workspace folder `c:\Users\Vinnie\cursor`.
+  - Changes land in the `runvil` repository (`c:\Users\Vinnie\cursor\runvil`), with two named exceptions. Archived rustdoc pages go to the `runvil-design` repository (`c:\Users\Vinnie\cursor\runvil-design`) under `saved-docs/<crate>/`, and `tools/cicerone` goes under `saved-docs/cicerone/`. Guide chapters go to the `runvil-docs` repository (`c:\Users\Vinnie\cursor\runvil-docs`). Touch nothing else in the surrounding workspace folder `c:\Users\Vinnie\cursor`.
   - Retired files are removed with git, and the history keeps them. In the user's words: "override the workspace rule. we have git."
   - Installers must not break: the Tauri desktop build of `crates/workshop/desktop`, and the cargo-dist release of `crates/gateway/app` configured in `dist-workspace.toml`.
   - The development machine runs Windows with PowerShell. The toolchain is the unpinned `stable` channel (`rust-toolchain.toml`), currently Cargo 1.99.
@@ -85,17 +85,17 @@ PromptForge is at version 0 and changes fast: one vibe-coding session can land a
 
 ## Functional Specification
 
-The repository changes in three places: what an agent reads, what the build rejects, and how the docs site is assembled. An agent sees doc comments and generic READMEs, never tutorial or guide prose. A Rust file over 500 lines fails the build with instructions for a split that keeps encapsulation intact. The published site keeps its URL, and promptforge's CI rebuilds it from promptforge's rustdoc plus the guides checked out from `promptforge-docs`.
+The repository changes in three places: what an agent reads, what the build rejects, and how the docs site is assembled. An agent sees doc comments and generic READMEs, never tutorial or guide prose. A Rust file over 500 lines fails the build with instructions for a split that keeps encapsulation intact. The published site keeps its URL, and runvil's CI rebuilds it from runvil's rustdoc plus the guides checked out from `runvil-docs`.
 
 - Actors and workflows:
   - A coding agent edits code. The build, clippy, cargo-deny, and `cargo test -p build-xtask` report every rule this plan enforces, and each failure message states the fix.
-  - The reviewer reads diffs of `crates/promptforge/public-api.txt` and the per-symbol rustdoc.
-  - A docs author edits chapters in `promptforge-docs`. The site publishes them by the next nightly build.
+  - The reviewer reads diffs of `crates/runvil/public-api.txt` and the per-symbol rustdoc.
+  - A docs author edits chapters in `runvil-docs`. The site publishes them by the next nightly build.
 - Inputs and outputs:
-  - Site build inputs: the promptforge checkout, plus a `promptforge-docs` checkout whose path is in the environment variable `PROMPTFORGE_DOCS`.
+  - Site build inputs: the runvil checkout, plus a `runvil-docs` checkout whose path is in the environment variable `RUNVIL_DOCS`.
   - Site build output: `target/site/`, holding the generated landing page, the three books, the four rustdoc sites, and the single-file guide exports as downloads.
 - States and validation:
-  - The landing page holds a title and one table, with no images and no other prose. Its columns are Documentation, Kind, and Covers. Its rows are four API references (`promptforge`, `harness`, `harness-gateway-client`, `harness-web`) and three guides (Prompt Language, Gateway, Workshop). Each Covers cell is a few broad words.
+  - The landing page holds a title and one table, with no images and no other prose. Its columns are Documentation, Kind, and Covers. Its rows are four API references (`runvil`, `harness`, `harness-gateway-client`, `harness-web`) and three guides (Prompt Language, Gateway, Workshop). Each Covers cell is a few broad words.
 - Errors and recovery:
   - A `.rs` file over 500 physical lines fails its crate's build with the ceiling failure message from Technical Design. The recovery is a split under the split rule in Technical Design, which never widens visibility.
   - A compiled code block in a doc comment fails `cargo test -p build-xtask`, and the message says to move the example into a test.
@@ -107,21 +107,21 @@ The repository changes in three places: what an agent reads, what the build reje
   - A 501-line `.rs` file added to any crate fails that crate's `cargo build` with the message above.
   - `cargo test -p build-xtask` fails on each of these: `unsafe_code` expected outside the four crates; a crate without `[lints] workspace = true`; a crate whose `build.rs` doesn't call `build_ceiling::check()`; a `workspace-hack` file over 500 lines; a compiled code block or a `doc = include_str!` in a doc comment.
   - Turning on serde_json's `preserve_order` anywhere in the dependency graph fails `cargo deny check`.
-  - The site workflow publishes rustdoc and books, and a change pushed only to `promptforge-docs` is published by the next nightly run.
+  - The site workflow publishes rustdoc and books, and a change pushed only to `runvil-docs` is published by the next nightly run.
 
 </product-contract>
 <implementation-contract>
 
 ## Technical Design
 
-Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and the repository's own tidy checks in `crates/build-xtask`. A new build-dependency crate gives every crate a compile-time file-size check, one workspace lint table governs every crate, and the docs site is built from promptforge plus a separate checkout of the guides. Rustdoc comes only from doc comments. Every step follows the rules in the first bullet.
+Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and the repository's own tidy checks in `crates/build-xtask`. A new build-dependency crate gives every crate a compile-time file-size check, one workspace lint table governs every crate, and the docs site is built from runvil plus a separate checkout of the guides. Rustdoc comes only from doc comments. Every step follows the rules in the first bullet.
 
 - Rules every step follows:
   - Find each edit by its quoted text. Line numbers and counts in this plan are as of 2026-10-03, and they drift.
   - Remove retired files with `git rm`, because the history keeps them.
-  - Commit edits to `promptforge-design` (`c:\Users\Vinnie\cursor\promptforge-design`) and `promptforge-docs` (`c:\Users\Vinnie\cursor\promptforge-docs`) in those repositories first, as separate commits, and push each one right away. The run does every push itself, and it never asks the operator to push.
-  - Sub-agents never stage or commit in any repository. They delete retired files from the worktree outright, never moving them to `cabinet/_trash/`, because the user overrode that workspace rule for this plan ("we have git"). The step's promptforge commit records each removal, which is what `git rm` means in this plan. They write sibling-repository copies unstaged. The session running the step commits and pushes `promptforge-design` or `promptforge-docs` after the coding sub-agent returns and before the step's promptforge commit, and again after any later round that changes them.
-  - The last step pushes promptforge after full verification passes. It then starts the site workflow with `gh workflow run site.yml`, and watches that run and the CI run for the pushed commit with `gh run watch` until both succeed. A failure in either is fixed in that same step.
+  - Commit edits to `runvil-design` (`c:\Users\Vinnie\cursor\runvil-design`) and `runvil-docs` (`c:\Users\Vinnie\cursor\runvil-docs`) in those repositories first, as separate commits, and push each one right away. The run does every push itself, and it never asks the operator to push.
+  - Sub-agents never stage or commit in any repository. They delete retired files from the worktree outright, never moving them to `cabinet/_trash/`, because the user overrode that workspace rule for this plan ("we have git"). The step's runvil commit records each removal, which is what `git rm` means in this plan. They write sibling-repository copies unstaged. The session running the step commits and pushes `runvil-design` or `runvil-docs` after the coding sub-agent returns and before the step's runvil commit, and again after any later round that changes them.
+  - The last step pushes runvil after full verification passes. It then starts the site workflow with `gh workflow run site.yml`, and watches that run and the CI run for the pushed commit with `gh run watch` until both succeed. A failure in either is fixed in that same step.
   - A step that spans many crates divides the work among parallel sub-agents, one crate group each, with disjoint files. Every sub-agent leaves its changes unstaged, and the step's coding agent merges them, runs the step's checks, and returns as usual.
   - Parallel sub-agents share one worktree and one Cargo target directory. Each compiles only its own packages, and when a build fails only in files another sub-agent owns, it waits and retries instead of editing them. A pass that breaks a crate on purpose while it compiles, such as Step 9's narrow-then-restore loop, walks crates in dependency order in one sub-agent or scripted walker, or runs each sub-agent in its own git worktree whose diff the step's coding agent applies to the main worktree.
   - Touch nothing else in `c:\Users\Vinnie\cursor`.
@@ -143,17 +143,17 @@ Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and th
     - End with the sentence "If no cohesive group splits out without widening visibility, stop and say why."
   - Ceiling wiring:
     - Wire a crate once all of its files are at or under 500 lines: add `build-ceiling.workspace = true` under `[build-dependencies]`, and give it a `build.rs` whose `main` calls `build_ceiling::check()`. A crate that already has a `build.rs` adds the call to it.
-    - Six crates include the source instead and get no manifest entry: `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `promptforge-vfs`. Their `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`.
+    - Six crates include the source instead and get no manifest entry: `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `runvil-vfs`. Their `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`.
       - `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table.
-      - `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency.
+      - `runvil-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency.
     - `build-ceiling`'s own `build.rs` includes its source the same way. If `unreachable_pub` fires on an included module, put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration.
   - Visibility rule:
     - Give every `pub(crate)` and `pub(super)` item the narrowest of private, `pub(super)`, or `pub(crate)` that compiles across all targets and features.
     - Method: in each crate, narrow every such item to private, compile, then restore only the items the compiler reports as inaccessible, each at the narrowest level that compiles.
-    - The facade surface in `crates/promptforge/public-api.txt` must not change.
-  - The `promptforge-docs` layout:
+    - The facade surface in `crates/runvil/public-api.txt` must not change.
+  - The `runvil-docs` layout:
     - Chapters go under `src/<book>/`, plus `src/introduction.md`, with `CONTRIBUTING.md` at the repository root.
-    - `PROMPTFORGE_DOCS` names the checkout root. `build-user-guide` and `cargo xtask site` read `$PROMPTFORGE_DOCS/src/` wherever they read `guide/src/` before.
+    - `RUNVIL_DOCS` names the checkout root. `build-user-guide` and `cargo xtask site` read `$RUNVIL_DOCS/src/` wherever they read `guide/src/` before.
     - Both fail with a message naming the variable when it's unset or names no such directory.
     - Read the variable once in `main` and pass the path down, so tests need no `std::env::set_var`, which is unsafe in Rust 2024.
 - Architecture:
@@ -161,7 +161,7 @@ Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and th
   - Cargo runs build scripts per package, so every crate needs its own call. A single script in a crate that everything depends on, such as `workspace-hack`, would rerun on every edit and rebuild the whole workspace.
   - `workspace-hack` is generated by `cargo hakari` (`.config/hakari.toml`) and gets no build script. A tidy check counts its files instead.
   - Lint policy: the root `[workspace.lints]` in `Cargo.toml` is the only lint table, and every crate declares `[lints] workspace = true`.
-  - Docs site: `cargo xtask site` (`crates/build-xtask/src/site.rs`) builds the rustdoc sites listed in `RUSTDOC_SITES`, stages the books through `crates/build-user-guide`, writes the landing page, and checks every relative link. Chapter sources come from the directory named in `PROMPTFORGE_DOCS`. Site framework files stay in promptforge: `guide/landing/`, `guide/chrome/`, and `guide/books/<book>/book.toml`.
+  - Docs site: `cargo xtask site` (`crates/build-xtask/src/site.rs`) builds the rustdoc sites listed in `RUSTDOC_SITES`, stages the books through `crates/build-user-guide`, writes the landing page, and checks every relative link. Chapter sources come from the directory named in `RUNVIL_DOCS`. Site framework files stay in runvil: `guide/landing/`, `guide/chrome/`, and `guide/books/<book>/book.toml`.
 - Modules and interfaces:
   - `build_ceiling::check()`:
     - Finds the calling crate from `CARGO_MANIFEST_DIR`.
@@ -188,7 +188,7 @@ Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and th
     - Each `guide/books/<book>/book.toml` gains a `description` under `[book]`.
     - `cargo xtask site` writes `target/site/index.html` from both lists, so a new rustdoc site or book adds its row automatically.
 - File and public API changes:
-  - The `promptforge` facade surface (`crates/promptforge/public-api.txt`) changes only when a visibility change reaches it.
+  - The `runvil` facade surface (`crates/runvil/public-api.txt`) changes only when a visibility change reaches it.
     - Regenerate it with `cargo +<pinned nightly> xtask api --bless`, and confirm with `--check`.
     - The pinned nightly is the one named in `crates/build-xtask/src/api/toolchain.rs`.
   - `[workspace.lints.rust]`:
@@ -203,7 +203,7 @@ Enforcement moves out of prose and into the compiler, clippy, cargo-deny, and th
     - `rustls::crypto::CryptoProvider::install_default`.
     - Each reason reads "use X instead, because Y". Add `replacement` only where the call shape matches, and drop any entry whose crate isn't in `Cargo.lock`.
   - `deny.toml` gains a `[[bans.features]]` entry: `crate = "serde_json"`, `deny = ["preserve_order"]`.
-  - `tools/cicerone.md` and `tools/cicerone/` (two plans and ten Python scripts) move to `promptforge-design/saved-docs/cicerone/`. Nothing outside `vibe/` references them.
+  - `tools/cicerone.md` and `tools/cicerone/` (two plans and ten Python scripts) move to `runvil-design/saved-docs/cicerone/`. Nothing outside `vibe/` references them.
   - `.cargo/config.toml` gains `[env] CLIPPY_DISABLE_DOCS_LINKS = "1"`.
   - Warnings as errors:
     - Gate commands (CI and `.githooks/pre-push`) set `CARGO_BUILD_WARNINGS=deny` instead of passing `-- -D warnings`.
@@ -226,10 +226,10 @@ Every new check gets behavior tests built on fixture crates, in the style of `cr
   - `build-ceiling` counts every physical line, including blank lines, comments, CRLF endings, and a missing final newline. A 500-line file passes and a 501-line file fails. The failure message includes the path, the count, the limit, the split rule, and the stop sentence. An unreadable file is reported, not skipped.
   - Each new tidy check has a passing fixture and a failing fixture, and fails when it scans nothing. The ceiling-wiring check passes both wiring forms. The no-doctests check fails on an untagged fence, a `rust` fence, an indented code block, and a `doc = include_str!`, and passes on `text`, `json`, and `toml` fences.
   - Landing generation (`crates/build-xtask/src/site-tests.rs`) gives every `RUSTDOC_SITES` entry and every staged book exactly one row.
-  - `build-user-guide` reads chapters from `PROMPTFORGE_DOCS` (`crates/build-user-guide/src/stage-tests.rs`).
+  - `build-user-guide` reads chapters from `RUNVIL_DOCS` (`crates/build-user-guide/src/stage-tests.rs`).
 - Integration and end-to-end:
   - The full suite, clippy, docs, facade docs, `xtask api --check`, `cargo deny check`, and `cargo test -p build-xtask` all pass.
-  - `cargo xtask site` builds with `PROMPTFORGE_DOCS` pointing at a `promptforge-docs` checkout, and its link check passes.
+  - `cargo xtask site` builds with `RUNVIL_DOCS` pointing at a `runvil-docs` checkout, and its link check passes.
   - A deliberately oversized scratch file fails a crate's build with the specified message, and the build passes again once it's removed.
 - Regression, security, and performance:
   - Ported tutorial examples keep their asserted results. For example, the complete greeter program still returns `HI THERE`.
@@ -251,8 +251,8 @@ Every new check gets behavior tests built on fixture crates, in the style of `cr
     - a compiled code block in a doc comment.
   - Turning on `serde_json/preserve_order` fails `cargo deny check`, and a `std::panic::set_hook` call in a library crate fails clippy.
   - Revert every probe.
-  - With `PROMPTFORGE_DOCS` set, `cargo xtask site` builds, writes the seven-row landing table, and passes its link check.
-  - `tools/cicerone` no longer exists in promptforge.
+  - With `RUNVIL_DOCS` set, `cargo xtask site` builds, writes the seven-row landing table, and passes its link check.
+  - `tools/cicerone` no longer exists in runvil.
 
 </verification-contract>
 <decision-record>
@@ -262,13 +262,13 @@ Every new check gets behavior tests built on fixture crates, in the style of `cr
 The user settled each decision below in conversation, and their words are quoted where they set the rule. The theme is to trade documentation for enforcement, and to keep encapsulation ahead of file size. Rejected alternatives record why each failed and when to revisit it.
 
 - Decisions:
-  - Only doc comments document code inside promptforge: "The ONLY docs in the repo will be doc comments". Rustdoc stays in promptforge because "promptforge repo is the source of truth for the Rustdocs".
-  - Every markdown file pulled into rustdoc is removed and archived: "I want all lib.md and related markdown includes removed from promptforge and archived in the promptforge-design repo under a directory in saved-docs".
+  - Only doc comments document code inside runvil: "The ONLY docs in the repo will be doc comments". Rustdoc stays in runvil because "runvil repo is the source of truth for the Rustdocs".
+  - Every markdown file pulled into rustdoc is removed and archived: "I want all lib.md and related markdown includes removed from runvil and archived in the runvil-design repo under a directory in saved-docs".
   - Doctests go, because removing them speeds up the gate. Each one is moved or deleted at the implementer's discretion: "for each doctest either move it or delete it (your call)".
   - READMEs become generic: "rewritten to be so generic they can never go out of date. Just describe the crate's responsibility in broad terms. Sand off anything that could go stale." The root README keeps its images and badges: "keep the badges. lose anything related to crates.io - we don't publish there."
   - The landing page becomes "a simple table. No images", and the Workshop guide keeps a row. It is generated from the rustdoc and book lists because the hand-written page already missed `harness-gateway-client` as a top-level crate.
   - All crates.io metadata goes ("I dont publish to crates.io and I never intend to"), but installers must not break ("I dont want installers to break"). So `description` stays on the two shipped binaries.
-  - The three guides move to `promptforge-docs`, but the framework stays: "The guides (3 exposition guides) should be moved yes but not the framework (landing page). The CI for promptforge still needs to build the overall github pages site". No history comes with them, and the site rebuilds on a nightly schedule.
+  - The three guides move to `runvil-docs`, but the framework stays: "The guides (3 exposition guides) should be moved yes but not the framework (landing page). The CI for runvil still needs to build the overall github pages site". No history comes with them, and the site rebuilds on a nightly schedule.
   - One lint table: "I do not want copies of workspace lint. I want the strictest possible settings that still lets us vibe." `unsafe_code` drops to `deny` because `forbid` can't be relaxed per module. The unsafe allowlist check restores the old strictness for the other 45 crates.
   - The explicit-approval rule for structural checks is removed from `AGENTS.md`. Where `AGENTS.md` conflicts with an adopted rule, the conflicting part is deleted, and shrinking beats expanding.
   - Gate on yes/no properties, never on an editable score threshold. The 500-line limit is one fixed constant in reviewed code, so it counts as a property.
@@ -280,15 +280,15 @@ The user settled each decision below in conversation, and their words are quoted
   - The gate turns warnings into errors with `CARGO_BUILD_WARNINGS=deny`, not in `.cargo/config.toml`, so a new stable Rust lint can't break every local build mid-session.
   - Six crates wire the 500-line check without naming `build-ceiling` in their manifests (added during decomposition, 2026-10-03):
     - The product-boundary matrix in `crates/build-xtask/src/product.rs` bars the five Harness crates (`harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`) from every `build-*` crate in every dependency table, build-dependencies included.
-    - `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency, and its manifest says never to weaken that rule.
+    - `runvil-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency, and its manifest says never to weaken that rule.
     - So these six crates' `build.rs` files pull in `crates/build-ceiling/src/lib.rs` with `#[path]` and call `build_ceiling::check()`, the way `build-ceiling`'s own `build.rs` does. Both existing rules stay unchanged, and the ceiling-wiring check accepts either form.
     - Rejected: exempting `build-ceiling` from both rules. It weakens a product boundary, and a rule its owner marked never to weaken, for the sake of tooling.
     - The user confirmed this choice when asked during review.
-  - `tools/cicerone` is archived to `promptforge-design/saved-docs/cicerone/`. It generated the rustdoc tutorial pages this plan deletes, and its instructions still target `lib.md` and `guide/src/`, so an agent could regenerate them. The user chose archiving during review.
+  - `tools/cicerone` is archived to `runvil-design/saved-docs/cicerone/`. It generated the rustdoc tutorial pages this plan deletes, and its instructions still target `lib.md` and `guide/src/`, so an agent could regenerate them. The user chose archiving during review.
   - A tidy check rejects new doctests, because once the doctest steps are gone, a doctest an agent writes later would never run. The user chose adding it during review.
-  - The run does everything, pushes included: "YOU DO EVERYTHING". It pushes the two sibling repositories as it commits to them, and it pushes promptforge and checks CI and the site workflow at the end.
+  - The run does everything, pushes included: "YOU DO EVERYTHING". It pushes the two sibling repositories as it commits to them, and it pushes runvil and checks CI and the site workflow at the end.
   - The run uses nine steps, not 29, because each step's fixed cost of review, verification, and commit message dominated: "do we REALLY need 29 steps?" The steps group work by subject, and the three largest (the doctest sweep, the file splits, and the visibility pass) fan out to parallel sub-agents inside the step.
-  - `promptforge-docs` keeps the old `guide/` layout (added during decomposition, 2026-10-03): chapters under `src/<book>/`, plus `src/introduction.md`, with `CONTRIBUTING.md` at its root. `PROMPTFORGE_DOCS` names the root of that checkout, and `build-user-guide` and `cargo xtask site` read `$PROMPTFORGE_DOCS/src/` where they read `guide/src/` before. Both fail with a message naming the variable when it is unset or names no such directory.
+  - `runvil-docs` keeps the old `guide/` layout (added during decomposition, 2026-10-03): chapters under `src/<book>/`, plus `src/introduction.md`, with `CONTRIBUTING.md` at its root. `RUNVIL_DOCS` names the root of that checkout, and `build-user-guide` and `cargo xtask site` read `$RUNVIL_DOCS/src/` where they read `guide/src/` before. Both fail with a message naming the variable when it is unset or names no such directory.
   - `build_ceiling::check()` returns `Result<(), build_ceiling::Violations>` instead of exiting the process (added during decomposition, 2026-10-03):
     - Library code never exits the process, and the workspace's `clippy::exit` deny rejects `process::exit` outside `main`, so the check reports through its return value and the build script's `main` turns it into a nonzero exit.
     - `Violations` lists every oversized or unreadable file. Its `Display` and `Debug` both render the ceiling failure message, because a `main` that returns a `Result` prints its error through `Debug`.
@@ -313,7 +313,7 @@ The user settled each decision below in conversation, and their words are quoted
   - Splitting files into sibling modules with widened visibility: it loosens encapsulation, as when one split widened `Attached` to `pub(crate)`. Private child modules achieve the same split with no widening. No revisit.
   - Showing tested examples in docs by including test files with `include_str!`: readers are not a goal. Revisit if outside readers become a goal.
   - Deleting all docs, or keeping rustdoc in a separate repository: rustdoc must stay with the code. No revisit.
-  - An orphan branch for the guides: the user chose the existing `promptforge-docs` repository. No revisit.
+  - An orphan branch for the guides: the user chose the existing `runvil-docs` repository. No revisit.
   - Rebuilding on every docs push with `repository_dispatch`: it needs a cross-repository token. Revisit if a one-day publish lag becomes a problem.
   - A `.cursorignore` for `guide/`: the guides leave the repository, which makes it moot. No revisit.
   - `build.warnings = "deny"` in `.cargo/config.toml`: on the unpinned stable channel, a new lint would break every local build. Revisit if the toolchain gets pinned.
@@ -329,8 +329,8 @@ The user settled each decision below in conversation, and their words are quoted
   - Cargo applies `[env]` to the compiler processes it runs. That should make `clippy-driver` honor `CLIPPY_DISABLE_DOCS_LINKS`, but this is unverified, so confirm that the docs-link line disappears.
   - `CARGO_BUILD_WARNINGS` might not cover rustdoc warnings, so rustdoc steps keep `RUSTDOCFLAGS="-D warnings"` unless that's verified. Cargo ignores `build.warnings` under `--message-format=json`, which rust-analyzer uses, so the editor still shows warnings.
   - Whether the Tauri bundler or cargo-dist reads `description` is unverified. That's why it stays on both shipped binaries.
-  - `promptforge-docs` sits at `c:\Users\Vinnie\cursor\promptforge-docs`, inside the workspace folder. An agent opened on `c:\Users\Vinnie\cursor` can still read the guides there, so vibe with `promptforge` opened as its own workspace. The repository is public (`git@github.com:cppalliance/promptforge-docs`, default branch `master`) and holds only `README.md` and `LICENSE`.
-  - Edits to `promptforge-design` and `promptforge-docs` are committed in those repositories, separately from promptforge's commits.
+  - `runvil-docs` sits at `c:\Users\Vinnie\cursor\runvil-docs`, inside the workspace folder. An agent opened on `c:\Users\Vinnie\cursor` can still read the guides there, so vibe with `runvil` opened as its own workspace. The repository is public (`git@github.com:cppalliance/runvil-docs`, default branch `master`) and holds only `README.md` and `LICENSE`.
+  - Edits to `runvil-design` and `runvil-docs` are committed in those repositories, separately from runvil's commits.
   - `core.hooksPath` is a per-clone git setting, and this plan sets it only in this clone. The hooks are bash scripts, which Git for Windows runs.
   - The 500-line limit as of 2026-10-03:
     - The tidy ceiling covered 23 of 49 crates. 0 of their 751 files are over 500 lines.
@@ -350,7 +350,7 @@ The user settled each decision below in conversation, and their words are quoted
 - Deferred: an ast-grep rule that workaround comments cite an upstream issue URL. Revisit once ast-grep is adopted, then delete that `AGENTS.md` rule.
 - Deferred: a `cargo xtask fix-layout` generator for the flat-directory convention. Revisit once the generator exists, then delete the `AGENTS.md` flat-directory paragraph.
 - Deferred: a unified `cargo xtask check` command, Cursor hooks (a stop hook, a write guard, a shell guard), and rustc-style xtask messages. Revisit after this plan.
-- Deferred: a scheduled job in `promptforge-docs` that parses every prompt example against promptforge's current parser and reports drift. Revisit once the guides have moved.
+- Deferred: a scheduled job in `runvil-docs` that parses every prompt example against runvil's current parser and reports drift. Revisit once the guides have moved.
 - Deferred: hiding old plans under `vibe/` from agents. Revisit when stale plans mislead a session.
 - Out of scope: file-size limits for TypeScript and CSS.
 - Out of scope: publishing any crate to crates.io.
@@ -367,16 +367,16 @@ The user settled each decision below in conversation, and their words are quoted
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. UI: `npm test --workspaces --if-present` from `crates/workshop`, and `npm test` from `crates/gateway/config-ui/ui`. Nightly-only fixtures: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`; never a standalone `cargo check --workspace` beside them. Also `cargo deny check` (pre-push and CI), and UI typechecks `npm run typecheck --workspaces --if-present` from `crates/workshop` and `npm run typecheck` from `crates/gateway/config-ui/ui`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook).
-- Docs command: with `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the default-feature facade docs `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`. User guide: with `PROMPTFORGE_DOCS` set to `c:\Users\Vinnie\cursor\promptforge-docs` (PowerShell: `$env:PROMPTFORGE_DOCS="c:\Users\Vinnie\cursor\promptforge-docs"`; ignored until the guides move), `cargo xtask site --books-only`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`).
+- Docs command: with `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the default-feature facade docs `cargo doc -p runvil --no-deps` and `cargo doc -p harness --no-deps`. User guide: with `RUNVIL_DOCS` set to `c:\Users\Vinnie\cursor\runvil-docs` (PowerShell: `$env:RUNVIL_DOCS="c:\Users\Vinnie\cursor\runvil-docs"`; ignored until the guides move), `cargo xtask site --books-only`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`).
 - Test placement and naming conventions:
   - Unit tests sit in `#[cfg(test)] mod tests` inline (about 380 files), or in a sibling `foo-tests.rs` wired as `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;`, or in a `src/<module>/tests/` directory once there are three or more test files.
   - Integration tests are one binary per crate: `crates/<crate>/tests/it/main.rs` or `tests/suite/main.rs`, with one module per topic beside it plus a `support.rs`.
   - Test functions are snake_case behavior sentences, such as `a_harness_crate_without_the_marker_is_a_violation_and_still_held_to_the_ceiling`.
   - Structural-check tests build fixture crates in the style of `crates/build-xtask/src/tidy-tests.rs`.
-  - Criterion benches use `harness = false` in `promptforge-engine` and `promptforge-lua`.
+  - Criterion benches use `harness = false` in `runvil-engine` and `runvil-lua`.
   - UI tests are `node --test` `.mjs` files in `crates/workshop/<pkg>/test/`, plus `src/**/*.test.mjs` in `ui`. `crates/workshop/ui/test/docs-claims.mjs` checks the Engine, Harness, and Host vocabulary in every `AGENTS.md`, `## Invariants` crate doc, and `.cursor/rules` file.
 - Directory map:
-  - `crates/`: every Rust crate. The Engine (`promptforge`, `promptforge-internal/*`), the Harness (`harness*`, `harness-internal/*`), the gateway family (`gateway/*`, with STT under `gateway/stt/*`), the Workshop family (`workshop/*`), shared crates (`gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, `shared-error-source`), build tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), and `workspace-hack` (cargo-hakari). `crates/shared-ui` is a TypeScript and CSS package, not a Rust crate.
+  - `crates/`: every Rust crate. The Engine (`runvil`, `runvil-internal/*`), the Harness (`harness*`, `harness-internal/*`), the gateway family (`gateway/*`, with STT under `gateway/stt/*`), the Workshop family (`workshop/*`), shared crates (`gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, `shared-error-source`), build tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), and `workspace-hack` (cargo-hakari). `crates/shared-ui` is a TypeScript and CSS package, not a Rust crate.
   - `guide/`: the user guide. Chapter sources are in `src/` and the long-form `*-guide.md` files, with `books/*/book.toml`, `landing/`, and `chrome/` for the site.
   - `prompts/`: example prompt programs. `local/`: machine-local gateway config, profiles, prompts, and STT fixtures.
   - `tools/`: Node sidecar-staging and TTS scripts with tests, plus the `cicerone` Python tooling.
@@ -386,13 +386,13 @@ The user settled each decision below in conversation, and their words are quoted
   - Root config: `Cargo.toml`, `clippy.toml`, `deny.toml`, `rustfmt.toml`, `rust-toolchain.toml` (stable), and `dist-workspace.toml` (cargo-dist). `target/` and `target-msrv/` are build output.
 - Component boundaries:
   - The Engine depends on the Lua VM boundary and the shared substrate.
-  - The Harness depends only on the Engine, through the `promptforge` facade. It has no gateway or shared crate, and no tokio in Harness crates.
+  - The Harness depends only on the Engine, through the `runvil` facade. It has no gateway or shared crate, and no tokio in Harness crates.
   - The Host (Workshop, the CLI) depends on the Harness.
   - The gateway family depends on the shared substrate.
   - The Workshop family depends on the Harness, the gateway, and the shared substrate, in a one-way tier graph.
   - The VFS layer depends on nothing.
   - Build crates are tooling and depend on no workspace crates.
-  - `cargo test -p build-xtask` enforces the product and container boundaries, the Workshop tier graph, lint inheritance, the `## Invariants` marker, and the 500-line file ceiling. `cargo xtask api --check` keeps the `promptforge` facade surface closed against `crates/promptforge/public-api.txt`.
+  - `cargo test -p build-xtask` enforces the product and container boundaries, the Workshop tier graph, lint inheritance, the `## Invariants` marker, and the 500-line file ceiling. `cargo xtask api --check` keeps the `runvil` facade surface closed against `crates/runvil/public-api.txt`.
 - Conventions summary:
   - Rust 2024 on stable. Dependencies are centralized in `[workspace.dependencies]`, with a comment justifying each pin.
   - One workspace lint table: clippy `all` and `pedantic` deny, `unwrap_used` and `expect_used` deny, `unsafe_code` forbid outside the owned unsafe boundaries, `missing_docs` warn, and rustdoc broken links deny.
@@ -408,12 +408,12 @@ The user settled each decision below in conversation, and their words are quoted
 
 ## Execution Instructions
 
-The work runs as 9 steps in four components. Each step is one promptforge commit holding its code and its tests. A step that also changes `promptforge-design` or `promptforge-docs` commits there first, as a separate commit, and pushes that repository right away. The run does every push itself: it pushes the two sibling repositories as it commits to them, and the last step pushes promptforge after full verification, starts the site workflow, and watches that run and the CI run until both succeed. The three largest bodies of work (the doctest sweep in Step 2, the file splits in Step 7, and the visibility pass in Step 9) fan out to parallel sub-agents on disjoint files inside their step, and the step's coding agent merges the results and runs the step's checks. Work item numbers refer to the 13 todos in the frontmatter.
+The work runs as 9 steps in four components. Each step is one runvil commit holding its code and its tests. A step that also changes `runvil-design` or `runvil-docs` commits there first, as a separate commit, and pushes that repository right away. The run does every push itself: it pushes the two sibling repositories as it commits to them, and the last step pushes runvil after full verification, starts the site workflow, and watches that run and the CI run until both succeed. The three largest bodies of work (the doctest sweep in Step 2, the file splits in Step 7, and the visibility pass in Step 9) fan out to parallel sub-agents on disjoint files inside their step, and the step's coding agent merges the results and runs the step's checks. Work item numbers refer to the 13 todos in the frontmatter.
 
 - Rules for every step:
   - Find each edit by its quoted text. Line numbers and line counts below are as of 2026-10-03 and drift.
   - Verify with the Project Survey commands for the crates the step touches, plus `cargo fmt --all --check` and the checks the step names. Each step repeats this in its own checks.
-  - Remove retired files with `git rm`; the history keeps them. Touch nothing in `c:\Users\Vinnie\cursor` outside `promptforge`, `promptforge-design`, and `promptforge-docs`.
+  - Remove retired files with `git rm`; the history keeps them. Touch nothing in `c:\Users\Vinnie\cursor` outside `runvil`, `runvil-design`, and `runvil-docs`.
   - Write new prose without em dashes or double dashes, in the Engine, Harness, and Host vocabulary that `crates/workshop/ui/test/docs-claims.mjs` checks.
   - Until Step 8 removes it, the tidy ceiling still binds the 23 crates with the `## Invariants` marker. A step that grows one of their files past 500 lines splits it under the split rule in Technical Design.
   - Sub-agents never stage or commit, and the session running the step commits and pushes the sibling repositories, as the rules in Technical Design set out.
@@ -421,7 +421,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   1. Docs out of rustdoc (Steps 1 and 2; items 1 and 2). First, because item 2 needs item 1 done, and dropping the doctest steps takes about 67 seconds off every later local gate run.
   2. READMEs, manifests, and docs site (Steps 3 and 4; items 3, 4, 5, and 6). Independent of the enforcement work. Early, so the steps that later edit the same manifests (the lint tables in Step 5, the build-dependencies in Step 8) start from trimmed files, and so the Docs line of `AGENTS.md` is final before Step 6 shrinks the file.
   3. Structural enforcement (Steps 5 and 6; items 7 to 12). Before the ceiling, because item 13 depends on every other item.
-  4. Compiler-enforced 500-line limit (Steps 7 to 9; item 13). Last, because its splits touch files every other component edits, its last step verifies the whole plan and pushes promptforge, and the user asked for it last.
+  4. Compiler-enforced 500-line limit (Steps 7 to 9; item 13). Last, because its splits touch files every other component edits, its last step verifies the whole plan and pushes runvil, and the user asked for it last.
 - Pieces and construction:
   - Docs out of rustdoc: the rustdoc pages, their ported tests and examples, and the generator that wrote them (Step 1), then every remaining doctest, the no-doctests tidy check, and the removal of the doctest gate (Step 2). Sequential, because only once the pages are gone are the remaining doctests the per-symbol ones, and the new tidy check rejects every `doc = include_str!` that Step 1 removes. Inside Step 2 the tidy check comes first, because its report is the complete list of blocks to remove: the two doctest commands never see binaries, build scripts, or integration tests. The family sub-agents then touch disjoint crates, so their order is free, and the gate removal follows their merge.
   - READMEs, manifests, and docs site: the READMEs and the manifests (Step 3), then the landing page and the guide move (Step 4). The two steps read nothing of each other, so their order is free. Inside Step 3 the READMEs and the manifests are joint, because neither reads the other. Inside Step 4 the landing page comes before the guide move, because both edit the site build and the move builds on the generated page.
@@ -433,32 +433,32 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 ### Step 1: Archive the rustdoc pages and cicerone [completed]
 
 - Component: Docs out of rustdoc
-- Work item: 1, for `promptforge`, `promptforge-engine`, `harness`, and `tools/cicerone`.
+- Work item: 1, for `runvil`, `runvil-engine`, `harness`, and `tools/cicerone`.
 - Archive:
-  - Copy the 13 pages in `crates/promptforge/src/` (`lib`, `effect`, `event`, `ids`, `model`, `tools`, `capabilities`, `prompt`, `vfs`, `cancel`, `timestamp`, `metrics`, and `replay`, each `.md`) to `promptforge-design/saved-docs/promptforge/`.
-  - Copy `crates/promptforge-internal/engine/src/lib.md` to `promptforge-design/saved-docs/promptforge-engine/`.
-  - Copy `crates/harness/src/{lib,capability,record,vfs}.md` to `promptforge-design/saved-docs/harness/`.
-  - Copy `tools/cicerone.md` and `tools/cicerone/` (two plans and ten Python scripts) to `promptforge-design/saved-docs/cicerone/`. Cicerone wrote the rustdoc pages this step deletes, and its instructions still target `lib.md` and `guide/src/`. Nothing outside `vibe/` references it.
-  - Commit the copies in `promptforge-design` (`c:\Users\Vinnie\cursor\promptforge-design`) and push that repository right away. Then `git rm` the 18 pages and both cicerone paths from promptforge.
+  - Copy the 13 pages in `crates/runvil/src/` (`lib`, `effect`, `event`, `ids`, `model`, `tools`, `capabilities`, `prompt`, `vfs`, `cancel`, `timestamp`, `metrics`, and `replay`, each `.md`) to `runvil-design/saved-docs/runvil/`.
+  - Copy `crates/runvil-internal/engine/src/lib.md` to `runvil-design/saved-docs/runvil-engine/`.
+  - Copy `crates/harness/src/{lib,capability,record,vfs}.md` to `runvil-design/saved-docs/harness/`.
+  - Copy `tools/cicerone.md` and `tools/cicerone/` (two plans and ten Python scripts) to `runvil-design/saved-docs/cicerone/`. Cicerone wrote the rustdoc pages this step deletes, and its instructions still target `lib.md` and `guide/src/`. Nothing outside `vibe/` references it.
+  - Commit the copies in `runvil-design` (`c:\Users\Vinnie\cursor\runvil-design`) and push that repository right away. Then `git rm` the 18 pages and both cicerone paths from runvil.
 - Tests:
-  - Port into `crates/promptforge/tests/suite/`, one topic module per page wired from `tests/suite/main.rs`, every `promptforge` page example whose behavior no suite test covers, with its assertions.
+  - Port into `crates/runvil/tests/suite/`, one topic module per page wired from `tests/suite/main.rs`, every `runvil` page example whose behavior no suite test covers, with its assertions.
   - Port the engine page's version-detection and parse example into the engine's `tests/` binary if no test covers it.
   - Port into `crates/harness/tests/suite/`, wired from `tests/suite/main.rs`, every `harness` page example whose behavior no suite test covers, with its assertions. The candidates are the tours that answer a run's question through an input broker, stop a round and cancel a run, and stream from a Host's own broker.
 - Examples:
-  - Add `crates/promptforge/examples/greeter.rs`, the canonical step-and-answer greeter loop from the `promptforge` page's complete program. A suite test asserts that the complete greeter returns `HI THERE`.
+  - Add `crates/runvil/examples/greeter.rs`, the canonical step-and-answer greeter loop from the `runvil` page's complete program. A suite test asserts that the complete greeter returns `HI THERE`.
   - Add `crates/harness/examples/run-prompt.rs`, the canonical example from the `harness` page's "Run a prompt" tour, using only the crate's existing dev-dependencies (`tokio`, `async-trait`).
 - Docs:
-  - In `crates/promptforge/src/lib.rs` and `crates/promptforge-internal/engine/src/lib.rs`, remove the 14 `#![doc = include_str!(...)]` lines and write a short `//!` crate doc. Give each `pub mod` block in the facade that had a page a one-line module doc. Keep the engine's `## Invariants` section. New doc text names no internal crate, because `xtask api --check` rejects that in facade docs.
+  - In `crates/runvil/src/lib.rs` and `crates/runvil-internal/engine/src/lib.rs`, remove the 14 `#![doc = include_str!(...)]` lines and write a short `//!` crate doc. Give each `pub mod` block in the facade that had a page a one-line module doc. Keep the engine's `## Invariants` section. New doc text names no internal crate, because `xtask api --check` rejects that in facade docs.
   - In `crates/harness/src/lib.rs`, remove the four `include_str!` lines, write a short `//!` crate doc, and give the `plugin`, `record`, and `vfs` module blocks one-line docs.
 - Checks:
-  - The Project Survey commands for `promptforge`, `promptforge-engine`, and `harness`, plus `cargo fmt --all --check`.
-  - `cargo nextest run --locked -p promptforge -p promptforge-engine -p harness --all-features`.
-  - `cargo run --locked -p promptforge --example greeter` and `cargo run --locked -p harness --example run-prompt`.
-  - With `RUSTDOCFLAGS=-D warnings`: `cargo doc -p promptforge --no-deps`, `cargo doc -p promptforge-engine --no-deps --all-features`, and `cargo doc -p harness --no-deps`.
+  - The Project Survey commands for `runvil`, `runvil-engine`, and `harness`, plus `cargo fmt --all --check`.
+  - `cargo nextest run --locked -p runvil -p runvil-engine -p harness --all-features`.
+  - `cargo run --locked -p runvil --example greeter` and `cargo run --locked -p harness --example run-prompt`.
+  - With `RUSTDOCFLAGS=-D warnings`: `cargo doc -p runvil --no-deps`, `cargo doc -p runvil-engine --no-deps --all-features`, and `cargo doc -p harness --no-deps`.
   - `cargo +nightly-2026-09-05 xtask api --check` and `cargo test -p build-xtask`.
-  - `rg 'doc = include_str!' crates` matches only the fixture strings in `crates/build-xtask/src/*-tests.rs`, so it finds nothing in `promptforge`, `promptforge-engine`, or `harness`.
+  - `rg 'doc = include_str!' crates` matches only the fixture strings in `crates/build-xtask/src/*-tests.rs`, so it finds nothing in `runvil`, `runvil-engine`, or `harness`.
   - `tools/cicerone.md` and `tools/cicerone/` no longer exist, and `rg -i cicerone --glob '!vibe/**'` finds nothing.
-  - `git -C c:\Users\Vinnie\cursor\promptforge-design status -sb` shows no unpushed commit.
+  - `git -C c:\Users\Vinnie\cursor\runvil-design status -sb` shows no unpushed commit.
 
 </step-1>
 
@@ -473,7 +473,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - Scope: every compiled code block in a doc comment, meaning untagged fences, fences tagged `rust`, `no_run`, `should_panic`, `compile_fail`, `ignore`, or an edition, and indented code blocks. `text`, `json`, and `toml` blocks stay.
   - Delete examples that only restate a signature, and every `compile_fail` case. Move into the crate's tests, with its assertions, any example that exercises behavior no test covers.
 - Families, each covering every crate in it that has a compiled block:
-  - Engine and Harness: `promptforge-types`, `promptforge-engine`, `promptforge-lua`, `promptforge-parser`, `promptforge-model-client`, `promptforge-vfs`, `harness-runner`, `harness-plugins`, `harness-gateway-client`, and `harness-web`. The most blocks are in `crates/promptforge-internal/types/src/tools/output.rs`, `crates/harness-internal/plugins/src/plugin.rs`, and `crates/harness-gateway-client/src/transport.rs`.
+  - Engine and Harness: `runvil-types`, `runvil-engine`, `runvil-lua`, `runvil-parser`, `runvil-model-client`, `runvil-vfs`, `harness-runner`, `harness-plugins`, `harness-gateway-client`, and `harness-web`. The most blocks are in `crates/runvil-internal/types/src/tools/output.rs`, `crates/harness-internal/plugins/src/plugin.rs`, and `crates/harness-gateway-client/src/transport.rs`.
   - Gateway and shared: every package under `crates/gateway/`, plus `gateway-api-types`, `gateway-api-discovery`, and `shared-loopback`. Most blocks are in `gateway-config` (`crates/gateway/config/src/config/accessors.rs` alone holds about 70, then `config/stt.rs`, `shadow.rs`, and `profile.rs`), then `crates/gateway-api-types/src/metadata.rs`, `gateway-logging`, and `crates/gateway/local/src/runtime.rs`.
   - Workshop: `workshop-agents`, `workshop-gateway`, and `workshop-support`, as of 2026-10-03.
   - After the merge, the coding agent removes, the same way, any compiled block the tidy check still reports, such as one in a `build-*` crate or a binary.
@@ -507,10 +507,10 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 - Work item: 3 (READMEs) and 5 (crates.io metadata).
 - READMEs, the 25 files:
   - The root `README.md` and `crates/README.md`.
-  - The family indexes: `crates/promptforge-internal/README.md`, `crates/gateway/README.md`, and `crates/gateway/stt/README.md`.
-  - The crate READMEs in `crates/gateway/{app,config,config-ui,local,protocol,routing,web-search}/`, `crates/gateway-api-discovery/`, `crates/harness-gateway-client/`, `crates/harness-internal/{plugins,runner}/`, `crates/harness-web/`, `crates/promptforge-internal/{engine,lua,model-client,parser,types,vfs}/`, `crates/shared-loopback/`, and `crates/workshop/run-log/`.
+  - The family indexes: `crates/runvil-internal/README.md`, `crates/gateway/README.md`, and `crates/gateway/stt/README.md`.
+  - The crate READMEs in `crates/gateway/{app,config,config-ui,local,protocol,routing,web-search}/`, `crates/gateway-api-discovery/`, `crates/harness-gateway-client/`, `crates/harness-internal/{plugins,runner}/`, `crates/harness-web/`, `crates/runvil-internal/{engine,lua,model-client,parser,types,vfs}/`, `crates/shared-loopback/`, and `crates/workshop/run-log/`.
 - Each README becomes a few sentences stating the crate's or directory's responsibility in broad terms. Remove type, function, file, and crate names, dependency lists, crate lists, feature lists, commands, and numbers. Keep every file.
-- The root `README.md` keeps its six images (`images/banner-02.png` through `images/banner-06.png`, and `images/promptforge-portrait.png`) and its CI and license badges.
+- The root `README.md` keeps its six images (`images/banner-02.png` through `images/banner-06.png`, and `images/runvil-portrait.png`) and its CI and license badges.
 - Remove everything tied to crates.io: the crates.io and docs.rs badges, and the `cargo install gateway` line in `crates/gateway/app/README.md`.
 - Manifests:
   - In each crate's `[package]`, remove `description`, `readme`, `keywords`, `categories`, `documentation`, and `homepage`. Keep `description` on `crates/gateway/app` and `crates/workshop/desktop`, the two shipped binaries, because whether the Tauri bundler or cargo-dist reads it is unverified.
@@ -528,41 +528,41 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 <step-4>
 
-### Step 4: Generate the landing page and move the guides to promptforge-docs [completed]
+### Step 4: Generate the landing page and move the guides to runvil-docs [completed]
 
 - Component: READMEs, manifests, and docs site
-- Work item: 4 (landing page) and 6 (guide move). Build the landing page first, then move the guides, because both edit the site build and the move builds on the generated page. Follow the `promptforge-docs` layout rule in Technical Design.
+- Work item: 4 (landing page) and 6 (guide move). Build the landing page first, then move the guides, because both edit the site build and the move builds on the generated page. Follow the `runvil-docs` layout rule in Technical Design.
 - Landing page, in `crates/build-xtask/src/site.rs`:
   - Each `RUSTDOC_SITES` entry gains a short, broad description.
   - A landing writer builds `target/site/index.html` from `RUSTDOC_SITES` and each staged book's `book.toml` `description`, so a new rustdoc site or book adds its row with no other edit. It replaces the copy of `guide/landing/index.html`. If `site.rs` would pass 500 lines, the writer lives in a private child module, `#[path = "site-landing.rs"] mod landing;`.
-  - The page holds a title and one table, with no images and no other prose. Its columns are Documentation, Kind, and Covers. Its rows are the four API references (`promptforge`, `harness`, `harness-gateway-client`, `harness-web`) and the three guides (Prompt Language, Gateway, Workshop). Each Covers cell is a few broad words.
+  - The page holds a title and one table, with no images and no other prose. Its columns are Documentation, Kind, and Covers. Its rows are the four API references (`runvil`, `harness`, `harness-gateway-client`, `harness-web`) and the three guides (Prompt Language, Gateway, Workshop). Each Covers cell is a few broad words.
   - Update the module doc's build order.
 - Each `guide/books/<book>/book.toml` gains a `description` under `[book]`.
 - Remove `guide/landing/index.html` and `guide/landing/img/`, and drop the image and product-table styles from `guide/landing/style.css`.
-- Guide move, in `c:\Users\Vinnie\cursor\promptforge-docs` (`git@github.com:cppalliance/promptforge-docs`, default branch `master`):
+- Guide move, in `c:\Users\Vinnie\cursor\runvil-docs` (`git@github.com:cppalliance/runvil-docs`, default branch `master`):
   - Copy `guide/src/language/`, `guide/src/gateway/`, `guide/src/workshop/`, and `guide/src/introduction.md` into `src/`, and `guide/CONTRIBUTING.md` to the root, as a plain copy with no history.
-  - Commit there first and push `master` right away, before this step's promptforge commit, because the site workflow checks that repository out. Then `git rm` those paths from promptforge.
-- What stays in promptforge: `guide/landing/`, `guide/chrome/`, `guide/books/*/book.toml`, `crates/build-user-guide`, and `crates/build-xtask/src/site.rs`. Point each `book.toml`'s `git-repository-url` at `https://github.com/cppalliance/promptforge-docs`.
+  - Commit there first and push `master` right away, before this step's runvil commit, because the site workflow checks that repository out. Then `git rm` those paths from runvil.
+- What stays in runvil: `guide/landing/`, `guide/chrome/`, `guide/books/*/book.toml`, `crates/build-user-guide`, and `crates/build-xtask/src/site.rs`. Point each `book.toml`'s `git-repository-url` at `https://github.com/cppalliance/runvil-docs`.
 - `crates/build-user-guide` (`src/main.rs`, `src/stage.rs`):
-  - Read chapters from `$PROMPTFORGE_DOCS/src/`, and keep reading `book.toml` and `chrome/` from `guide/`.
+  - Read chapters from `$RUNVIL_DOCS/src/`, and keep reading `book.toml` and `chrome/` from `guide/`.
   - Read the variable once in `main` and pass the path down, so tests need no `std::env::set_var`, which is unsafe in Rust 2024.
-  - Write the single-file exports `promptforge-<book>-guide.md` into the site output, where `cargo xtask site` places them in `target/site/`, instead of into `guide/`. Remove the committed `guide/promptforge-*-guide.md` files.
+  - Write the single-file exports `runvil-<book>-guide.md` into the site output, where `cargo xtask site` places them in `target/site/`, instead of into `guide/`. Remove the committed `guide/runvil-*-guide.md` files.
   - Update the module docs that name `guide/src/`.
-- `cargo xtask site` reads `PROMPTFORGE_DOCS` once in `main`, passes the path down and through to the stage run, and fails with a message naming the variable when it is unset or names no such directory.
+- `cargo xtask site` reads `RUNVIL_DOCS` once in `main`, passes the path down and through to the stage run, and fails with a message naming the variable when it is unset or names no such directory.
 - `.github/workflows/site.yml`:
-  - Check out `cppalliance/promptforge-docs` beside promptforge with `actions/checkout`, `repository:`, and `path:`, and set `PROMPTFORGE_DOCS` for both build steps.
+  - Check out `cppalliance/runvil-docs` beside runvil with `actions/checkout`, `repository:`, and `path:`, and set `RUNVIL_DOCS` for both build steps.
   - Drop the `guide/**` pull-request path trigger.
   - Add a nightly `schedule` and keep `workflow_dispatch`. The deploy job's `github.event_name != 'pull_request'` condition already covers scheduled runs.
 - `AGENTS.md`: delete "; user guide: `cargo xtask site --books-only`" from the Docs line.
 - Tests:
-  - In `crates/build-xtask/src/site-tests.rs`: every `RUSTDOC_SITES` entry and every staged book gets exactly one row, the page has no `<img>`, and `cargo xtask site` fails with `PROMPTFORGE_DOCS` in the message when the docs root is unset or missing.
-  - In `crates/build-user-guide/src/stage-tests.rs`: staging reads chapters from the docs root it is given, and an unset or missing root fails with `PROMPTFORGE_DOCS` in the message. The `fake_guide()` fixture in `src/main.rs` moves to the split layout.
-- This step pushes only `promptforge-docs`. Pushing promptforge, running the site workflow, and checking CI happen in the run's last step (Step 9), under the push rules in Technical Design.
+  - In `crates/build-xtask/src/site-tests.rs`: every `RUSTDOC_SITES` entry and every staged book gets exactly one row, the page has no `<img>`, and `cargo xtask site` fails with `RUNVIL_DOCS` in the message when the docs root is unset or missing.
+  - In `crates/build-user-guide/src/stage-tests.rs`: staging reads chapters from the docs root it is given, and an unset or missing root fails with `RUNVIL_DOCS` in the message. The `fake_guide()` fixture in `src/main.rs` moves to the split layout.
+- This step pushes only `runvil-docs`. Pushing runvil, running the site workflow, and checking CI happen in the run's last step (Step 9), under the push rules in Technical Design.
 - Checks:
   - The Project Survey commands for `build-xtask` and `build-user-guide`, plus `cargo fmt --all --check`.
   - `cargo nextest run --locked -p build-user-guide -p build-xtask` and `cargo test -p build-xtask`.
-  - With `PROMPTFORGE_DOCS` set to `c:\Users\Vinnie\cursor\promptforge-docs`: `cargo xtask site --books-only` passes its link check, and `cargo xtask site` builds, writes the landing page with all seven rows, passes its link check, and lands the exports in `target/site/`.
-  - `git -C c:\Users\Vinnie\cursor\promptforge-docs status -sb` shows `master` with no unpushed commit.
+  - With `RUNVIL_DOCS` set to `c:\Users\Vinnie\cursor\runvil-docs`: `cargo xtask site --books-only` passes its link check, and `cargo xtask site` builds, writes the landing page with all seven rows, passes its link check, and lands the exports in `target/site/`.
+  - `git -C c:\Users\Vinnie\cursor\runvil-docs status -sb` shows `master` with no unpushed commit.
 
 </step-4>
 
@@ -611,7 +611,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - `tracing_subscriber::util::SubscriberInitExt::init` and `try_init`.
   - `rustls::crypto::CryptoProvider::install_default`.
   - Each `reason` reads "use X instead, because Y". Add `replacement` only where the call shape matches, and drop any entry whose crate isn't in `Cargo.lock`.
-  - The three subscriber `init()` calls in `crates/gateway/app/src/main.rs` get `#[expect(clippy::disallowed_methods, reason = ...)]`, and so does any other installer clippy flags in a binary entry point; only binary entry points may install process-global state. mlua's `lua.set_hook` in `crates/promptforge-internal/lua` is a different method and is unaffected.
+  - The three subscriber `init()` calls in `crates/gateway/app/src/main.rs` get `#[expect(clippy::disallowed_methods, reason = ...)]`, and so does any other installer clippy flags in a binary entry point; only binary entry points may install process-global state. mlua's `lua.set_hook` in `crates/runvil-internal/lua` is a different method and is unaffected.
 - serde_json `preserve_order`: `deny.toml` gains a `[[bans.features]]` entry with `crate = "serde_json"` and `deny = ["preserve_order"]`.
 - Gate settings:
   - `.cargo/config.toml` gains `[env] CLIPPY_DISABLE_DOCS_LINKS = "1"`. Cargo applies `[env]` to the compiler processes it runs, which should cover `clippy-driver`, but that is unverified, so confirm that clippy output no longer prints the docs-link line.
@@ -654,7 +654,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 - Component: Compiler-enforced 500-line limit
 - Work item: 13, splits. This step wires no crate to the compile-time check.
-- Scope: split every `.rs` file over 500 lines in the workspace, including any that grew past the limit after 2026-10-03. List them from the promptforge root with `Get-ChildItem crates -Recurse -File -Filter *.rs | Where-Object { $_.FullName -notmatch '\\(target|node_modules)\\' -and @(Get-Content -LiteralPath $_.FullName).Count -gt 500 } | Select-Object -ExpandProperty FullName`. As of 2026-10-03 there are 66, all in the groups below.
+- Scope: split every `.rs` file over 500 lines in the workspace, including any that grew past the limit after 2026-10-03. List them from the runvil root with `Get-ChildItem crates -Recurse -File -Filter *.rs | Where-Object { $_.FullName -notmatch '\\(target|node_modules)\\' -and @(Get-Content -LiteralPath $_.FullName).Count -gt 500 } | Select-Object -ExpandProperty FullName`. As of 2026-10-03 there are 66, all in the groups below.
 - Divide the crates among parallel sub-agents, one crate group each, on disjoint files, using the seven groups below. A file the scan finds outside the lists goes to the group that owns its crate, or to the coding agent when no group does.
 - Split rules:
   - Split each file under the split rule in Technical Design. Pick the `#[path = "<stem>-<topic>.rs"]` or `<stem>/<topic>.rs` form by the flat-directory rule in `AGENTS.md`.
@@ -696,11 +696,11 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 
 - Component: Compiler-enforced 500-line limit
 - Work item: 13, the compile-time check, its wiring into every crate with the wiring tidy check, the new-crate template, and the removal of what the check replaces.
-- Before wiring, confirm that no `.rs` file in the workspace is over 500 lines, because a wired crate with one fails its build. From the promptforge root, `Get-ChildItem crates -Recurse -File -Filter *.rs | Where-Object { $_.FullName -notmatch '\\(target|node_modules)\\' -and @(Get-Content -LiteralPath $_.FullName).Count -gt 500 } | Select-Object -ExpandProperty FullName` lists nothing. Split any file it lists, and any file this step pushes past 500 lines, under the split rule in Technical Design.
+- Before wiring, confirm that no `.rs` file in the workspace is over 500 lines, because a wired crate with one fails its build. From the runvil root, `Get-ChildItem crates -Recurse -File -Filter *.rs | Where-Object { $_.FullName -notmatch '\\(target|node_modules)\\' -and @(Get-Content -LiteralPath $_.FullName).Count -gt 500 } | Select-Object -ExpandProperty FullName` lists nothing. Split any file it lists, and any file this step pushes past 500 lines, under the split rule in Technical Design.
 - The `build-ceiling` crate:
   - New crate `crates/build-ceiling` (package `build-ceiling`): no dependencies of any kind, not even `workspace-hack`; `publish = false`; `[lints] workspace = true`.
   - Add `build-ceiling = { path = "crates/build-ceiling" }` to the root `[workspace.dependencies]`.
-  - Add `build-ceiling` to `[final-excludes] workspace-members` in `.config/hakari.toml`, beside `promptforge-vfs`, so hakari never adds `workspace-hack` to it.
+  - Add `build-ceiling` to `[final-excludes] workspace-members` in `.config/hakari.toml`, beside `runvil-vfs`, so hakari never adds `workspace-hack` to it.
 - `src/lib.rs` exposes `pub fn check() -> Result<(), Violations>` and `pub struct Violations`, as the `build_ceiling::check()` interface in Technical Design sets out:
   - `check()` reads the calling crate's root from `CARGO_MANIFEST_DIR` and passes it to the scan, which takes the root as a parameter, so tests need no environment variable.
   - The scan counts every physical line with `str::lines().count()`, so blank, comment, and test lines all count, in every `.rs` file under `src/`, `tests/`, `benches/`, and `examples/`, plus `build.rs`.
@@ -719,8 +719,8 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
     - `crates/gateway/app/build.rs` (package `gateway`), whose `main` returns `anyhow::Result<()>`: call `build_ceiling::check()?` first, before the icon and manifest work.
     - `crates/workshop/desktop/build.rs` (package `workshop`), whose `main` returns `Result<(), Box<dyn Error>>`: call `build_ceiling::check()?` first, before the sidecar refresh and the Tauri build.
     - `crates/gateway/config-ui` and `crates/workshop/server`, whose `main` returns an `ExitCode`: call `build_ceiling::check()` first, and on an error print it with `eprintln!("{error}")` and return `ExitCode::FAILURE`.
-  - `promptforge-parser` gets a new package-root `build.rs`. Its `src/build.rs` is an ordinary module, not a build script, and stays as it is.
-  - `#[path]` form, with no manifest entry, in `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `promptforge-vfs`: the `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`. Put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration if that lint fires. These six take no manifest entry because `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table, and `promptforge-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency. Both rules stay unchanged.
+  - `runvil-parser` gets a new package-root `build.rs`. Its `src/build.rs` is an ordinary module, not a build script, and stays as it is.
+  - `#[path]` form, with no manifest entry, in `harness`, `harness-gateway-client`, `harness-web`, `harness-runner`, `harness-plugins`, and `runvil-vfs`: the `build.rs` declares `#[path = "<relative path>/build-ceiling/src/lib.rs"] mod build_ceiling;` and calls `build_ceiling::check()`. Put `#[expect(unreachable_pub, reason = ...)]` on the `mod` declaration if that lint fires. These six take no manifest entry because `crates/build-xtask/src/product.rs` bars the Harness crates from every `build-*` crate in every dependency table, and `runvil-vfs`'s `the_manifest_declares_no_dependencies` test refuses any build-dependency. Both rules stay unchanged.
   - `workspace-hack` gets no build script.
 - Ceiling wiring tidy check: `crates/build-xtask/src/tidy.rs` gains `ceiling_wiring_violations`, called from `all_violations`:
   - Every workspace crate's package-root `build.rs` calls `build_ceiling::check()`, and either names `build-ceiling` under `[build-dependencies]` or includes `build-ceiling/src/lib.rs` with `#[path]`. A `src/build.rs` module never counts as a build script.
@@ -731,7 +731,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 - A `build.rs` failure also fails release and installer builds. CI's clippy and test jobs build every crate first, so they catch a violation before a release does.
 - Retire the tidy ceiling once every crate is wired, removing what the compile-time check replaces:
   - In `crates/build-xtask/src/tidy.rs`: `MAX_FILE_LINES`, `file_ceiling_violations` and its call in `all_violations`, and `participating_crates`, which has no other caller now that `lint_inheritance_violations` binds every crate from `crate::product::workspace_crates`. Update the module doc's sentence about the file ceiling. Remove the ceiling tests in `crates/build-xtask/src/tidy-tests.rs`.
-  - The "Every file in this crate stays under 500 lines; split first, then edit." bullet in the `## Invariants` docs of 23 crates: `crates/build-xtask/src/main.rs`; the `lib.rs` of `harness-web`, `harness-gateway-client`, `harness-runner`, and `harness-plugins`; `promptforge-engine`, `promptforge-lua`, `promptforge-model-client`, `promptforge-parser`, `promptforge-types`, and `promptforge-vfs`; and `workshop-agents`, `workshop-gateway`, `workshop-menu`, `workshop-protocol`, `workshop-registry`, `workshop-run-log`, `workshop-server`, `workshop-server-api`, `workshop-status`, `workshop-support`, `workshop-user-state`, and `workshop-workspace`. Remove the same bullet from the `lib_rs` template in `crates/build-xtask/src/new_crate.rs`.
+  - The "Every file in this crate stays under 500 lines; split first, then edit." bullet in the `## Invariants` docs of 23 crates: `crates/build-xtask/src/main.rs`; the `lib.rs` of `harness-web`, `harness-gateway-client`, `harness-runner`, and `harness-plugins`; `runvil-engine`, `runvil-lua`, `runvil-model-client`, `runvil-parser`, `runvil-types`, and `runvil-vfs`; and `workshop-agents`, `workshop-gateway`, `workshop-menu`, `workshop-protocol`, `workshop-registry`, `workshop-run-log`, `workshop-server`, `workshop-server-api`, `workshop-status`, `workshop-support`, `workshop-user-state`, and `workshop-workspace`. Remove the same bullet from the `lib_rs` template in `crates/build-xtask/src/new_crate.rs`.
   - In `.cursor/rules/workshop-architecture.mdc`, the "File ceiling" section, and ", 500-line file ceiling" from the `description` line.
   - In the module doc of `crates/workshop/server/src/agents/socket_frames.rs`, the clause "so each stays under the 500-line ceiling".
   - In the structural-checks line of `AGENTS.md`, ", and the 500-line file ceiling", restoring "and" before the last remaining item.
@@ -753,7 +753,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
 ### Step 9: Narrow visibility, verify the whole plan, push, and watch CI and the site [completed]
 
 - Component: Compiler-enforced 500-line limit
-- Work item: 13, visibility, then the final verification of all 13 items, the promptforge push, and the CI and site workflow runs.
+- Work item: 13, visibility, then the final verification of all 13 items, the runvil push, and the CI and site workflow runs.
 - Divide the visibility work among parallel sub-agents by family (Engine; Harness; gateway and shared; Workshop and build crates), each on disjoint files. Once their changes are merged, run the checks, then push.
 - Visibility, under the visibility rule in Technical Design:
   - Give every `pub(crate)` and `pub(super)` item the narrowest visibility that compiles across all targets and features: private where only its own module uses it, `pub(super)` where only the parent does.
@@ -762,7 +762,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - Leave unchanged any item in code that no local build compiles, such as the macOS and Linux tray files and other `cfg` branches for another platform, unless `cargo check --target <triple>` builds it on this machine. List the skipped files in the ledger.
   - The pass spans about 3,300 `pub(crate)` and `pub(super)` uses in about 490 files.
 - Families:
-  - Engine: `promptforge` and every crate under `crates/promptforge-internal/`. The facade surface must not change. If a change does reach `crates/promptforge/public-api.txt`, regenerate it with `cargo +nightly-2026-09-05 xtask api --bless`, confirm with `--check`, and review the diff.
+  - Engine: `runvil` and every crate under `crates/runvil-internal/`. The facade surface must not change. If a change does reach `crates/runvil/public-api.txt`, regenerate it with `cargo +nightly-2026-09-05 xtask api --bless`, confirm with `--check`, and review the diff.
   - Harness: `harness`, `harness-gateway-client`, `harness-web`, and every crate under `crates/harness-internal/`.
   - Gateway and shared: every crate under `crates/gateway/`, plus `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, and `shared-error-source`.
   - Workshop and build crates: every crate under `crates/workshop/`, and every `build-*` crate, `build-ceiling` and `build-xtask` included.
@@ -774,7 +774,7 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - Gateway and shared: `cargo check -p gateway --no-default-features`.
   - Workshop and build crates: `cargo build --locked -p workshop`.
 - Final verification, after the merge:
-  - CI's two private-item doc builds pass with `RUSTDOCFLAGS=-D warnings`: `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items` and `cargo doc --locked --no-deps -p workshop-server --document-private-items`.
+  - CI's two private-item doc builds pass with `RUSTDOCFLAGS=-D warnings`: `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items` and `cargo doc --locked --no-deps -p workshop-server --document-private-items`.
   - Every Project Survey command passes, plus `cargo fmt --all --check`, with clippy run under `CARGO_BUILD_WARNINGS=deny`. The exception is the two doctest commands, which the gate no longer runs: run `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api` once more, and both report zero doctests.
   - `rg 'doc = include_str!' crates` matches only the fixture strings in `crates/build-xtask/src/*-tests.rs`.
   - No `.rs` file in the workspace exceeds 500 lines.
@@ -782,14 +782,14 @@ The work runs as 9 steps in four components. Each step is one promptforge commit
   - `cargo test -p build-xtask` fails on each probe: `unsafe_code` expected outside the four allowed crates (`crates/gateway/app`, `crates/gateway/stt/whisper-ffi`, `crates/gateway-api-discovery`, and `crates/workshop/desktop`), a crate without `[lints] workspace = true`, a crate whose `build.rs` doesn't call `build_ceiling::check()`, a `workspace-hack` file over 500 lines, and a compiled code block in a doc comment.
   - `cargo deny check` fails with serde_json's `preserve_order` turned on, and clippy fails on a `std::panic::set_hook` call in a library crate.
   - Revert every probe.
-  - With `PROMPTFORGE_DOCS` set to `c:\Users\Vinnie\cursor\promptforge-docs`, `cargo xtask site` builds, writes the seven-row landing table, and passes its link check.
-  - `tools/cicerone.md` and `tools/cicerone/` no longer exist in promptforge.
+  - With `RUNVIL_DOCS` set to `c:\Users\Vinnie\cursor\runvil-docs`, `cargo xtask site` builds, writes the seven-row landing table, and passes its link check.
+  - `tools/cicerone.md` and `tools/cicerone/` no longer exist in runvil.
 - Push and watch, once every check above passes. The session, not a sub-agent, does this after Step 9's commit message is final and the run's `Close plan` commit is made, so nothing provisional is pushed. A fix after the push lands as a new commit, never an amend.
-  - Push promptforge from `c:\Users\Vinnie\cursor\promptforge` with `git push`.
+  - Push runvil from `c:\Users\Vinnie\cursor\runvil` with `git push`.
   - Start the site workflow with `gh workflow run site.yml`.
   - Find the CI run for the pushed commit (`gh run list --workflow ci.yml --commit <sha>`) and the new site run (`gh run list --workflow site.yml --limit 1`), and watch each with `gh run watch <run-id> --exit-status` until both succeed.
   - Fix any failure in this step: read it with `gh run view <run-id> --log-failed`, fix the cause, rerun the checks for what the fix touches, make a new commit, push, start the site workflow again, and watch both new runs until they succeed.
-  - Confirm that the deployed site's guide pages come from `promptforge-docs`: the site run's log shows the checkout of `cppalliance/promptforge-docs`, and a guide chapter on the deployed site (at the Pages URL that `gh api repos/{owner}/{repo}/pages --jq .html_url` prints) links to `https://github.com/cppalliance/promptforge-docs` and matches its source under `src/<book>/` in that repository.
+  - Confirm that the deployed site's guide pages come from `runvil-docs`: the site run's log shows the checkout of `cppalliance/runvil-docs`, and a guide chapter on the deployed site (at the Pages URL that `gh api repos/{owner}/{repo}/pages --jq .html_url` prints) links to `https://github.com/cppalliance/runvil-docs` and matches its source under `src/<book>/` in that repository.
 
 </step-9>
 

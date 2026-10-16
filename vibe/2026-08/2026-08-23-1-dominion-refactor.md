@@ -1,9 +1,9 @@
 ---
 name: Gateway program
-overview: "The whole gateway program in one plan: extract promptforge-gateway-config; new boot rules (config path from CLI or PROMPTFORGE_GATEWAY_CONFIG, mandatory --profile, sibling profiles dir, boot-owned [server] as a hard error, two env files); dominions replace devices/lanes with truly shared queues and VRAM budgets; profile allowlist; then embeddings/classifiers/streaming; normalization last."
+overview: "The whole gateway program in one plan: extract runvil-gateway-config; new boot rules (config path from CLI or RUNVIL_GATEWAY_CONFIG, mandatory --profile, sibling profiles dir, boot-owned [server] as a hard error, two env files); dominions replace devices/lanes with truly shared queues and VRAM budgets; profile allowlist; then embeddings/classifiers/streaming; normalization last."
 todos:
   - id: step-1-move-modules
-    content: "Extract promptforge-gateway-config: move config/ + profile/ + error types, gateway depends on it, moved tests pass"
+    content: "Extract runvil-gateway-config: move config/ + profile/ + error types, gateway depends on it, moved tests pass"
     status: completed
   - id: step-2-public-api
     content: "Harden public API: accessors replace pub fields, Secret opaque, RawConfig private, doc examples"
@@ -69,7 +69,7 @@ todos:
     content: "Inbound translation: emulated tool-call parsing, thinking normalization, finish reasons, Anthropic responses"
     status: completed
   - id: n5-core-dialect-removal
-    content: "Delete promptforge-core client-side dialect machinery; integration suite proves zero-dialects"
+    content: "Delete runvil-core client-side dialect machinery; integration suite proves zero-dialects"
     status: completed
   - id: step-17-streaming-relay
     content: "S1a: stream:true SSE relay - ChatChunk wire types, Upstream::stream, permit held for stream lifetime"
@@ -88,8 +88,8 @@ Ordering decision 2026-08-23: extract the config crate FIRST as a behavior-prese
 
 This is the ONLY plan for the gateway program. Phases:
 
-1. **Extract `promptforge-gateway-config`** (steps 1-2): mechanical move, then public API hardening.
-2. **Config-path resolution and boot rules** (steps 3-5): CLI positional / `PROMPTFORGE_GATEWAY_CONFIG` / sibling `profiles/` / mandatory `--profile NAME` at boot - the boot file is the catalog, the named profile is the initial loaded set.
+1. **Extract `runvil-gateway-config`** (steps 1-2): mechanical move, then public API hardening.
+2. **Config-path resolution and boot rules** (steps 3-5): CLI positional / `RUNVIL_GATEWAY_CONFIG` / sibling `profiles/` / mandatory `--profile NAME` at boot - the boot file is the catalog, the named profile is the initial loaded set.
 3. **Dominions and the profile allowlist** (steps 6-12): reshape the structs inside the new crate, expand-migrate-contract so every commit stays green.
 4. **Embeddings, classifiers, and streaming** (components E1-E3, S1): level-4 step decomposition happens when this phase starts.
 5. **Normalization layer** (components N1-N5, last section of this document): zero-dialect OpenAI normalization. Always last.
@@ -100,15 +100,15 @@ Prior art established by research (2026-08-23): Triton's rate limiter is the dir
 
 Key verified facts about the CURRENT code that motivate this refactor:
 
-- Devices and lanes only supply a concurrency number; they do not create a shared limit. `Routing::from_config` builds one `EndpointLane` per endpoint ([routing.rs:105](promptforge/crates/promptforge-gateway/src/routing.rs)); two endpoints referencing the same remote device each get their own independent queue with the full device concurrency.
-- A lane's concurrency value is used in two places: as the llama-server child's `--parallel N` argument and as that model's queue limit ([local/mod.rs:82-105](promptforge/crates/promptforge-gateway/src/local/mod.rs)). Two models sharing a lane each get their own queue with the full lane concurrency.
+- Devices and lanes only supply a concurrency number; they do not create a shared limit. `Routing::from_config` builds one `EndpointLane` per endpoint ([routing.rs:105](runvil/crates/runvil-gateway/src/routing.rs)); two endpoints referencing the same remote device each get their own independent queue with the full device concurrency.
+- A lane's concurrency value is used in two places: as the llama-server child's `--parallel N` argument and as that model's queue limit ([local/mod.rs:82-105](runvil/crates/runvil-gateway/src/local/mod.rs)). Two models sharing a lane each get their own queue with the full lane concurrency.
 - VRAM is modeled nowhere; co-residency failures surface as child-process OOMs.
 
-## Phase 1: extract `promptforge-gateway-config` (steps 1-2)
+## Phase 1: extract `runvil-gateway-config` (steps 1-2)
 
-Behavior-preserving extraction with the CURRENT structs (devices, lanes, and all). The reshape happens in phase 3, inside the extracted crate. Decision recorded 2026-08-23: extraction over widening the gateway's lib surface or moving types into `promptforge-core` - the gateway crate is an application (its own docs say so), and consumers (IDE tooling, config editors, `promptforge-cli`) should not pull axum/reqwest to read a TOML file.
+Behavior-preserving extraction with the CURRENT structs (devices, lanes, and all). The reshape happens in phase 3, inside the extracted crate. Decision recorded 2026-08-23: extraction over widening the gateway's lib surface or moving types into `runvil-core` - the gateway crate is an application (its own docs say so), and consumers (IDE tooling, config editors, `runvil-cli`) should not pull axum/reqwest to read a TOML file.
 
-**Step 1: move the modules.** New crate `crates/promptforge-gateway-config` receives `config/` (Config, RawConfig DTO, validate, interpolate), `profile/` (ProfileName, include resolution, merge, list/load), and the config error types (`ConfigError` from error.rs and the `ConfigError`/`ConfigErrorKind` portion of api_error.rs; `GatewayError`, `ServeError`, `StartupError` stay in the gateway). Two cross-module dependencies move with them: `QueueConfig` (defined in queue.rs, imported by config.rs) moves into the config crate while the rest of queue.rs stays, and `default_promptforge_root` (local/artifacts) moves too because profile.rs and cache-dir resolution need it. Visibility changes are the minimum needed to compile: section fields become `pub` for now, and step 2 replaces them with accessors. Note: `load_env_chain` and the dotenvy usage move with `profile/` in this step (the move is behavior-preserving); phase 2 later removes env-file loading from the crate entirely, since interpolating from the process environment is the crate's job and populating that environment is the binary's. `promptforge-gateway` depends on the crate and re-exports what its own API needs (`Config`, `Secret`, `ProfileName`); `Gateway`, `ServeOptions`, `run` are unchanged. Manifest and layout follow the rust-rulebook: `edition`/`rust-version`/`license`/`repository` via `*.workspace = true`, `[lints] workspace = true`, the dependency edge declared once in `[workspace.dependencies]` with both `path` and `version`, `unsafe_code = "forbid"` (the crate has no unsafe), a facade `lib.rs` (crate docs, `mod`, `pub use`, no logic), the existing `config.rs` + `config/` layout kept (no `mod.rs`), `pub(crate)` by default. Test: the moved unit tests run in the new crate; the gateway suite passes unchanged. Docs: crate README, module doc paths, Cargo.toml metadata (description, keywords, categories, readme, documentation).
+**Step 1: move the modules.** New crate `crates/runvil-gateway-config` receives `config/` (Config, RawConfig DTO, validate, interpolate), `profile/` (ProfileName, include resolution, merge, list/load), and the config error types (`ConfigError` from error.rs and the `ConfigError`/`ConfigErrorKind` portion of api_error.rs; `GatewayError`, `ServeError`, `StartupError` stay in the gateway). Two cross-module dependencies move with them: `QueueConfig` (defined in queue.rs, imported by config.rs) moves into the config crate while the rest of queue.rs stays, and `default_runvil_root` (local/artifacts) moves too because profile.rs and cache-dir resolution need it. Visibility changes are the minimum needed to compile: section fields become `pub` for now, and step 2 replaces them with accessors. Note: `load_env_chain` and the dotenvy usage move with `profile/` in this step (the move is behavior-preserving); phase 2 later removes env-file loading from the crate entirely, since interpolating from the process environment is the crate's job and populating that environment is the binary's. `runvil-gateway` depends on the crate and re-exports what its own API needs (`Config`, `Secret`, `ProfileName`); `Gateway`, `ServeOptions`, `run` are unchanged. Manifest and layout follow the rust-rulebook: `edition`/`rust-version`/`license`/`repository` via `*.workspace = true`, `[lints] workspace = true`, the dependency edge declared once in `[workspace.dependencies]` with both `path` and `version`, `unsafe_code = "forbid"` (the crate has no unsafe), a facade `lib.rs` (crate docs, `mod`, `pub use`, no logic), the existing `config.rs` + `config/` layout kept (no `mod.rs`), `pub(crate)` by default. Test: the moved unit tests run in the new crate; the gateway suite passes unchanged. Docs: crate README, module doc paths, Cargo.toml metadata (description, keywords, categories, readme, documentation).
 
 **Step 2: harden the public API.** Read accessors replace the public fields step 1 created on the config section structs (this touches the same gateway call sites twice - accepted, because keeping step 1 a purely mechanical move is worth more); `Secret` stays opaque; `RawConfig` stays private; `Config` remains unconstructable without validation. Accessor style follows the rust-rulebook: no `get_` prefix, borrowed returns (`&str`, `&[ModelConfig]`), `#[must_use]` on constructors and pure accessors, `#[non_exhaustive]` on every public struct and enum. The moved error types are audited against the error rules: thiserror derives, `#[non_exhaustive]` on the public enums, lowercase Display messages with no trailing period and no `failed to` prefix, `#[source]` chains intact. Test: doc examples for `load` / `load_profile` / `from_toml_str` and each accessor. Docs: crate-level docs with a load example; every public item documented with `# Errors` where it applies.
 
@@ -148,7 +148,7 @@ vram_gb = 14              # footprint estimate for the co-residency check
 # ...
 ```
 
-## Target struct shape (`promptforge-gateway-config`)
+## Target struct shape (`runvil-gateway-config`)
 
 The public API of the extracted crate. Fields shown for review; public access is via read accessors, and construction is only possible through validation. This is the END STATE after phases 3-5, not what step 1 extracts. Field arrival by phase: `dominion`/`parallel`/`vram_gb` in step 6; `kind` in E1; the `Capabilities` enrichment fields (`max_output`, `adaptive_thinking`, `effort_levels`, `default_effort`, `default_temperature`, `images`, `parallel_tool_calls`) in N1; `dialect` in N2. All public types carry `#[non_exhaustive]` per the rust-rulebook. `Capabilities` is shared by remote and local models via `#[serde(flatten)]` so the TOML stays flat and the two model types cannot drift apart.
 
@@ -172,7 +172,7 @@ impl Config {
 }
 
 pub struct ServerConfig { pub bind: SocketAddr, pub api_key: Secret }
-pub struct LocalConfig { pub cache_dir: Option<String> } // default ~/.promptforge
+pub struct LocalConfig { pub cache_dir: Option<String> } // default ~/.runvil
 
 pub struct DominionConfig {
     pub id: String,
@@ -261,7 +261,7 @@ Notes:
 - **Dominions are truly shared**: one runtime queue instance per dominion, `Arc`-shared by every bound endpoint. This is NEW behavior (today nothing is shared) and is the main behavior change in this refactor.
 - **No inline `endpoint.concurrency` sugar**: one way to cap. An endpoint without `dominion` is unlimited, as today when no cap is set.
 - **Explicit `kind` on dominions** (better error messages over structural inference). Kind-incompatible payloads rejected, same spirit as CFG-004: `vram_gb` forbidden on remote, lane-style fields gone entirely.
-- **Fairness v1**: per-client round-robin (`X-PromptForge-Client`) is the only discipline, with no abstraction layer for future ones (decision 2026-08-23: a one-variant enum is ceremony; the DRR/token-cost change, if it ever unparks, is contained in queue.rs). Document that the fairness key is a self-asserted header - trusted callers only.
+- **Fairness v1**: per-client round-robin (`X-Runvil-Client`) is the only discipline, with no abstraction layer for future ones (decision 2026-08-23: a one-variant enum is ceremony; the DRR/token-cost change, if it ever unparks, is contained in queue.rs). Document that the fairness key is a self-asserted header - trusted callers only.
 - **VRAM co-residency check**: at validate time, sum `local_model.vram_gb` per local dominion and reject when the sum exceeds the dominion's `vram_gb`. Runs for free at profile switch because switch loads and validates the full config before committing. Models without an estimate bound to a budgeted dominion: validation error (budgets must be complete to be meaningful).
 - **"Model packs" is not a future feature - it is profile hot-swapping, which already ships** (`POST /admin/switch-profile` swaps the whole resident set atomically). The deferred-list mention in the crate docs is stale and gets corrected in this refactor.
 - **REJECTED, not deferred: demand-driven per-model load/unload** (llama-swap-style). Decision 2026-08-23: too much mechanism (swap serialization, in-flight drain, eviction policy, co-residency solving) for too little gain. The VRAM-constrained single-GPU operator manually chooses a profile per workload; that is the supported workflow, and a demand-loaded request would eat the model's cold-start latency anyway. Do not re-propose without a new use case that profile switching cannot serve.
@@ -270,10 +270,10 @@ Notes:
 
 Boot rules (all ruled 2026-08-23):
 
-- Boot requires two things: a config path and a profile name. `promptforge-gateway serve gateway.toml --profile analytics`.
-- The config path comes from the positional argument or `PROMPTFORGE_GATEWAY_CONFIG`; the CLI path wins. Neither set: usage error naming both sources.
+- Boot requires two things: a config path and a profile name. `runvil-gateway serve gateway.toml --profile analytics`.
+- The config path comes from the positional argument or `RUNVIL_GATEWAY_CONFIG`; the CLI path wins. Neither set: usage error naming both sources.
 - The profile name comes from `--profile` only (no env var). It is required; there is no anonymous boot. Every gateway has at least one profile; the initial loaded set always has a name.
-- Profiles dir is always `<config-file-parent>/profiles` - never independently configurable, no `~/.promptforge/profiles` default.
+- Profiles dir is always `<config-file-parent>/profiles` - never independently configurable, no `~/.runvil/profiles` default.
 - The boot file is the CATALOG and infrastructure; it is not loaded as the runtime config directly. The named profile is loaded with include resolution - it typically contains `include = ["../gateway.toml"]` plus a `models = [...]` allowlist - and becomes the initial config. (The allowlist key does not exist until step 11; during phase 2 every profile loads the full catalog.)
 - Boot with an unknown profile name: startup error listing the available profiles. Boot when the sibling `profiles/` dir is missing or lacks the named file: startup error.
 - The single-file user creates one minimal profile, e.g. `profiles/main.toml` containing only `include = ["../gateway.toml"]`, which loads the full catalog.
@@ -283,7 +283,7 @@ Boot rules (all ruled 2026-08-23):
 - The check is VALUE equality, not path provenance: both sides are compared after `${VAR}` interpolation, so a profile that replicates the block verbatim passes and a genuinely different bind or key fails. Provenance tracking was rejected: the merge machinery does not record per-table origins, the boot file's own `[server]` may itself come from an include, and identical values are identical behavior.
 - Env files are cut to two: precedence is the process environment, then `<profile>.env`, then the boot file's sibling env file (e.g. `gateway.env`); dotenvy never overrides, so earlier wins. Included files' env files are no longer loaded. The config crate does no env-file loading at all: `Config::load` / `load_profile` interpolate from the process environment, and populating it from those two files is the binary's job - a library that reads a config must not mutate the process environment as a side effect. At boot the binary loads `<profile>.env` then `<boot>.env`, then interpolates and compares `[server]` in that shared environment. At switch, only the new profile's env file is loaded (the boot env file is already in the process).
 
-**Step 3: CLI parsing (main.rs).** USAGE becomes `usage: promptforge-gateway serve [config.toml] --profile NAME` plus a line documenting the env fallback. `parse_args`: at most one positional (the config path); `--profile NAME` required, parsed into a `ProfileName` at parse time; drop `--profiles-dir`; keep `-h/--help` and unknown-flag rejection. Path resolution goes through a pure, testable helper so tests never touch the process environment (edition 2024 makes `set_var` unsafe):
+**Step 3: CLI parsing (main.rs).** USAGE becomes `usage: runvil-gateway serve [config.toml] --profile NAME` plus a line documenting the env fallback. `parse_args`: at most one positional (the config path); `--profile NAME` required, parsed into a `ProfileName` at parse time; drop `--profiles-dir`; keep `-h/--help` and unknown-flag rejection. Path resolution goes through a pure, testable helper so tests never touch the process environment (edition 2024 makes `set_var` unsafe):
 
 ```rust
 fn resolve_config_path(
@@ -294,13 +294,13 @@ fn resolve_config_path(
         (Some(path), _) => Ok(path),
         (None, Some(value)) => Ok(PathBuf::from(value)),
         (None, None) => Err(ParseError::Usage(
-            "provide a config.toml path or set PROMPTFORGE_GATEWAY_CONFIG".into(),
+            "provide a config.toml path or set RUNVIL_GATEWAY_CONFIG".into(),
         )),
     }
 }
 ```
 
-`parse_args` calls it with `std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG")`. Test: CLI-wins, env-fallback, neither-path-set, missing `--profile`, invalid profile name, traversal profile name rejected.
+`parse_args` calls it with `std::env::var_os("RUNVIL_GATEWAY_CONFIG")`. Test: CLI-wins, env-fallback, neither-path-set, missing `--profile`, invalid profile name, traversal profile name rejected.
 
 **Step 4: boot semantics (runner.rs, profile.rs, lib.rs, api_error.rs).** `ConfigSource` is deleted. `ServeOptions` becomes:
 
@@ -319,7 +319,7 @@ Add `profiles_dir_for(config_path)` (parent join `profiles`; a bare filename res
 
 ## Phase 3: dominions and the profile allowlist (steps 6-12)
 
-Expand-migrate-contract: new fields and code paths land additively first, legacy config is deleted last, so every commit compiles and passes. All config-struct work happens in the `promptforge-gateway-config` crate extracted in phase 1. File homes after phase 1: config.rs, validate.rs, and merge.rs live in the config crate; queue.rs, routing.rs, and local/ remain in the gateway.
+Expand-migrate-contract: new fields and code paths land additively first, legacy config is deleted last, so every commit compiles and passes. All config-struct work happens in the `runvil-gateway-config` crate extracted in phase 1. File homes after phase 1: config.rs, validate.rs, and merge.rs live in the config crate; queue.rs, routing.rs, and local/ remain in the gateway.
 
 **Step 6: add dominions to config.** Add `DominionConfig` / `DominionKind` / `QueuePolicy` and the `[[dominion]]` array: `DominionConfig { id, kind, max_concurrency: Option<usize>, max_queue: usize (default 100), policy: QueuePolicy (default Queue), fair_scheduling: bool (default true), vram_gb: Option<u32> }` with `deny_unknown_fields`. `EndpointConfig` gains `dominion: Option<String>`; `LocalModelConfig` gains `dominion: Option<String>`, `parallel: Option<u32>`, `vram_gb: Option<u32>` - all additive; the legacy fields they replace are deleted in step 12. (`parallel` is `Option` during the transition so an unset field cannot override a legacy lane's concurrency with the default; it becomes `u32` with default 1 in step 12.) Validation: unique non-empty dominion ids; `max_concurrency` >= 1 when present; `max_queue` >= 1; `vram_gb` only on local kind; endpoint `dominion` must name a remote dominion; local-model `dominion` must name a local one; `local_model.parallel` >= 1 when present (added at execution 2026-08-23: the list omitted it, but the crate applies a >= 1 check to every concurrency knob and `parallel` feeds the child's `--parallel` and the queue limit, so 0 is meaningless). Devices, lanes, and `[queue]` still parse in this step. Test: dominion validation cases. Docs: user-guide dominion section.
 
@@ -379,7 +379,7 @@ Deferred spellings settled here, each with its falsifier:
 
 ## Final phase: normalization layer (zero dialects)
 
-Everything below executes LAST, after the config architecture is stable and public. Until this phase completes, `promptforge-core`'s client-side dialect machinery (`dialects.rs`, `normalize.rs`) stays alive - there must be no window where neither side owns tool-call formatting.
+Everything below executes LAST, after the config architecture is stable and public. Until this phase completes, `runvil-core`'s client-side dialect machinery (`dialects.rs`, `normalize.rs`) stays alive - there must be no window where neither side owns tool-call formatting.
 
 **The goal**: clients speak pure OpenAI chat-completions shape. Whatever the backend is - OpenAI-compatible remote, llama.cpp with an exotic chat template, a model whose tool calls exist only as prompt conventions, eventually Anthropic - the gateway translates in both directions. The catalog tells clients *what a model can do*; the gateway alone decides *how to say it*. Zed's provider crates are the reference implementations for the per-backend mappings; Zed's capability vocabulary is adopted, its client-side capability mechanism is exactly what this abolishes for our clients.
 
@@ -403,7 +403,7 @@ The existing `thinking` tri-state (never/always/switchable) stays. Validation: `
 - **One translator trait per backend dialect**, shaped on LiteLLM's `BaseConfig` (verified 2026-08-23, `litellm/llms/base_llm/chat/transformation.py`): supported-params list, param mapping, request transform, response transform, error mapping - with transport kept OUT of the translator. The trait is the only registry. Avoid LiteLLM's structure: a giant `get_optional_params` if/elif ladder plus a second registry that drifts out of sync with it.
 - Per-model dialect config: how to express tools to this backend (`native` | named emulated template), how to express effort (OpenAI `reasoning_effort` string | Anthropic `budget_tokens` rung-to-tokens map | `chat_template_kwargs.enable_thinking` bool collapse | Gemini level), system-message quirks. Exact TOML spelling decided at the level-4 pass.
 - **Adopt LiteLLM's shared effort-to-budget table** (`litellm/constants.py`): one canonical rung-to-token-budget map with per-backend emitters. It is the de-facto interop table; per-model overrides live in the dialect config.
-- `ModelInfo` drops `tool_dialect`/`tools_mode` from the catalog response (breaking wire change; promptforge-core stops reading them in N5). The wire change and core's reader update must land together, or the fields stay populated until N5 - decide at the level-4 pass, but do not break core between components.
+- `ModelInfo` drops `tool_dialect`/`tools_mode` from the catalog response (breaking wire change; runvil-core stops reading them in N5). The wire change and core's reader update must land together, or the fields stay populated until N5 - decide at the level-4 pass, but do not break core between components.
 
 ### Component N3: request normalization (outbound)
 
@@ -422,9 +422,9 @@ The existing `thinking` tri-state (never/always/switchable) stays. Validation: `
 - **Streaming arm**: the same translations applied incrementally to chunk streams, including tool-call assembly across chunks (LiteLLM's `CustomStreamWrapper` is the reference for accumulating partial tool calls).
 - Anthropic upstream: Messages API response to chat-completions shape, streaming included.
 
-### Component N5: promptforge-core dialect removal (final step)
+### Component N5: runvil-core dialect removal (final step)
 
-Once the gateway covers every dialect promptforge-core handles, delete the client-side machinery: `dialects.rs`, the dialect-handling parts of `normalize.rs`, `ToolDialectId`, and the catalog fields that fed them. `ModelDescriptor`/`ModelCatalog` consume the enriched catalog fields instead. This is the step that proves the goal: the client compiles with no dialect code and the integration suite still passes.
+Once the gateway covers every dialect runvil-core handles, delete the client-side machinery: `dialects.rs`, the dialect-handling parts of `normalize.rs`, `ToolDialectId`, and the catalog fields that fed them. `ModelDescriptor`/`ModelCatalog` consume the enriched catalog fields instead. This is the step that proves the goal: the client compiles with no dialect code and the integration suite still passes.
 
 ### Normalization testing strategy
 
@@ -443,7 +443,7 @@ Per `tools-public/rulebooks/vibe-rulebook.md` (execution flow) and `tools-public
 - Phases 1-3 are decomposed into numbered steps above (each step = one commit: code + test + docs). Phases 4-5 (embeddings/classifiers/streaming, normalization) remain at component level and get their level-4 step decomposition when those phases start.
 - Rust-rulebook constraints already folded into the steps: crate manifest and layout rules (step 1), public API and error-design rules (step 2), no abstraction before a second implementation exists (step 7: always round-robin, no discipline type), the full local verification loop (Verification section).
 - **Obsolescence sweeps** (requested 2026-08-23): on the Verify schedule - every 3rd step, end of each phase, and the final step - a review subagent sweeps the WHOLE crate surface, not just the step's diff, for code our changes have made obsolete: functions and helpers with no remaining caller, config fields nothing reads, dead code paths, unused dependencies (`cargo machete`), doc comments and guide sections referencing removed concepts, orphaned test fixtures and helpers, public items with no consumer. Removals land in their own commit named for what became obsolete and why (vibe-rulebook rule 7 discipline) - never folded silently into a feature step.
-- Rule 5 (plans stand alone): satisfied. Everything decision-relevant is persisted at `promptforge/research/2026-08-23-gateway-design-decisions.md` (all rulings with reasons), `promptforge/research/2026-08-23-prior-art-llm-serving-gateways.md` (Triton, vLLM, TGI, SGLang, LiteLLM, Ollama, llama-swap, llama.cpp router mode, APF, DRR, VTC), `promptforge/research/2026-08-23-zed-litellm-codebase-exploration.md` (Zed capability inventory, LiteLLM translator layer, litellm-rust), and `promptforge/research/2026-08-23-gateway-current-code-findings.md` (verified pre-refactor code facts with file:line references).
+- Rule 5 (plans stand alone): satisfied. Everything decision-relevant is persisted at `runvil/research/2026-08-23-gateway-design-decisions.md` (all rulings with reasons), `runvil/research/2026-08-23-prior-art-llm-serving-gateways.md` (Triton, vLLM, TGI, SGLang, LiteLLM, Ollama, llama-swap, llama.cpp router mode, APF, DRR, VTC), `runvil/research/2026-08-23-zed-litellm-codebase-exploration.md` (Zed capability inventory, LiteLLM translator layer, litellm-rust), and `runvil/research/2026-08-23-gateway-current-code-findings.md` (verified pre-refactor code facts with file:line references).
 - Each step commits with code + test + docs; review-and-fix runs once per step; Verify on the rulebook schedule.
 
 ## Explicitly NOT in this plan
@@ -475,7 +475,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin of the catalog/profile split
 
-The boot-rules design grew out of a chat with Sean Parsons that Vinnie pasted into the creator chat (2026-08-23). The decisive statement, verbatim: "we want two different things: to configure the list of available models / to configure the current set of loaded models... we dont want every profile to duplicate all the model information... so there would be a split: the regular config file binds model descriptors to identifiers, and a profile defines a set of identifiers which reflects loaded models". Sean contributed the framing analogy: "There's a single config file that defines everything and then you specify which part of the config file you want active. Very similar to AWS profiles." The boot invocation itself was dictated verbatim: "The gateway takes the command line path to the TOML. And it expects a profiles/ dir as a sibling to that path. If the command line does not have the parameter then it looks to PROMPTFORGE_GATEWAY_CONFIG".
+The boot-rules design grew out of a chat with Sean Parsons that Vinnie pasted into the creator chat (2026-08-23). The decisive statement, verbatim: "we want two different things: to configure the list of available models / to configure the current set of loaded models... we dont want every profile to duplicate all the model information... so there would be a split: the regular config file binds model descriptors to identifiers, and a profile defines a set of identifiers which reflects loaded models". Sean contributed the framing analogy: "There's a single config file that defines everything and then you specify which part of the config file you want active. Very similar to AWS profiles." The boot invocation itself was dictated verbatim: "The gateway takes the command line path to the TOML. And it expects a profiles/ dir as a sibling to that path. If the command line does not have the parameter then it looks to RUNVIL_GATEWAY_CONFIG".
 
 Two later refinements also trace to user challenges. The boot-owned [server] rule exists because of the objection "but then the port could change", and the value-equality-vs-provenance decision was the user's framing: "how will you manage this, by comparing the values in [server] or by actually making sure that the root toml file is the same path as the boot root?" The cut from hierarchical env files down to two traces to: "I'm wondering if the hierarchical env is pulling its own weight. why would we need this?"
 
@@ -494,7 +494,7 @@ Budget priority, verbatim: "The VRAM is the primary budget, the max concurrency 
 
 ## Why the config crate exists, and the sequencing
 
-Verbatim (disfluencies preserved; the intent is the IDE consumer): "We want PromptForge Gateway to have like, to export... the configuration file is like generally useful... I can build my IDE, and then my IDE can talk to the gateway, and it can get the information about the models, and then it has the right struct, so it can perfectly reflect the metadata." Extract-first sequencing was the user's question-turned-order: "should we factor out the config crate first? Get it well tested, fully working, and so on, and then we can work on gateway piecemeal?" Phase ordering was dictated: "I want the normalization to all come at the very end. the last steps. and I want the beginning steps to focus on the config architecture changes. the structs. the API for people who want to access the config/profile stuff as Rust".
+Verbatim (disfluencies preserved; the intent is the IDE consumer): "We want Runvil Gateway to have like, to export... the configuration file is like generally useful... I can build my IDE, and then my IDE can talk to the gateway, and it can get the information about the models, and then it has the right struct, so it can perfectly reflect the metadata." Extract-first sequencing was the user's question-turned-order: "should we factor out the config crate first? Get it well tested, fully working, and so on, and then we can work on gateway piecemeal?" Phase ordering was dictated: "I want the normalization to all come at the very end. the last steps. and I want the beginning steps to focus on the config architecture changes. the structs. the API for people who want to access the config/profile stuff as Rust".
 
 ## The zero-dialect goal
 
@@ -509,9 +509,9 @@ Verbatim: "The goal is zero dialects. We're gonna normalize whatever is on the o
 ## Deviations and additions from the run chats
 
 - Execution was interrupted mid-run; the user ordered: "discard partial work, decompose the remaining work into finer grained steps into a new plan file", then had the plan rewritten in place. Reaction to the result: "I am a little shocked we need 16 steps for this... how did we get so many steps?"
-- Normalization scope was deliberately narrowed, verbatim: "if we look at PromptForge Core, it only got these little dialects. So why do we, how much normalization are we doing?... I was thinking we just add them as needed, we don't try to cover every possible model at once." (Paraphrase: dialect coverage is incremental and demand-driven, not upfront-complete.)
+- Normalization scope was deliberately narrowed, verbatim: "if we look at Runvil Core, it only got these little dialects. So why do we, how much normalization are we doing?... I was thinking we just add them as needed, we don't try to cover every possible model at once." (Paraphrase: dialect coverage is incremental and demand-driven, not upfront-complete.)
 - The semantic-blur constraint was added during the run, verbatim: "the point of semantic blur is that when you edit the code I dont want you to bloat it. I want you to make the edits in a way that reverses entropy" - with entropy-reversal rules baked into the plan as an XML-delimited section that step subagents grep for and read in isolation, never reading the whole plan.
 - Housekeeping deviations: the four research files survived only after the user asked "are those 4 research files any use? commit them if they are truly useful otherwise delete"; a recover-rationale mechanism was removed on direct order ("I want that recover-rationale thingy deleted").
 - Post-execution reflection: 37 commits with roughly 5k net lines added, and the user openly asked "was it worth it? 5k net increase in lines" - the net growth is on record as questioned, not celebrated.
-- From the third run chat (mostly an unrelated skillgate session): a downstream motivation for streaming plus thinking normalization - PromptForge Workbench must distinguish thinking from reply blocks, and "my idea was to have the gateway normalize always, so every client gets a clean stream with distinguished blocks".
+- From the third run chat (mostly an unrelated skillgate session): a downstream motivation for streaming plus thinking normalization - Runvil Workbench must distinguish thinking from reply blocks, and "my idea was to have the gateway normalize always, so every client gets a clean stream with distinguished blocks".
 - The second run chat (step-5 coder subagent) holds no deviations; it confirms steps 1-4 landed as planned.

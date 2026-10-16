@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn unset_variable_is_an_error() {
-        assert!(interpolate("${PFG_DEFINITELY_UNSET_VAR_XYZ}", &config_lookup).is_err());
+        assert!(interpolate("${RVG_DEFINITELY_UNSET_VAR_XYZ}", &config_lookup).is_err());
     }
 
     #[test]

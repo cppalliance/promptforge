@@ -63,7 +63,7 @@ jobs:
           New-Item -ItemType Directory -Path $fixture -Force | Out-Null
           $archive = Join-Path $fixture 'whisper.zip'
           Invoke-WebRequest `
-            -Uri 'https://github.com/cppalliance/promptforge/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip' `
+            -Uri 'https://github.com/cppalliance/runvil/releases/download/whisper-lib-b4938/whisper-b4938-windows-x86_64-cuda.zip' `
             -OutFile $archive
           $runtimeHash = (Get-FileHash $archive -Algorithm SHA256).Hash
           if ($runtimeHash -ne 'F1BC54D7288E21EE826CCB5767249836B780FC316BEC4A0374873E73163DAE12') {
@@ -123,7 +123,7 @@ jobs:
           # Six LibriSpeech test-clean clips (CC BY 4.0) with a clips.json of their reference text.
           $speechArchive = Join-Path $fixture 'long-speech.zip'
           Invoke-WebRequest `
-            -Uri 'https://github.com/cppalliance/promptforge/releases/download/stt-long-speech-1/stt-long-speech-1.zip' `
+            -Uri 'https://github.com/cppalliance/runvil/releases/download/stt-long-speech-1/stt-long-speech-1.zip' `
             -OutFile $speechArchive
           $speechHash = (Get-FileHash $speechArchive -Algorithm SHA256).Hash
           if ($speechHash -ne 'C8BB0618630D5FA76026F2B6CEC5EC3A0227DC12F710FB0BF01D12FDF1ED3FC7') {
@@ -132,23 +132,23 @@ jobs:
           $speechDir = Join-Path $fixture 'long-speech'
           Expand-Archive -Path $speechArchive -DestinationPath $speechDir -Force
           $fixture | Add-Content $env:GITHUB_PATH
-          "PROMPTFORGE_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
-          "PROMPTFORGE_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
-          "PROMPTFORGE_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
-          "PROMPTFORGE_SILERO_MODEL=$silero" | Add-Content $env:GITHUB_ENV
-          # PROMPTFORGE_WHISPER_MODEL stays at tiny.en for the steps below. Only the
+          "RUNVIL_WHISPER_LIBRARY=$(Join-Path $fixture 'whisper.dll')" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_WHISPER_MODEL=$model" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_WHISPER_AUDIO=$audio" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_SILERO_MODEL=$silero" | Add-Content $env:GITHUB_ENV
+          # RUNVIL_WHISPER_MODEL stays at tiny.en for the steps below. Only the
           # long-speech step points the test at these paths, and it exports
-          # PROMPTFORGE_LONG_SPEECH_CLIPS itself so no other ignored test sees it.
-          "PROMPTFORGE_WHISPER_BASE_MODEL=$baseModel" | Add-Content $env:GITHUB_ENV
-          "PROMPTFORGE_WHISPER_SMALL_MODEL=$smallModel" | Add-Content $env:GITHUB_ENV
-          "PROMPTFORGE_LONG_SPEECH_DIR=$speechDir" | Add-Content $env:GITHUB_ENV
+          # RUNVIL_LONG_SPEECH_CLIPS itself so no other ignored test sees it.
+          "RUNVIL_WHISPER_BASE_MODEL=$baseModel" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_WHISPER_SMALL_MODEL=$smallModel" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_LONG_SPEECH_DIR=$speechDir" | Add-Content $env:GITHUB_ENV
           # Native speech fixture configs default to the CPU build; this runner tests CUDA.
-          "PROMPTFORGE_WHISPER_BACKEND=cuda" | Add-Content $env:GITHUB_ENV
+          "RUNVIL_WHISPER_BACKEND=cuda" | Add-Content $env:GITHUB_ENV
 
       - name: Test safe Whisper backend integration
         run: cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1
 
-      # The noise test reads PROMPTFORGE_NOISE_CLIPS, which this runner does not provision.
+      # The noise test reads RUNVIL_NOISE_CLIPS, which this runner does not provision.
       - name: Test native Silero speech detection
         run: cargo test --locked -p gateway-stt-backend-whisper --test native_silero -- --ignored --test-threads=1 --skip noise_clips_hold_no_speech_decision
 
@@ -175,7 +175,7 @@ jobs:
       - name: Test native long-speech transcription
         shell: powershell
         run: |
-          $env:PROMPTFORGE_LONG_SPEECH_CLIPS = $env:PROMPTFORGE_LONG_SPEECH_DIR
-          $env:PROMPTFORGE_WHISPER_MODEL = $env:PROMPTFORGE_WHISPER_BASE_MODEL
-          $env:PROMPTFORGE_WHISPER_FINAL_MODEL = $env:PROMPTFORGE_WHISPER_SMALL_MODEL
+          $env:RUNVIL_LONG_SPEECH_CLIPS = $env:RUNVIL_LONG_SPEECH_DIR
+          $env:RUNVIL_WHISPER_MODEL = $env:RUNVIL_WHISPER_BASE_MODEL
+          $env:RUNVIL_WHISPER_FINAL_MODEL = $env:RUNVIL_WHISPER_SMALL_MODEL
           cargo test --locked -p gateway-stt --test it realtime_long_speech -- --ignored --test-threads=1

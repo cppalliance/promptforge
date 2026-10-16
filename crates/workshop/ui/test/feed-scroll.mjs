@@ -78,7 +78,7 @@ const resize = () => {
   for (const observer of observers) if (observer.live) observer.callback([]);
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-feed-scroll-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-feed-scroll-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   FeedScroll,

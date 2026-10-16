@@ -8,16 +8,16 @@ todos:
 isProject: false
 ---
 
-# PromptForge: substitution + var + sys
+# Runvil: substitution + var + sys
 
 ## Already implemented (do not redo)
 
 Committed in the Lua echo commit: mlua embedded and sandboxed
-(`promptforge-core::lua::run_chunk`), the single raw `args` string exposed to a
+(`runvil-core::lua::run_chunk`), the single raw `args` string exposed to a
 section's Lua block, and the finish case of the exit rule (a chunk that returns a
 plain value ends the run with it). `execute::run(prompt, args)` runs the entry
 section's Lua and, on a returned value, finishes; otherwise it sends the prose to
-the gateway. CLI: `promptforge run <file> [input]`.
+the gateway. CLI: `runvil run <file> [input]`.
 
 ## Remaining: substitution + var + sys
 
@@ -26,7 +26,7 @@ runtime-provided `sys` namespace, so Lua-computed and runtime values flow into
 the prose the model sees. This all lands on the existing "no return -> model"
 branch of `execute::run`.
 
-- `crates/promptforge-core/src/subst.rs` (new) - resolve `{{ ns.path }}` in prose for namespaces `args`, `var`, `sys`: scalar -> string, table -> JSON (serde_json), missing key -> hard error, single pass, no recursion. Add `Error::Substitution(String)`.
+- `crates/runvil-core/src/subst.rs` (new) - resolve `{{ ns.path }}` in prose for namespaces `args`, `var`, `sys`: scalar -> string, table -> JSON (serde_json), missing key -> hard error, single pass, no recursion. Add `Error::Substitution(String)`.
 - `var` - a writable table the Lua block populates; read back after the chunk runs.
 - `sys` - runtime-populated, read-only, available to both substitution and Lua:
   - `sys.when` - launch timestamp, captured once at run start (fixed for the run).
@@ -49,7 +49,7 @@ branch of `execute::run`.
 ## Tests
 
 - `subst` unit: `{{ args }}`; `{{ var.x }}` after Lua sets it; `{{ sys.id }}` and `{{ sys.when }}`; a `var` table field -> JSON; missing key -> error; text with no placeholders unchanged.
-- e2e (manual, through the gateway): `promptforge run prompts/greet.md "World"` prints `Hello, World!`.
+- e2e (manual, through the gateway): `runvil run prompts/greet.md "World"` prints `Hello, World!`.
 
 ## Verification
 

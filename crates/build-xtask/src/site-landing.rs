@@ -8,7 +8,7 @@ use std::path::Path;
 
 use super::RUSTDOC_SITES;
 
-const TITLE: &str = "PromptForge documentation";
+const TITLE: &str = "Runvil documentation";
 
 /// The landing page: one row per entry in `RUSTDOC_SITES`, in order, then
 /// one per book in `books`, each read from the `title` and `description`

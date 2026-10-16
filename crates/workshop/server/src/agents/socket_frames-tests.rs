@@ -3,9 +3,9 @@
 //! wire shapes, and the cursor and wire-index bookkeeping behind every
 //! durable `agent_event` frame.
 
-use promptforge::event::Event;
-use promptforge::ids::{ChainId, Provenance, TaskId};
-use promptforge::tools::ToolId;
+use runvil::event::Event;
+use runvil::ids::{ChainId, Provenance, TaskId};
+use runvil::tools::ToolId;
 use workshop_agents::{Delta, SessionEvent, WaitFrame};
 use workshop_protocol::InputFrame;
 

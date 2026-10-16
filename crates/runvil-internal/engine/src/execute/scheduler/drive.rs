@@ -1,0 +1,234 @@
+//! The run-level step: `resume -> match request -> dispatch -> resume with
+//! answer`, run until no chain can proceed without an answer from the
+//! caller. The step starts the run's first chain on its first call, drains
+//! the ready queue, and returns the effects the drain issued with the
+//! events it reported.
+//! An empty ready queue with an empty pending table and no queued chain
+//! that can be admitted is a stall, which fails loudly rather than hangs.
+//! The run's `Done` is withheld until
+//! every issued effect has its answer, so every effect the caller was
+//! handed has exactly one answer.
+
+use runvil_types::event::lifecycle;
+use runvil_types::ids::AbandonReason;
+
+use crate::execute::RunResult;
+use crate::execute::error::RunError;
+use crate::execute::run::{EffectAnswer, EffectId, Step};
+use crate::{Error, Result};
+
+use super::chain::ChainStep;
+use super::{ChainIndex, GENERIC_COMPLETION, Phase, Scheduler};
+
+impl Scheduler {
+    /// Drains the ready queue and returns the step's outcome: the effects
+    /// issued and the events reported while chains ran, or the run's
+    /// result once it is over and every issued effect is answered. The
+    /// first call starts the H1 pass when the prompt has H1 blocks, else
+    /// the root chain over the prompt's sections.
+    pub(crate) fn step(&mut self) -> Step {
+        if matches!(self.phase, Phase::Fresh) {
+            self.phase = Phase::Running;
+            if let Err(error) = self.start() {
+                self.end(Err(error));
+            }
+        }
+        if matches!(self.phase, Phase::Running) {
+            self.drain();
+        }
+        // Every unfinished chain is ready, pending on an effect, blocked on
+        // a child, waiting on a task, or queued for admission, and a
+        // blocked or waiting chain transitively bottoms out in a ready or
+        // pending chain, so an empty ready queue with an empty pending
+        // table and no admissible queued chain can only be a scheduler
+        // bug (nothing ready, nothing pending, no slot that will ever
+        // free, and whatever is waiting can never be woken) - fail loudly
+        // rather than hang. A running drain returns only after `admit`
+        // left the ready queue empty, so no queued chain is admissible
+        // here and the two empty checks are the whole guard.
+        if matches!(self.phase, Phase::Running) && self.ready.is_empty() && self.pending.is_empty()
+        {
+            self.end(Err(Error::internal(
+                "the scheduler stalled with no ready chain, no in-flight request, \
+                 and no queued chain that can be admitted",
+            )));
+        }
+        let effects = std::mem::take(&mut self.issued);
+        let mut withdrawn = std::mem::take(&mut self.withdrawn);
+        withdrawn.sort_unstable();
+        let events = self.ctx.take_events();
+        let answered = self.pending.is_empty() && self.orphaned.is_empty();
+        match std::mem::replace(&mut self.phase, Phase::Done) {
+            Phase::Ending(result) if answered => {
+                // Only here, with every pending and orphaned effect
+                // answered, so an orphan's store effect still runs in the
+                // live scope.
+                self.end_scope();
+                Step::Done {
+                    result: match result {
+                        Ok(text) => RunResult::Ok(text),
+                        Err(Error::Interrupted) => RunResult::Cancelled,
+                        Err(error) => RunResult::Failure(RunError::from(error)),
+                    },
+                    events,
+                }
+            }
+            Phase::Done => Step::Done {
+                result: RunResult::Failure(RunError::from(Error::internal(
+                    "a finished run cannot be stepped again",
+                ))),
+                events,
+            },
+            phase @ (Phase::Fresh | Phase::Running | Phase::Ending(_)) => {
+                self.phase = phase;
+                Step::Pending {
+                    effects,
+                    events,
+                    withdrawn,
+                }
+            }
+        }
+    }
+
+    /// Applies one effect's answer. An answer for an orphaned effect (its
+    /// chain stopped waiting) is discarded; an answer for an id the run
+    /// never issued, or a second answer for one effect, ends the run with
+    /// an internal error, as does a fatal outcome of the answer itself (a
+    /// claims-model conflict). A run that has returned `Done` ignores
+    /// every answer.
+    pub(crate) fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
+        if matches!(self.phase, Phase::Done) {
+            return;
+        }
+        if self.orphaned.remove(&id) {
+            return;
+        }
+        // Every answer is applied here, on the caller's thread: the
+        // round's events fire against the parked chain's own reporting
+        // handles, a chat round's tool calls are checked against the scope
+        // the chain advertised, a timer's firing wakes its waiter, and a
+        // fatal store conflict ends the run.
+        if let Err(error) = self.apply_answer(id, answer) {
+            self.end(Err(error));
+        }
+    }
+
+    /// Starts the run's first chain: the H1 pass when the prompt has H1
+    /// blocks; an H1-less prompt goes straight to the walk, so no VM is set
+    /// up for a throwaway section 0. A prompt with neither ends at once
+    /// with the generic completion.
+    fn start(&mut self) -> Result<()> {
+        let prompt = self.prompt();
+        if runvil_parser::detail::h1_blocks(&prompt).is_empty() {
+            if runvil_parser::detail::sections(&prompt).is_empty() {
+                self.end(Ok(GENERIC_COMPLETION.to_owned()));
+                return Ok(());
+            }
+            self.start_root_walk()?;
+        } else {
+            let h1 = self.start_live_h1()?;
+            self.ready.push_back(h1);
+        }
+        Ok(())
+    }
+
+    /// Runs every ready chain to its next suspension point. Cancellation
+    /// is polled before each chain step: the instruction hook covers
+    /// running Lua, and a cancel that arrives while every chain is
+    /// suspended is observed on the next `step`. When the queue empties,
+    /// the queued tasks that now fit are admitted and drained in turn:
+    /// admission is the one place a queued chain's Lua VM comes to be, and
+    /// deferring it to the drain's edge lets a woken owner cancel its
+    /// queued siblings before they start.
+    fn drain(&mut self) {
+        loop {
+            if self.ctx.cancel().is_cancelled() {
+                self.end(Err(Error::Interrupted));
+                return;
+            }
+            let Some(id) = self.ready.pop_front() else {
+                if let Err(error) = self.admit() {
+                    self.end(Err(error));
+                    return;
+                }
+                if self.ready.is_empty() {
+                    return;
+                }
+                continue;
+            };
+            let step = match self.step_chain(id) {
+                Ok(step) => step,
+                Err(error) => self.finish(id, Err(error)),
+            };
+            if let ChainStep::RunEnded(result) = step {
+                self.end(result);
+                return;
+            }
+        }
+    }
+
+    /// Decides the run: settles every live task exactly once (each
+    /// reports `TaskAbandoned` - with `RunTerminated` for a task the run's
+    /// end stranded directly, `OwnerAborted` for one nested under it and
+    /// ended through `abort_subtree` - so a task stranded by a run cancel
+    /// or a fatal answer keeps the one-terminal contract; a run that ended
+    /// well has none left, its root chain having settled its own), tears
+    /// every chain down (the suspended chains' frames
+    /// drop unarmed - no `SECTION_FINISHED` - and every effect still out
+    /// with the caller becomes an orphan the caller still answers), reports
+    /// the run's end boundary after every task terminal, and holds
+    /// `result` until the orphans are answered. A second decision keeps
+    /// the first: the outcome that ended the run is the record.
+    fn end(&mut self, result: Result<String>) {
+        if matches!(self.phase, Phase::Ending(_) | Phase::Done) {
+            return;
+        }
+        self.settle_all_tasks(AbandonReason::RunTerminated);
+        self.teardown();
+        // Settling withdrew the abandoned tasks' calls, but teardown orphans
+        // the rest unlisted, so a decided run lists none rather than some.
+        self.withdrawn.clear();
+        self.ctx.emitter().report(
+            self.ctx.prompt().title(),
+            if result.is_ok() {
+                lifecycle::RUN_SUCCEEDED
+            } else {
+                lifecycle::RUN_FAILED
+            },
+        );
+        self.phase = Phase::Ending(result);
+    }
+
+    /// Drops every chain's live state in the teardown order (the suspended
+    /// coroutine, then the frame unarmed, then the access capability) and
+    /// orphans every pending effect. The task slots keep their terminal
+    /// state for inspection; every slot is terminal by now, `end` having
+    /// settled the live ones, so nothing here reports. Each chain joins
+    /// the tasks it owns before its access drops, closing the run's
+    /// happens-before record.
+    fn teardown(&mut self) {
+        self.ready.clear();
+        self.resuming.clear();
+        self.spawned.clear();
+        // The arena is u32-bounded at insertion (`start_chain`), so the
+        // index range covers every chain.
+        for (owner, chain) in (0..).map(ChainIndex).zip(&self.chains) {
+            let Some(access) = chain.access.as_ref() else {
+                continue;
+            };
+            self.join_owned_tasks(owner, access);
+        }
+        for chain in &mut self.chains {
+            chain.coroutine = None;
+            chain.incoming = None;
+            chain.waiting_on.clear();
+            chain.awaiting = None;
+            chain.batch.clear();
+            chain.blocked = None;
+            chain.frame = None;
+            chain.access = None;
+        }
+        self.orphaned
+            .extend(self.pending.drain().map(|(effect, _)| effect));
+    }
+}

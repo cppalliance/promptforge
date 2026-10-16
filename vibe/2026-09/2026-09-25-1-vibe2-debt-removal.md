@@ -20,14 +20,14 @@ todos:
 isProject: false
 ---
 
-# Debt Removal Plan - promptforge vibe2 since upstream/master
+# Debt Removal Plan - runvil vibe2 since upstream/master
 
 <product-contract>
 
 ## Product Requirements
 
 **Scope and target work**
-- Repository: `C:\Users\Vinnie\cursor\promptforge2`, branch `vibe2`.
+- Repository: `C:\Users\Vinnie\cursor\runvil2`, branch `vibe2`.
 - Baseline: `1fd82c62`. This is `upstream/master`, and it is also the merge base with `HEAD`. The local ref was not fetched.
 - Endpoint: `a6b9a747` (`HEAD`).
 - Target: 39 commits under two plans:
@@ -97,7 +97,7 @@ isProject: false
 - Target state: the inventories use intra-doc links, and a rustdoc build with private items and denied warnings runs in CI.
 
 **DEBT-04 - Linux-dead glob import fails the clippy job (introduced, `8a17ee0b`)**
-- Evidence: CI run [36110606135](https://github.com/cppalliance/promptforge/actions/runs/36110606135) at `ce10a8eb` failed only in `clippy`, which denies warnings. The error is `unused import: super::*` at [crates/workshop/workspace/src/workspace/tests/jail.rs](crates/workshop/workspace/src/workspace/tests/jail.rs) line 11. `ci-green` failed only because it aggregates the other jobs. The analysis pass missed this; CI found it.
+- Evidence: CI run [36110606135](https://github.com/cppalliance/runvil/actions/runs/36110606135) at `ce10a8eb` failed only in `clippy`, which denies warnings. The error is `unused import: super::*` at [crates/workshop/workspace/src/workspace/tests/jail.rs](crates/workshop/workspace/src/workspace/tests/jail.rs) line 11. `ci-green` failed only because it aggregates the other jobs. The analysis pass missed this; CI found it.
 - Cause: every item that uses the glob (`Path`, `PathBuf`, `fs`, `Workspace`, `WorkspaceError`, `granted_dir`, `simplified`) is `#[cfg(windows)]`. The ungated `symlink_unavailable` and its two tests use nothing from the parent. The local gates run only on Windows, so they could not see it.
 - Scope: this is the only Linux-only error.
   - The Linux `test` job compiled every crate in clippy's scope with all features and test targets, and emitted exactly this one rustc warning.
@@ -273,32 +273,32 @@ use super::*;
 ## Project Survey
 
 - Status: complete
-- Build command: `cargo build --locked -p <crate>`. Plain `cargo build` builds only the default member `crates/gateway/app` (binary `promptforge-gateway`). Desktop app: `cargo build --locked -p workshop`; desktop release orchestration: `cargo workshop` (alias for `run -p build-workshop --`). The UI bundles are built by crate build scripts through `build-ui`, which needs `npm ci --prefix crates/workshop/ui` and `npm ci --prefix crates/gateway/config-ui/ui` first. Windows links with `rust-lld` and the static CRT per `.cargo/config.toml`.
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; for `workshop`, `workshop-server`, and `workshop-server-api` drop `--all-features`. Integration tests in one binary: add `--test it` (or `--test suite` for `promptforge`). UI tests: `node --test <file>.mjs` from the UI directory.
+- Build command: `cargo build --locked -p <crate>`. Plain `cargo build` builds only the default member `crates/gateway/app` (binary `runvil-gateway`). Desktop app: `cargo build --locked -p workshop`; desktop release orchestration: `cargo workshop` (alias for `run -p build-workshop --`). The UI bundles are built by crate build scripts through `build-ui`, which needs `npm ci --prefix crates/workshop/ui` and `npm ci --prefix crates/gateway/config-ui/ui` first. Windows links with `rust-lld` and the static CRT per `.cargo/config.toml`.
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; for `workshop`, `workshop-server`, and `workshop-server-api` drop `--all-features`. Integration tests in one binary: add `--test it` (or `--test suite` for `runvil`). UI tests: `node --test <file>.mjs` from the UI directory.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`, then `cargo test -p <crate> --all-features --doc` (workshop crates without `--all-features`; `workshop-server` also has `cargo nextest run --locked -p workshop-server --features headless`). UI components: `npm test` in `crates/workshop/ui` or `crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The workspace run includes `build-xtask`, the structural checks (`cargo test -p build-xtask`). UI suites: `npm test` in both UI directories.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless gate `cargo check -p gateway --no-default-features`. Never run a standalone `cargo check --workspace`. UI type checks: `npm run typecheck` in both UI directories. Supply chain: `cargo deny check` (pre-push runs it when installed).
 - Formatter check command: `cargo fmt --all --check` (rustfmt `style_edition = "2024"`; the pre-commit hook runs it).
-- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps` (default features), both with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`); user guide: `mdbook build guide`. Facade surface: `cargo +<pinned nightly> xtask api --check`, nightly named in `crates/build-xtask/src/api/toolchain.rs`, checked against `crates/promptforge/public-api.txt`.
+- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p runvil --no-deps` (default features), both with `RUSTDOCFLAGS` set to `-D warnings` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`); user guide: `mdbook build guide`. Facade surface: `cargo +<pinned nightly> xtask api --check`, nightly named in `crates/build-xtask/src/api/toolchain.rs`, checked against `crates/runvil/public-api.txt`.
 - Test placement and naming conventions:
   - Unit tests either inline as `#[cfg(test)] mod tests { ... }` or in a sibling file wired with `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (for example `tidy.rs` with `tidy-tests.rs`); a `tests/` subdirectory under `src/` appears once a module's tests reach three files.
-  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/main.rs` in `promptforge`) that declares topic modules plus a `support.rs` helper module; prompt fixtures sit under `tests/prompts/`. Benches exist only in `promptforge-engine` and `promptforge-lua` (criterion).
+  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/main.rs` in `runvil`) that declares topic modules plus a `support.rs` helper module; prompt fixtures sit under `tests/prompts/`. Benches exist only in `runvil-engine` and `runvil-lua` (criterion).
   - Test function names are behavior sentences in snake_case (`a_pending_timer_is_torn_down_by_a_cancel`, `workshop_tier_dependencies_flow_one_way`). Async tests use `#[tokio::test]`. Test roots open with `#![expect(clippy::expect_used, clippy::unwrap_used, reason = "...")]`; `clippy.toml` allows unwrap and expect in tests.
   - UI tests are Node `node:test` `.mjs` files: `crates/workshop/ui/test/*.mjs` (with `test/helpers/`), and beside source as `src/**/*.test.mjs` in `crates/gateway/config-ui/ui`; `tools/*.test.mjs` sit beside their scripts.
   - Behavior changes ship with tests in the same change; nextest caps the whisper-backed STT packages in a `heavy` test group.
 - Directory map:
-  - `crates/` - the public and shared layer: root crates `promptforge` (facade), `gateway-api-types`, `gateway-api-discovery`, `harness-api`, `shared-error-source`, `shared-loopback`, `workspace-hack`, and `build-*` tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), plus `shared-ui` (TypeScript and CSS package, not a Rust crate).
-  - `crates/promptforge-internal/` - private Engine family: `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
+  - `crates/` - the public and shared layer: root crates `runvil` (facade), `gateway-api-types`, `gateway-api-discovery`, `harness-api`, `shared-error-source`, `shared-loopback`, `workspace-hack`, and `build-*` tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), plus `shared-ui` (TypeScript and CSS package, not a Rust crate).
+  - `crates/runvil-internal/` - private Engine family: `engine`, `types`, `vfs`, `lua`, `parser`, `store`, `model-client`.
   - `crates/gateway/` - private gateway family: `app`, `cloud-providers`, `config`, `config-ui` (with its `ui/` SPA), `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/harness/` - private Harness family: `runner`, `models`, `capabilities`, `log`, `sessions`, `web`, `webfetch`, `web-search`.
   - `crates/workshop/` - private Workshop family: `desktop` (Tauri app, package `workshop`), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and `ui/` (the SPA).
   - `guide/` - mdBook user guide and contributor docs. `prompts/` - sample Markdown prompts. `tools/` - Node release scripts with tests. `vibe/` - plans, archdoc, and design notes. `images/` - banners. `.github/` - CI workflows and fixtures. `.config/` - nextest and hakari. `.githooks/` - pre-commit and pre-push.
   - Root config: `Cargo.toml` (explicit member list, lints, workspace deps), `rust-toolchain.toml` (stable), `rustfmt.toml`, `clippy.toml`, `deny.toml`, `dist-workspace.toml` (cargo-dist), `AGENTS.md` (repository rules).
 - Component boundaries:
-  - `promptforge` is the only crate outside its family that may reach `promptforge-internal/*`; promptforge crates never depend on gateway, workshop, or Harness crates. The Engine is a sans-I/O state machine exchanging effects and events.
-  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; nothing outside may depend into `crates/gateway/`, and gateway crates never depend on promptforge, workshop, or Harness. `gateway-stt` is the only family-visible STT crate. It runs as a separate process reached over HTTP and WebSocket plus the discovery file.
-  - Harness exposes only `harness-api`; Harness crates may depend on `promptforge`, the gateway public pair, and `shared-*`, never on workshop or private gateway crates. It steps the Engine as its only production caller and performs its effects.
-  - Workshop crates may depend on `harness-api`, `promptforge`, the gateway public pair, and `shared-*` only. The desktop app depends on `workshop-server-api`, never `workshop-server`. Inside the family, tiers flow one way: server, then features, then services, then vocabulary.
+  - `runvil` is the only crate outside its family that may reach `runvil-internal/*`; runvil crates never depend on gateway, workshop, or Harness crates. The Engine is a sans-I/O state machine exchanging effects and events.
+  - Gateway exposes only `gateway-api-types` and `gateway-api-discovery`; nothing outside may depend into `crates/gateway/`, and gateway crates never depend on runvil, workshop, or Harness. `gateway-stt` is the only family-visible STT crate. It runs as a separate process reached over HTTP and WebSocket plus the discovery file.
+  - Harness exposes only `harness-api`; Harness crates may depend on `runvil`, the gateway public pair, and `shared-*`, never on workshop or private gateway crates. It steps the Engine as its only production caller and performs its effects.
+  - Workshop crates may depend on `harness-api`, `runvil`, the gateway public pair, and `shared-*` only. The desktop app depends on `workshop-server-api`, never `workshop-server`. Inside the family, tiers flow one way: server, then features, then services, then vocabulary.
   - `shared-*` depend on no product crates. `build-*` crates are meta tooling exempt from container privacy; only `build-ui` is depended on, as a build dependency. Every member depends on `workspace-hack`.
   - Family container crates may depend only on `crates/` root crates and their own siblings. Rules bind normal, dev, build, and target-specific dependencies, and `cargo test -p build-xtask` enforces them. The archdoc names a CLI component, but no dedicated CLI crate exists in the tree.
 - Conventions summary:
@@ -308,7 +308,7 @@ use super::*;
   - Reuse an existing facility before building new machinery; no new structural checks without explicit user approval; Cargo features gate real constraints only.
   - Error and status messages are concise and self-contained for model consumption. Comments explain only non-obvious constraints and cite upstream issue URLs for workarounds.
   - Run-log JSON round-trips exactly (sorted keys, finite numbers, `float_roundtrip`, never `preserve_order`). Third-party errors are wrapped through `shared-error-source`.
-  - SPA rules: CSS beside its TypeScript, `--ws-*` tokens instead of raw values, no `localStorage` (state goes to `ui-state.json` or the `.pfwork` workspace file through the server).
+  - SPA rules: CSS beside its TypeScript, `--ws-*` tokens instead of raw values, no `localStorage` (state goes to `ui-state.json` or the `.rvwork` workspace file through the server).
 
 </project-survey>
 <execution-plan>

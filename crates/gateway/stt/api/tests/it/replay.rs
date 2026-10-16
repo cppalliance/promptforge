@@ -27,7 +27,7 @@ use serde_json::{Map, Value};
 
 use metrics::Metrics;
 
-const UPDATE_VARIABLE: &str = "PROMPTFORGE_REPLAY_UPDATE";
+const UPDATE_VARIABLE: &str = "RUNVIL_REPLAY_UPDATE";
 const SCRIPTED_PREFIX: &str = "scripted-";
 const NATIVE_FIXTURE: &str = "jfk-native-recaptured";
 /// Sections no replay produces, kept as written: the native interim decode

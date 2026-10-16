@@ -1,0 +1,49 @@
+[package]
+name = "runvil-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+runvil-lua.workspace = true
+runvil-model-client.workspace = true
+runvil-parser.workspace = true
+runvil-types.workspace = true
+runvil-vfs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+mlua.workspace = true
+# Logs the tools the offering leaves out; the caller's subscriber decides
+# where a line goes, so the Engine still performs no I/O itself.
+tracing.workspace = true
+
+[features]
+# The Engine's own test driver, for `benches/models_loop.rs` alone, which
+# names this feature in `required-features` because a bench cannot see
+# `#[cfg(test)]` code: the serial sans-IO driver (`test_support::drive`)
+# that steps a run on the calling thread, the local effect performer, and
+# the scripted model, with no runtime and no HTTP. No other crate enables
+# it.
+test-support = []
+
+[dev-dependencies]
+criterion.workspace = true
+runvil-lua = { workspace = true, features = ["test-support"] }
+runvil-parser = { workspace = true, features = ["test-support"] }
+
+# The bench drives runs on the serial test driver and answers their rounds
+# from the scripted model, so it needs the feature that provides both.
+[[bench]]
+name = "models_loop"
+harness = false
+required-features = ["test-support"]
+
+[build-dependencies]
+build-ceiling.workspace = true
+
+[lints]
+workspace = true

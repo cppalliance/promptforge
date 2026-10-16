@@ -1,4 +1,4 @@
-//! Shared loopback request checks for PromptForge servers.
+//! Shared loopback request checks for Runvil servers.
 //!
 //! Two middlewares form the wall. [`require_loopback`] refuses any request
 //! whose peer address is not loopback. [`require_loopback_host`] refuses

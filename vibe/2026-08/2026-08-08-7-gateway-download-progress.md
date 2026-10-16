@@ -1,6 +1,6 @@
 ---
 name: gateway download progress
-overview: Add an indicatif progress bar (percent, bytes, rate, ETA) to promptforge-gateway local artifact downloads so large GGUF fetches are visible on a TTY.
+overview: Add an indicatif progress bar (percent, bytes, rate, ETA) to runvil-gateway local artifact downloads so large GGUF fetches are visible on a TTY.
 todos:
   - id: add-indicatif
     content: Add indicatif workspace + gateway dependency
@@ -21,13 +21,13 @@ isProject: false
 
 ## Decision
 
-Use [`indicatif`](https://crates.io/crates/indicatif) in [`crates/promptforge-gateway/src/local/artifacts.rs`](promptforge/crates/promptforge-gateway/src/local/artifacts.rs) `download`. On a TTY stderr: bar + percent + transferred/total + rate + ETA + spinner-style template. When stderr is not a TTY (CI / redirected logs): no bar; emit `tracing::info!` every ~5% or 64 MiB with percent and bytes so progress still appears in logs.
+Use [`indicatif`](https://crates.io/crates/indicatif) in [`crates/runvil-gateway/src/local/artifacts.rs`](runvil/crates/runvil-gateway/src/local/artifacts.rs) `download`. On a TTY stderr: bar + percent + transferred/total + rate + ETA + spinner-style template. When stderr is not a TTY (CI / redirected logs): no bar; emit `tracing::info!` every ~5% or 64 MiB with percent and bytes so progress still appears in logs.
 
 Default: progress on stderr only (keeps stdout free if anything else uses it). No multi-connection speedup in this change.
 
 ## Changes
 
-1. **Dependency** - add `indicatif` to workspace `[workspace.dependencies]` and `promptforge-gateway` deps (`*.workspace = true`).
+1. **Dependency** - add `indicatif` to workspace `[workspace.dependencies]` and `runvil-gateway` deps (`*.workspace = true`).
 
 2. **`download` in `artifacts.rs`**
    - After a successful response, read `Content-Length` if present.
@@ -55,7 +55,7 @@ trait DownloadProgress {
 
 TTY builds `IndicatifProgress`; tests use a `RecordingProgress`. Production `download` constructs the right one from `stderr().is_terminal()`.
 
-4. **Docs** - one short note in [`crates/promptforge-gateway/design-gateway.md`](promptforge/crates/promptforge-gateway/design-gateway.md) under local models: first-time GGUF download shows a progress bar on an interactive terminal.
+4. **Docs** - one short note in [`crates/runvil-gateway/design-gateway.md`](runvil/crates/runvil-gateway/design-gateway.md) under local models: first-time GGUF download shows a progress bar on an interactive terminal.
 
 ## Out of scope
 

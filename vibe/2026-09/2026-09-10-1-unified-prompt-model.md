@@ -1,6 +1,6 @@
 ---
 name: Unified Prompt Model
-overview: "Implement a narrow `promptforge: 0` core: rename heading-based `execute` to `call`, add pending Markdown capture and lazy `prose`, remove `reply`, expose plain messages with optional builders, retain `models.infer`, add Rust-backed `models.loop` with an optional leading model handle, and implement only the minimum compactor surface with `compactors.fail` as the sole policy. Keep every other designed capability documented but deferred and inert."
+overview: "Implement a narrow `runvil: 0` core: rename heading-based `execute` to `call`, add pending Markdown capture and lazy `prose`, remove `reply`, expose plain messages with optional builders, retain `models.infer`, add Rust-backed `models.loop` with an optional leading model handle, and implement only the minimum compactor surface with `compactors.fail` as the sole policy. Keep every other designed capability documented but deferred and inert."
 todos:
   - id: define-unified-contracts
     content: Define only the active plain-message, message-builder, models.loop, and call-time model/tool selection contracts; retain every other contract as deferred description.
@@ -44,7 +44,7 @@ todos:
 isProject: false
 ---
 
-# Unified PromptForge Prompt Model
+# Unified Runvil Prompt Model
 
 **Active implementation scope.** Rename heading-based `execute` to synchronous `call`; add pending Markdown capture with thematic-break reset and lazy `prose`; remove `reply`; retain plain message arrays and add optional pure-Lua builders; retain `models.infer`; expose Rust-backed `models.loop(handle?, messages, compactor?)`; implement the minimum compactor invocation surface with `compactors.fail` as the only policy; and generalize `user_input()` enough to keep the Agent window working.
 
@@ -88,9 +88,9 @@ Only focused tests and migrations required by those active changes belong to thi
   - One Rust-backed `models.loop` appends protocol-complete history, processes every structured model tool call, returns nil, and behaves identically with zero or many model-visible tools.
   - The Agent window remains functional through the generic input broker and active `models.loop`.
   - Reconnect persistence, Workshop restore, concurrency, and composition contracts remain deferred.
-  - Prompts, examples, guides, and tests touched by the active core use `promptforge: 0` and its explicit model.
+  - Prompts, examples, guides, and tests touched by the active core use `runvil: 0` and its explicit model.
 - Constraints:
-  - Keep `promptforge: 0`; never propose incrementing it while this rule remains active.
+  - Keep `runvil: 0`; never propose incrementing it while this rule remains active.
   - Preserve fresh VMs for fall-through, jump, call, and every child-task entry; use explicit task input, `var`, return values, and store as transfer channels.
   - Keep canonical events append-only and separate from mutable model-facing message arrays.
   - The Harness keeps the canonical event log; prompt Lua reads specific returned values or narrow APIs in place of a general event view.
@@ -104,8 +104,8 @@ Only focused tests and migrations required by those active changes belong to thi
 ## Functional Specification
 
 - Actors and workflows:
-  - PromptForge accumulates Markdown in a pending prose buffer after each section heading or ordinary Lua fence. A Markdown thematic break recognized by the parser clears that buffer and is not included in `prose`.
-  - On each ordinary Lua fence, PromptForge installs the current buffer as a fresh unresolved read-only `prose` value, clears the pending buffer, and runs the Lua coroutine.
+  - Runvil accumulates Markdown in a pending prose buffer after each section heading or ordinary Lua fence. A Markdown thematic break recognized by the parser clears that buffer and is not included in `prose`.
+  - On each ordinary Lua fence, Runvil installs the current buffer as a fresh unresolved read-only `prose` value, clears the pending buffer, and runs the Lua coroutine.
   - The first runtime read snapshots section state, evaluates every `{{ }}` substitution once, memoizes the resulting string, and returns that same string on later reads.
   - Markdown before the last thematic break is inert commentary, and Markdown left after the section's final Lua fence is inert trailing commentary. Unconsumed Markdown at section end is discarded without error or model invocation.
   - A routine tool-free pipeline author calls `models.infer(prose)` and passes selected results explicitly through `var`, store, or return values rather than a rolling `reply` register.
@@ -116,7 +116,7 @@ Only focused tests and migrations required by those active changes belong to thi
   - An active Host input policy blocks for a human, reports unavailable immediately, or fails; `user_input()` returns `text, available`, preserving the exact fallback sentence while distinguishing it from human speech. The model-visible input tool uses the same broker and correlated tool protocol.
   - A prompt author uses `call("## Heading", input?)` for an in-document section.
   - The deferred module contract uses sandboxed `require("./path.lua")` for one cached Lua module instance per VM.
-  - The deferred complete-document contract uses `execute("./path.md", input?)` for a child PromptForge document.
+  - The deferred complete-document contract uses `execute("./path.md", input?)` for a child Runvil document.
   - Deferred task contract: `call_async(heading, input?)` eagerly creates and enqueues a section task, returns its handle without waiting, and lets the executor control when queued work becomes running.
   - Active `call` directly and synchronously invokes a section while preserving current execution behavior.
   - Deferred task and document contracts later define `call` as an await-and-unwrap wrapper and add symmetric `execute` and `execute_async`.
@@ -175,31 +175,31 @@ Only focused tests and migrations required by those active changes belong to thi
 ## Technical Design
 
 - Architecture:
-  - Collapse the public split in [`crates/promptforge/src/lib.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge/src/lib.rs) behind one run configuration and scheduler while retaining lower-level parser, Lua, model-client, tool, store, gateway, and observer crates.
+  - Collapse the public split in [`crates/runvil/src/lib.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil/src/lib.rs) behind one run configuration and scheduler while retaining lower-level parser, Lua, model-client, tool, store, gateway, and observer crates.
   - Keep `SectionContext` as the owner of one fresh VM, plain Lua message arrays, current model and tool selection, counts, and lifecycle; move active context projection, the minimal compaction invocation path, and input brokering into focused modules and defer incarnation.
   - Keep the provider request as an internal Rust leaf and expose only Rust-backed `models.loop` to Lua, with an optional leading handle argument; ship optional message-list builders and `compactors.fail` now and defer the replacement-handling compactor framework, summarizing, and other built-in compactor factories.
   - Preserve the append-only `EventLog` as canonical truth and treat every Lua message array as an author-controlled model projection.
   - Deferred task architecture puts asynchronous child execution behind one task runtime with stable task and frame IDs; active `call` retains current synchronous execution semantics.
 - Modules and interfaces:
-  - Remove `loop_capable` from `Block::Prose` in [`crates/promptforge-parser/src/lib.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-parser/src/lib.rs) and represent Markdown accumulation, thematic-break reset, and Lua-fence consumption without an unpaired-prose error.
-  - Replace automatic prose advancement in [`crates/promptforge-core/src/execute/scheduler.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-core/src/execute/scheduler.rs) with installation of the pending Markdown buffer as a fresh lazy prose template before each Lua coroutine starts; clear the buffer at thematic breaks, Lua fences, and section boundaries.
-  - Generalize the existing agent-only chat request and Rust tool loop in [`crates/promptforge-lua/src/protocol.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-lua/src/protocol.rs) and [`crates/promptforge-core/src/execute/tool_loop.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-core/src/execute/tool_loop.rs) into section-visible `models.loop`, retaining provider-neutral messages, tool dispatch, cancellation, streaming, and Harness metrics.
+  - Remove `loop_capable` from `Block::Prose` in [`crates/runvil-parser/src/lib.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-parser/src/lib.rs) and represent Markdown accumulation, thematic-break reset, and Lua-fence consumption without an unpaired-prose error.
+  - Replace automatic prose advancement in [`crates/runvil-core/src/execute/scheduler.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-core/src/execute/scheduler.rs) with installation of the pending Markdown buffer as a fresh lazy prose template before each Lua coroutine starts; clear the buffer at thematic breaks, Lua fences, and section boundaries.
+  - Generalize the existing agent-only chat request and Rust tool loop in [`crates/runvil-lua/src/protocol.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-lua/src/protocol.rs) and [`crates/runvil-core/src/execute/tool_loop.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-core/src/execute/tool_loop.rs) into section-visible `models.loop`, retaining provider-neutral messages, tool dispatch, cancellation, streaming, and Harness metrics.
   - Read model selection and tool scope at call time; `models.use`, `tools.add`, and `tools.add_local` remain available throughout the section and affect the next `models.loop` call.
   - Add request precheck, provider-overflow detection, and compactor callback invocation required by active `models.loop`; defer replacement validation, measurable progress checks, and atomic in-place history replacement to the deferred compactor framework.
   - Ship optional pure-Lua `messages.new()` message-list methods over a normal numeric table; `models.loop`, substitution, and protocol validation continue to consume the underlying plain records.
   - Move Workshop's wait registry behind a generic input-broker interface; expose direct `user_input()` returning `text, available`, adapt the model-visible input tool to the same broker, and preserve Agent-window behavior without adding cold restore.
   - Implement the Agent-window model picker as a deliberate minimal hack, to be revisited: `ui().selected_model` serves the MenuBus selection only for the Workshop Agent-window session and is nil in every other context (the `ui` provider is already a per-run Host-injected closure, so this is wiring in `workshop-server`, not new machinery); in the Agent-window context, `models.get` resolves an undeclared alias as a raw gateway catalog model id, so `chat.md` calls `models.loop(models.get(ui().selected_model), messages)` and re-reads the selection each turn. The operator directed: "I want the smallest possible hack for ui().selected_model. Just make it work, with the absolute minimum amount of code, because we will have to revisit that anyway."
   - Deferred: add `lua inherit` as a contiguous initialization prefix replayed once per fresh VM.
-  - Retain the deferred `require(path)` target contract: load a Lua module return value once per VM through PromptForge's frozen source-relative resolver rather than `package.path`, process working directory, native loaders, or unrestricted searchers. Do not implement it in the current plan.
-  - Retain the deferred `execute(path, input?)` and `execute_async(path, input?)` target contracts for complete external `.md` PromptForge documents: resolve and freeze the source, invoke the same parser and executor contract as a root prompt, create isolated child VMs and prompt state, share only the run-scoped store and Host policy, link child lifecycle events, and expose synchronous result or asynchronous Task semantics. Do not implement these interfaces in the current plan.
+  - Retain the deferred `require(path)` target contract: load a Lua module return value once per VM through Runvil's frozen source-relative resolver rather than `package.path`, process working directory, native loaders, or unrestricted searchers. Do not implement it in the current plan.
+  - Retain the deferred `execute(path, input?)` and `execute_async(path, input?)` target contracts for complete external `.md` Runvil documents: resolve and freeze the source, invoke the same parser and executor contract as a root prompt, create isolated child VMs and prompt state, share only the run-scoped store and Host policy, link child lifecycle events, and expose synchronous result or asynchronous Task semantics. Do not implement these interfaces in the current plan.
   - Deferred: add eager queued `call_async`, immutable task handles and outcomes, Rust-backed `tasks.await_all`, model-visible subagent adapters, continuation-capable waits, and journaled suspending operations.
 - File and public API changes:
-  - Parser and syntax: [`crates/promptforge-parser/src/build.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-parser/src/build.rs), [`crates/promptforge-parser/src/fence.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-parser/src/fence.rs), and parser tests lose positional prose semantics and gain pending Markdown capture with thematic-break reset; inherited initialization and complete-document execution remain deferred.
-  - Lua and model substrate: [`crates/promptforge-lua/src/coro.rs`](C:/Users/Vinnie/cursor/promptforge/crates/promptforge-lua/src/coro.rs), its embedded Lua shims, VM setup, model bindings, protocol, dispatch, and errors expose the unified leaf calls and libraries.
-  - Consolidate the Lua tool bindings into a `crates/promptforge-lua/src/tools/` module directory mirroring the existing `models/` layout: `mod.rs` for namespace installation (`always`, `add`, `add_local`, `call`, `calls`), `userdata.rs` for `LuaToolHandle` (moved out of `handles.rs`), `decode.rs` for alias-or-Tool argument polymorphism and `add_local` schema building, and `tests.rs`; move tool-installation logic out of `vm.rs`. Add `crates/promptforge-lua/src/messages/` in the same layout for the message namespace and its pure-Lua builders shim.
+  - Parser and syntax: [`crates/runvil-parser/src/build.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-parser/src/build.rs), [`crates/runvil-parser/src/fence.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-parser/src/fence.rs), and parser tests lose positional prose semantics and gain pending Markdown capture with thematic-break reset; inherited initialization and complete-document execution remain deferred.
+  - Lua and model substrate: [`crates/runvil-lua/src/coro.rs`](C:/Users/Vinnie/cursor/runvil/crates/runvil-lua/src/coro.rs), its embedded Lua shims, VM setup, model bindings, protocol, dispatch, and errors expose the unified leaf calls and libraries.
+  - Consolidate the Lua tool bindings into a `crates/runvil-lua/src/tools/` module directory mirroring the existing `models/` layout: `mod.rs` for namespace installation (`always`, `add`, `add_local`, `call`, `calls`), `userdata.rs` for `LuaToolHandle` (moved out of `handles.rs`), `decode.rs` for alias-or-Tool argument polymorphism and `add_local` schema building, and `tests.rs`; move tool-installation logic out of `vm.rs`. Add `crates/runvil-lua/src/messages/` in the same layout for the message namespace and its pure-Lua builders shim.
   - Executor: section context, scheduler, scope, errors, substitution, models.loop protocol test support, and public run options adopt one section-agent contract.
   - Active Host integration covers the generic input broker and minimum Agent-window wiring; cold restore, incarnation checks, reconnect persistence, external Markdown-agent discovery, and broader Workshop migration remain deferred.
-  - Rewrite the built-in Workshop chat agent from the standalone `chat.lua` program into an embedded `chat.md` Markdown prompt at `promptforge: 0` on the unified runtime: explicit retained message list, the `user_input()` broker, and `models.loop` with the leading handle for the UI-selected model. The chat agent becomes an ordinary prompt document; only external Markdown-agent discovery stays deferred.
+  - Rewrite the built-in Workshop chat agent from the standalone `chat.lua` program into an embedded `chat.md` Markdown prompt at `runvil: 0` on the unified runtime: explicit retained message list, the `user_input()` broker, and `models.loop` with the leading handle for the UI-selected model. The chat agent becomes an ordinary prompt document; only external Markdown-agent discovery stays deferred.
   - Active public facade and guide changes cover `call`, prose, `reply` removal, messages, `models.infer`, `models.loop`, the minimal compactor surface and `compactors.fail`, and `user_input`.
 - Data, persistence, failure, security, and privacy constraints, all deferred except active message validation, input waiting, and existing trust behavior:
   - Persist completed canonical events, content-free compaction records, sealed incarnation hashes, and execution snapshots tied to event offsets; snapshots carry block position, active projections, completed Engine-call results, and outstanding waits or children, never live coroutines or mutable userdata.
@@ -222,7 +222,7 @@ Only focused tests and migrations required by those active changes belong to thi
 ## Testing Plan
 
 - Unit:
-  - Parser tests cover pending Markdown capture, reset at headings, Lua fences, and thematic breaks, leading and per-fence commentary exclusion, naturally inert trailing commentary, no unpaired-prose error, and `promptforge: 0` acceptance; inheritance and module-cycle tests remain deferred.
+  - Parser tests cover pending Markdown capture, reset at headings, Lua fences, and thematic breaks, leading and per-fence commentary exclusion, naturally inert trailing commentary, no unpaired-prose error, and `runvil: 0` acceptance; inheritance and module-cycle tests remain deferred.
   - Lua protocol tests cover every role and content variant, visible text plus tool calls, multiple calls, correlated results, malformed arrays, `messages.new()` builders, read-only lazy `prose`, and direct input behavior; model metrics remain Harness-observer data.
   - Deferred event-sandbox tests cover eventual removal of `runtime.events()` while preserving Harness observation and replay.
   - Prose tests cover state mutation before first read, memoization after first read, no evaluation or error when never read, fresh evaluation for a second pair, assignment rejection, recursive `{{ prose }}` rejection, and `pcall` at the read site.
@@ -241,7 +241,7 @@ Only focused tests and migrations required by those active changes belong to thi
 - Exit criteria:
   - Focused tests pass for active parser, Lua, core, model-client, projection, input-broker, Agent-window, and migration changes.
   - Formatting, Clippy, affected crate tests, doctests, and architecture checks pass for the active slice; deferred persistence and broad platform matrices do not block it.
-  - Touched production paths retain no implicit prose inference, `reply`, agent-only model API, incomplete tool projection, heading-based `execute`, bare `tool_call`, colon handle methods, or `promptforge: 1` examples.
+  - Touched production paths retain no implicit prose inference, `reply`, agent-only model API, incomplete tool projection, heading-based `execute`, bare `tool_call`, colon handle methods, or `runvil: 1` examples.
 
 </verification-contract>
 
@@ -250,9 +250,9 @@ Only focused tests and migrations required by those active changes belong to thi
 ## Decision Record
 
 - Decisions:
-  - Use `promptforge: 0` throughout development. The operator's rule is: "as long as we are at 0 you will never suggest to increment it."
+  - Use `runvil: 0` throughout development. The operator's rule is: "as long as we are at 0 you will never suggest to increment it."
   - Keep one fresh VM per section entry and reuse it for every turn inside that section; explicit state channels preserve identical behavior across fall-through, jump, call, and child-task entry.
-  - Name contained section invocation `call(heading, input?)`; it creates a fresh child frame, waits, returns the child's result, and resumes its caller, while `jump` transfers control without returning. The operator selected `call` after asking: "should we change execute() to call() in promptforge?"
+  - Name contained section invocation `call(heading, input?)`; it creates a fresh child frame, waits, returns the child's result, and resumes its caller, while `jump` transfers control without returning. The operator selected `call` after asking: "should we change execute() to call() in runvil?"
   - Make the heading-based `execute` to `call` rename the first child-composition behavior change after the public contracts freeze; preserve its current synchronous behavior during the rename and verify no heading-form `execute` remains before introducing path-based `execute`. The operator decided: "renaming execute to call should be the first step (or close to it)."
   - Remove the special `reply` register and all automatic result handoff across fall-through and `jump`; authors use `var` or store for explicit transfer. The operator decided: "in the case of fallthrough or jump(section) we can just remove the `reply` feature. The author can use the store or a var to pass data".
   - Accumulate pending Markdown after each section heading or ordinary Lua fence, clear it at each thematic break, bind the remaining buffer as lazy `prose` for the next Lua fence, and discard any trailing buffer at section end. Thematic breaks affect only prose capture and never terminate calls or alter fall-through. This supersedes the prior deferred thematic control-flow design. The operator observed: "every prose can have commentary. the section can have commentary. and we can have trailing commentary."
@@ -270,7 +270,7 @@ Only focused tests and migrations required by those active changes belong to thi
   - Keep generic `user_input`, its model-visible tool adapter, and minimum Agent-window integration in active scope because the Agent window cannot function without an input wait. The operator decided: "user_input is required or else the Agent window stops working."
   - Allow `lua inherit` at every heading level but only as a contiguous initialization prefix before ordinary executable prose or Lua; applicable blocks execute once per fresh VM in deterministic root-to-leaf source order. The operator preferred `inherit` because the source is replayed rather than mutable state being shared.
   - Use an Engine-installed sandboxed `require("./path.lua")` for Lua modules; resolve from the source file containing the call, preserve that anchor when an inherited block is replayed, freeze bytes, cache one returned module value per VM, and reject bare names, absolute paths, process-working-directory lookup, unrestricted package searchers, and confined-root escapes. The operator accepted this contract after asking where `"helpers"` comes from and whether authors must implement `require`.
-  - Use `execute("./path.md", input?)` only for complete external PromptForge documents and run them through the formal parser and executor as isolated child prompt invocations; use `call("## Heading", input?)` for in-document sections and `require("./path.lua")` for cached Lua module values. Partial Markdown composition through future `include` and `local_include` remains a distinct deferred contract.
+  - Use `execute("./path.md", input?)` only for complete external Runvil documents and run them through the formal parser and executor as isolated child prompt invocations; use `call("## Heading", input?)` for in-document sections and `require("./path.lua")` for cached Lua module values. Partial Markdown composition through future `include` and `local_include` remains a distinct deferred contract.
   - Defer implementation of path-based `execute` and `execute_async` while preserving their full target contract in this plan and the language contract. The operator decided: "defer path-based execute. describe it in the plan but do not implement it".
   - Keep future `require`, `include`, `local_include`, and partial Markdown composition as distinct contracts: `require()` returns a cached Lua module value, while `include()` does not. None exists in the current implementation scope.
   - Defer implementation of `require`, `include`, `local_include`, and Markdown fragments while preserving their target descriptions. They require no current removal, compatibility, testing, or migration work because they do not yet exist, but later plans will implement them. The operator decided: "Lets defer require(). Keep the description but dont implement it as a step", clarified "There is no include path currently", and then settled: "they will eventually be implemented just not yet".
@@ -313,7 +313,7 @@ Only focused tests and migrations required by those active changes belong to thi
   - `lua inherit` blocks that trigger effects repeat those effects in every applicable fresh VM; guidance and tests should favor declarations, constants, and function construction.
   - Plain message arrays remain the protocol contract; optional `messages.new()` methods reduce boilerplate without creating Engine-owned conversation state, while deferred compactor factories will preserve immutable prefixes later.
   - Existing prompts require scoped migration because prose no longer infers automatically; thematic breaks now reset pending prose, and trailing Markdown becomes inert without becoming invalid.
-  - The current executor accepts `promptforge: 1`; changing the gate, shipped prompts, and fixtures to `promptforge: 0` must be one controlled migration or a temporary dual-read transition, never a suggestion to increment the target language.
+  - The current executor accepts `runvil: 1`; changing the gate, shipped prompts, and fixtures to `runvil: 0` must be one controlled migration or a temporary dual-read transition, never a suggestion to increment the target language.
   - Pending Markdown capture, thematic-break reset, scheduler demotion of automatic prose, lazy `prose`, and `reply` removal are one coupled active behavior slice.
   - Current Workshop chat reconstructs messages through `runtime.events()`; migrate chat to the unified Markdown runtime before removing the event view. That rebuild-per-turn also provides today's restart and turn-cancel resume; after migration, message history lives in a Lua global and restart loses it until the deferred persistence work lands - an accepted interim regression.
   - The current sandbox removes `require`, current `execute` addresses headings, and current compaction, operation journaling, and incarnation snapshots are greenfield subsystems; source-relative module loading, external prompt execution, include APIs, and fragment artifacts remain documented deferred subsystems.
@@ -321,7 +321,7 @@ Only focused tests and migrations required by those active changes belong to thi
   - Rust-backed `models.loop` still needs focused internals for projection budgeting, normalized call-ID dispatch, typed recoverable errors, and stable conversation and policy identity; these internals are not Lua APIs. Atomic compaction commit belongs to the deferred compactor framework.
   - Generalizing `args` from string to a read-only JSON-representable task input affects `call`, `execute`, substitution, frontmatter validation, and migration, but avoids a second child-input channel.
   - Exact cold restoration requires every control-flow-relevant outside observation to be journaled and replay-verified, including nil task-result probes, completion selection, cancellation races, store reads, clocks, and Host snapshots.
-  - PromptForge can guarantee stable local task identity, replay-safe local store effects, and fail-closed indeterminate outcomes; remote cancellation and exactly-once external effects require provider or tool cooperation.
+  - Runvil can guarantee stable local task identity, replay-safe local store effects, and fail-closed indeterminate outcomes; remote cancellation and exactly-once external effects require provider or tool cooperation.
 
 </decision-record>
 
@@ -336,9 +336,9 @@ Only focused tests and migrations required by those active changes belong to thi
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`, then doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; Workshop crates run separately on Windows: `cargo nextest run --locked -p workshop -p workshop-server`. On machines without cargo-nextest, the fallback is `cargo test --locked --workspace --exclude workshop --exclude workshop-server --all-features` and `cargo test --locked -p workshop -p workshop-server`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --all-targets --all-features -- -D warnings` (Workshop: `cargo clippy -p workshop -p workshop-server --all-targets -- -D warnings`).
 - Formatter check command: `cargo fmt --all --check`.
-- Test placement and naming conventions: unit tests live in `src` modules behind `#[cfg(test)]`; integration tests live in `tests/` as a `main.rs` test root pulling in per-area module files (gateway uses `tests/it/`, promptforge-core uses `tests/suite/` with `execution.rs`, `fanout.rs`, etc.); UI tests run with `npm test` inside `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`. Nextest profiles in `.config/nextest.toml`; tensor/FFI-heavy crates (promptforge-tool-picker, gateway-stt, gateway-stt-backend-whisper) are pinned to a `heavy` test group.
-- Directory map: `crates/` holds all Rust workspace members via the `crates/*` glob, named by product prefix (`gateway-*`, `promptforge-*`, `shared-*`, `workshop`, `workshop-server`, `product-integration-tests`); `crates/shared-ui` is a shared TypeScript+CSS package excluded from the Cargo workspace; `tools/` holds Node/PowerShell helper scripts (sidecar staging, MSRV validation); `guide/` holds the user guide; `prompts/` holds prompt assets; `vibe/` holds the architecture doc and working notes; `images/`, `local/` hold assets and local config; `.github/workflows/` holds CI; `.config/nextest.toml` configures nextest; `.cargo/config.toml` holds cargo config.
-- Component boundaries (per `vibe/archdoc.md` and root `AGENTS.md`): executor (`promptforge-core`) parses and runs pipelines and Lua agent programs and depends on parser, Lua, model-client, store, tools, gateway, and shared substrate; `gateway` crates own model routing, provider access, and local inference; `workshop`/`workshop-server` make up the desktop shell; `promptforge-store` is the run-scoped virtual filesystem; `promptforge-lua` is the Lua VM boundary; `shared-*` crates are the cross-product substrate. Dependency rules: PromptForge crates never depend on Gateway or Workshop crates; Gateway crates never depend on PromptForge or Workshop crates; Workshop crates never depend on Gateway crates.
+- Test placement and naming conventions: unit tests live in `src` modules behind `#[cfg(test)]`; integration tests live in `tests/` as a `main.rs` test root pulling in per-area module files (gateway uses `tests/it/`, runvil-core uses `tests/suite/` with `execution.rs`, `fanout.rs`, etc.); UI tests run with `npm test` inside `crates/workshop-server/ui` and `crates/gateway-config-ui/ui`. Nextest profiles in `.config/nextest.toml`; tensor/FFI-heavy crates (runvil-tool-picker, gateway-stt, gateway-stt-backend-whisper) are pinned to a `heavy` test group.
+- Directory map: `crates/` holds all Rust workspace members via the `crates/*` glob, named by product prefix (`gateway-*`, `runvil-*`, `shared-*`, `workshop`, `workshop-server`, `product-integration-tests`); `crates/shared-ui` is a shared TypeScript+CSS package excluded from the Cargo workspace; `tools/` holds Node/PowerShell helper scripts (sidecar staging, MSRV validation); `guide/` holds the user guide; `prompts/` holds prompt assets; `vibe/` holds the architecture doc and working notes; `images/`, `local/` hold assets and local config; `.github/workflows/` holds CI; `.config/nextest.toml` configures nextest; `.cargo/config.toml` holds cargo config.
+- Component boundaries (per `vibe/archdoc.md` and root `AGENTS.md`): executor (`runvil-core`) parses and runs pipelines and Lua agent programs and depends on parser, Lua, model-client, store, tools, gateway, and shared substrate; `gateway` crates own model routing, provider access, and local inference; `workshop`/`workshop-server` make up the desktop shell; `runvil-store` is the run-scoped virtual filesystem; `runvil-lua` is the Lua VM boundary; `shared-*` crates are the cross-product substrate. Dependency rules: Runvil crates never depend on Gateway or Workshop crates; Gateway crates never depend on Runvil or Workshop crates; Workshop crates never depend on Gateway crates.
 - Conventions summary: Rust edition 2024, MSRV 1.89 pinned via `rust-toolchain.toml`; workspace lints forbid `unsafe_code` (except explicitly owned FFI boundaries with documented invariants) and deny clippy `all`, `unwrap_used`, and `expect_used`; comments explain non-obvious constraints and cite upstream issue URLs for workarounds; behavior changes ship with behavior tests in the same change; Cargo features gate real constraints (toolchain, native builds), never product shape; long-running work reports through `shared-progress`; library and serve paths return errors instead of exiting.
 
 </project-survey>
@@ -353,7 +353,7 @@ Only focused tests and migrations required by those active changes belong to thi
 
 - Component: messages
 
-Extend message validation and typed request data in `crates/promptforge-lua/src/protocol.rs`: every role and content-part variant, visible text plus multiple normalized tool calls, correlated tool results carrying matching call IDs, and typed errors for malformed arrays. Unit tests live in the protocol module. Placement: first, because plain message records are the contract every later component consumes.
+Extend message validation and typed request data in `crates/runvil-lua/src/protocol.rs`: every role and content-part variant, visible text plus multiple normalized tool calls, correlated tool results carrying matching call IDs, and typed errors for malformed arrays. Unit tests live in the protocol module. Placement: first, because plain message records are the contract every later component consumes.
 
 </step-1>
 
@@ -363,7 +363,7 @@ Extend message validation and typed request data in `crates/promptforge-lua/src/
 
 - Component: messages
 
-Add `crates/promptforge-lua/src/messages/` mirroring the `models/` layout: `mod.rs` for namespace installation, the embedded pure-Lua builders shim, and `tests.rs`. `messages.new()` returns a normal numerically indexed table with optional chainable `system`, `user`, `assistant`, `tool`, and `append` methods; Engine validation keeps consuming the underlying plain records. Tests cover builder output and raw-array compatibility. Placement: with Step 1 because both ship the message substrate; sequenced after it because builders are validated against the protocol records.
+Add `crates/runvil-lua/src/messages/` mirroring the `models/` layout: `mod.rs` for namespace installation, the embedded pure-Lua builders shim, and `tests.rs`. `messages.new()` returns a normal numerically indexed table with optional chainable `system`, `user`, `assistant`, `tool`, and `append` methods; Engine validation keeps consuming the underlying plain records. Tests cover builder output and raw-array compatibility. Placement: with Step 1 because both ship the message substrate; sequenced after it because builders are validated against the protocol records.
 
 </step-2>
 
@@ -373,7 +373,7 @@ Add `crates/promptforge-lua/src/messages/` mirroring the `models/` layout: `mod.
 
 - Component: section-call
 
-Rename `execute(heading, input?)` to synchronous `call(heading, input?)` across the Lua bindings in `crates/promptforge-lua`, core execution and diagnostics in `crates/promptforge-core`, and affected tests, preserving current synchronous behavior and reserving path-based execution. Placement: the first behavior change per the decision record, before any section-invocation migration.
+Rename `execute(heading, input?)` to synchronous `call(heading, input?)` across the Lua bindings in `crates/runvil-lua`, core execution and diagnostics in `crates/runvil-core`, and affected tests, preserving current synchronous behavior and reserving path-based execution. Placement: the first behavior change per the decision record, before any section-invocation migration.
 
 </step-3>
 
@@ -383,7 +383,7 @@ Rename `execute(heading, input?)` to synchronous `call(heading, input?)` across 
 
 - Component: section-call
 
-Rename the bare `tool_call` global to `tools.call(alias_or_tool, arguments)` and remove colon handle methods so `models.infer(handle?, prompt)` and `tools.call` take an optional leading handle or Tool object. Consolidate the Lua tool bindings into `crates/promptforge-lua/src/tools/`: `mod.rs` for namespace installation (`always`, `add`, `add_local`, `call`, `calls`), `userdata.rs` for `LuaToolHandle` moved out of `handles.rs`, `decode.rs` for alias-or-Tool argument polymorphism and `add_local` schema building, and `tests.rs`; move tool installation out of `vm.rs`. Tests cover the renamed namespace and handle invocation forms. Placement: rides the same migration slice as the `execute` to `call` rename per the decision record.
+Rename the bare `tool_call` global to `tools.call(alias_or_tool, arguments)` and remove colon handle methods so `models.infer(handle?, prompt)` and `tools.call` take an optional leading handle or Tool object. Consolidate the Lua tool bindings into `crates/runvil-lua/src/tools/`: `mod.rs` for namespace installation (`always`, `add`, `add_local`, `call`, `calls`), `userdata.rs` for `LuaToolHandle` moved out of `handles.rs`, `decode.rs` for alias-or-Tool argument polymorphism and `add_local` schema building, and `tests.rs`; move tool installation out of `vm.rs`. Tests cover the renamed namespace and handle invocation forms. Placement: rides the same migration slice as the `execute` to `call` rename per the decision record.
 
 </step-4>
 
@@ -393,7 +393,7 @@ Rename the bare `tool_call` global to `tools.call(alias_or_tool, arguments)` and
 
 - Component: prose
 
-In `crates/promptforge-parser/src/build.rs` and `crates/promptforge-parser/src/fence.rs`, remove `loop_capable` from `Block::Prose`, accumulate pending Markdown after each section heading or ordinary Lua fence, reset the buffer at thematic breaks without including the break in `prose`, and drop the unpaired-prose error. Parser tests cover capture, reset at headings, Lua fences, and thematic breaks, leading and per-fence commentary exclusion, inert trailing commentary, and `promptforge: 0` acceptance.
+In `crates/runvil-parser/src/build.rs` and `crates/runvil-parser/src/fence.rs`, remove `loop_capable` from `Block::Prose`, accumulate pending Markdown after each section heading or ordinary Lua fence, reset the buffer at thematic breaks without including the break in `prose`, and drop the unpaired-prose error. Parser tests cover capture, reset at headings, Lua fences, and thematic breaks, leading and per-fence commentary exclusion, inert trailing commentary, and `runvil: 0` acceptance.
 
 </step-5>
 
@@ -403,7 +403,7 @@ In `crates/promptforge-parser/src/build.rs` and `crates/promptforge-parser/src/f
 
 - Component: prose
 
-In `crates/promptforge-core/src/execute/scheduler.rs`, substitution, and VM setup in `crates/promptforge-lua`, replace automatic prose advancement with installing the pending buffer as a fresh read-only lazy `prose` template before each Lua coroutine starts; evaluate every `{{ }}` substitution once on first runtime read, memoize the result, and discard unconsumed buffers at section end. Remove the `reply` register and all automatic result handoff across fall-through and `jump`; authors use `var`, store, or return values. Prose tests cover state mutation before first read, memoization after first read, no evaluation or error when never read, fresh evaluation for a second pair, assignment rejection, recursive `{{ prose }}` rejection, and `pcall` at the read site. Placement: one coupled behavior slice with Step 5, split only for parser versus executor test ownership.
+In `crates/runvil-core/src/execute/scheduler.rs`, substitution, and VM setup in `crates/runvil-lua`, replace automatic prose advancement with installing the pending buffer as a fresh read-only lazy `prose` template before each Lua coroutine starts; evaluate every `{{ }}` substitution once on first runtime read, memoize the result, and discard unconsumed buffers at section end. Remove the `reply` register and all automatic result handoff across fall-through and `jump`; authors use `var`, store, or return values. Prose tests cover state mutation before first read, memoization after first read, no evaluation or error when never read, fresh evaluation for a second pair, assignment rejection, recursive `{{ prose }}` rejection, and `pcall` at the read site. Placement: one coupled behavior slice with Step 5, split only for parser versus executor test ownership.
 
 </step-6>
 
@@ -413,7 +413,7 @@ In `crates/promptforge-core/src/execute/scheduler.rs`, substitution, and VM setu
 
 - Component: projection
 
-Add context projection across `crates/promptforge-core` execution and the `crates/promptforge-lua` protocol: validate roles, content parts, unique tool-call IDs, complete atomic call-result pairing, and provider-required alternation immediately before dispatch; compose multiple leading system messages per provider without mutating the source array; coalesce streaming fragments into one assistant result; strip metadata. Projection tests cover multiple leading system messages, same-role normalization, streaming coalescence, complete tool exchanges, abnormal-edge healing, and metadata stripping, plus malformed message, orphan tool record, duplicate call ID, and secret-exclusion regression tests. Placement: after messages, before public `models.loop`.
+Add context projection across `crates/runvil-core` execution and the `crates/runvil-lua` protocol: validate roles, content parts, unique tool-call IDs, complete atomic call-result pairing, and provider-required alternation immediately before dispatch; compose multiple leading system messages per provider without mutating the source array; coalesce streaming fragments into one assistant result; strip metadata. Projection tests cover multiple leading system messages, same-role normalization, streaming coalescence, complete tool exchanges, abnormal-edge healing, and metadata stripping, plus malformed message, orphan tool record, duplicate call ID, and secret-exclusion regression tests. Placement: after messages, before public `models.loop`.
 
 </step-7>
 
@@ -433,7 +433,7 @@ Add request precheck, provider-overflow detection, and compactor callback invoca
 
 - Component: models-loop
 
-Generalize the agent-only chat request and Rust tool loop in `crates/promptforge-lua/src/protocol.rs` and `crates/promptforge-core/src/execute/tool_loop.rs` into section-visible `models.loop(handle?, messages, compactor?)`: read the section's current `models.*` selection and model-visible tool scope at each call, run an explicit leading handle on its frozen binding at any time, append every assistant message and correlated tool result including terminal assistant text as the final record, invoke the selected compactor on overflow, preserve streaming, cancellation, and Harness metrics, and return nil. Tests cover one terminal turn with no tools, repeated model-tool rounds, automatic assistant and tool-result append, nil return, explicit terminal removal, local and bound tools, omitted-compactor default, `compactors.fail` invocation, typed context overflow, and explicit-handle calls on a frozen binding. Placement: after projection and the compactor surface, before input integration.
+Generalize the agent-only chat request and Rust tool loop in `crates/runvil-lua/src/protocol.rs` and `crates/runvil-core/src/execute/tool_loop.rs` into section-visible `models.loop(handle?, messages, compactor?)`: read the section's current `models.*` selection and model-visible tool scope at each call, run an explicit leading handle on its frozen binding at any time, append every assistant message and correlated tool result including terminal assistant text as the final record, invoke the selected compactor on overflow, preserve streaming, cancellation, and Harness metrics, and return nil. Tests cover one terminal turn with no tools, repeated model-tool rounds, automatic assistant and tool-result append, nil return, explicit terminal removal, local and bound tools, omitted-compactor default, `compactors.fail` invocation, typed context overflow, and explicit-handle calls on a frozen binding. Placement: after projection and the compactor surface, before input integration.
 
 </step-9>
 
@@ -443,7 +443,7 @@ Generalize the agent-only chat request and Rust tool loop in `crates/promptforge
 
 - Component: input-broker
 
-Generalize user input across `crates/promptforge-core` and `crates/promptforge-lua` into one broker with blocking, unavailable-fallback, and failure Host policies: direct `user_input()` returns `text, available` so the exact fallback sentence cannot be spoofed by identical human text, and the model-visible input tool adapts the same broker through the correlated tool protocol. Record waits and responses through existing Harness observation without adding the deferred replay contract; a section waiting on input retains its VM and message history. Tests cover direct input, the model-visible input tool, unavailable fallback, Host failure, and cancellation. Placement: after `models.loop`, which the model-visible input adapter runs inside.
+Generalize user input across `crates/runvil-core` and `crates/runvil-lua` into one broker with blocking, unavailable-fallback, and failure Host policies: direct `user_input()` returns `text, available` so the exact fallback sentence cannot be spoofed by identical human text, and the model-visible input tool adapts the same broker through the correlated tool protocol. Record waits and responses through existing Harness observation without adding the deferred replay contract; a section waiting on input retains its VM and message history. Tests cover direct input, the model-visible input tool, unavailable fallback, Host failure, and cancellation. Placement: after `models.loop`, which the model-visible input adapter runs inside.
 
 </step-10>
 
@@ -453,7 +453,7 @@ Generalize user input across `crates/promptforge-core` and `crates/promptforge-l
 
 - Component: input-broker
 
-Move Workshop's wait registry behind the generic input-broker interface. Rewrite the built-in chat agent from the standalone `chat.lua` program into an embedded `chat.md` Markdown prompt at `promptforge: 0` on the unified runtime: an explicit retained message list, the `user_input()` broker, and `models.loop(models.get(ui().selected_model), messages)` re-reading the selection each turn. Implement `ui().selected_model` as the deliberate minimal hack: MenuBus selection wiring in `workshop-server` only for the Agent-window session, nil in every other context, with `models.get` resolving an undeclared alias as a raw gateway catalog model id in that context. Integration tests run one Agent-window session through direct and model-visible user input, unavailable fallback, Host failure, cancellation, and complete message history without reconnect persistence. Placement: after the broker and `models.loop`, which it consumes.
+Move Workshop's wait registry behind the generic input-broker interface. Rewrite the built-in chat agent from the standalone `chat.lua` program into an embedded `chat.md` Markdown prompt at `runvil: 0` on the unified runtime: an explicit retained message list, the `user_input()` broker, and `models.loop(models.get(ui().selected_model), messages)` re-reading the selection each turn. Implement `ui().selected_model` as the deliberate minimal hack: MenuBus selection wiring in `workshop-server` only for the Agent-window session, nil in every other context, with `models.get` resolving an undeclared alias as a raw gateway catalog model id in that context. Integration tests run one Agent-window session through direct and model-visible user input, unavailable fallback, Host failure, cancellation, and complete message history without reconnect persistence. Placement: after the broker and `models.loop`, which it consumes.
 
 </step-11>
 
@@ -463,7 +463,7 @@ Move Workshop's wait registry behind the generic input-broker interface. Rewrite
 
 - Component: migration
 
-Migrate only fixtures, shipped prompts, public APIs, README material, and language and agent guides touched by the active core to `promptforge: 0`: `call`, `tools.call`, namespace-only handle invocation, explicit lazy prose, `reply` removal, plain message arrays or builders, `models.infer`, `models.loop`, `compactors.fail`, call-time model and tool selection, and generic input. Verify output parity on migrated fixtures and run one finite pipeline end to end through explicit lazy prose, `models.infer`, `models.loop`, message builders, tool dispatch, `reply` removal, and synchronous `call`. Finish with the project survey checks for the active slice: `cargo fmt --all --check`, Clippy with `-D warnings`, affected crate tests, doctests, architecture checks, and benchmarks for message building, projection, `models.loop`, and the `compactors.fail` path. Placement: last, because it consumes every active component.
+Migrate only fixtures, shipped prompts, public APIs, README material, and language and agent guides touched by the active core to `runvil: 0`: `call`, `tools.call`, namespace-only handle invocation, explicit lazy prose, `reply` removal, plain message arrays or builders, `models.infer`, `models.loop`, `compactors.fail`, call-time model and tool selection, and generic input. Verify output parity on migrated fixtures and run one finite pipeline end to end through explicit lazy prose, `models.infer`, `models.loop`, message builders, tool dispatch, `reply` removal, and synchronous `call`. Finish with the project survey checks for the active slice: `cargo fmt --all --check`, Clippy with `-D warnings`, affected crate tests, doctests, architecture checks, and benchmarks for message building, projection, `models.loop`, and the `compactors.fail` path. Placement: last, because it consumes every active component.
 
 </step-12>
 

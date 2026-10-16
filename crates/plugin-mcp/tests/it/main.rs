@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fixture::Fixture;
-use promptforge_plugin::testing::TestCall;
-use promptforge_plugin::{
+use runvil_plugin::testing::TestCall;
+use runvil_plugin::{
     HostServices, OutputTrust, Plugin, PluginId, ServiceKey, TOKIO_RUNTIME, ToolError,
     ToolErrorKind, ToolId,
 };
@@ -63,14 +63,14 @@ async fn call(plugin: &Arc<dyn Plugin>, tool: &str, args: Value) -> Result<Strin
 }
 
 #[test]
-fn the_package_is_promptforge_mcp_with_no_prelude_and_no_needs() {
-    assert_eq!(plugin_mcp::PACKAGE.name, "promptforge/mcp");
+fn the_package_is_runvil_mcp_with_no_prelude_and_no_needs() {
+    assert_eq!(plugin_mcp::PACKAGE.name, "runvil/mcp");
     assert!(plugin_mcp::PACKAGE.prelude.is_none());
     assert!(plugin_mcp::PACKAGE.needs.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_initialize_request_names_promptforge_and_declares_no_capabilities() {
+async fn the_initialize_request_names_runvil_and_declares_no_capabilities() {
     let fixture = Fixture::start().await;
     let plugin = install(&fixture, &json!({}));
     ready(&plugin).await;
@@ -83,7 +83,7 @@ async fn the_initialize_request_names_promptforge_and_declares_no_capabilities()
         .initializes
         .clone();
     assert_eq!(initializes.len(), 1);
-    assert_eq!(initializes[0]["clientInfo"]["name"], "PromptForge");
+    assert_eq!(initializes[0]["clientInfo"]["name"], "Runvil");
     assert_eq!(initializes[0]["capabilities"], json!({}));
 }
 
@@ -221,7 +221,7 @@ async fn a_missing_runtime_service_fails_construct_naming_it() {
     .err()
     .expect("no runtime is a failure");
     assert!(
-        error.to_string().contains("promptforge/tokio-runtime"),
+        error.to_string().contains("runvil/tokio-runtime"),
         "{error}"
     );
 }

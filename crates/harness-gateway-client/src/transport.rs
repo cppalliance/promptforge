@@ -11,7 +11,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
-use promptforge::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
+use runvil::model::{Completion, CompletionError, CompletionOptions, Message, ToolSchema};
 
 use crate::config::{GatewayConfigError, GatewayEndpoint, SecretString};
 use crate::failure::{elapsed, transport_failure, unavailable};
@@ -171,8 +171,8 @@ impl GatewayChat {
 
     /// Builds a client from environment variables.
     ///
-    /// - `PROMPTFORGE_GATEWAY_URL` holds the gateway URL. It is required.
-    /// - `PROMPTFORGE_GATEWAY_API_KEY` holds the gateway's shared bearer key.
+    /// - `RUNVIL_GATEWAY_URL` holds the gateway URL. It is required.
+    /// - `RUNVIL_GATEWAY_API_KEY` holds the gateway's shared bearer key.
     ///   An empty value counts as missing. The key is optional when the
     ///   URL's host is loopback (`127.0.0.1`, `::1`, `localhost`) and
     ///   required for every other host. By default, a loopback gateway
@@ -185,10 +185,10 @@ impl GatewayChat {
     /// `Unavailable`-kind error when the gateway answers 401.
     ///
     /// # Errors
-    /// Returns a [`GatewayConfigError`] when `PROMPTFORGE_GATEWAY_URL` is
+    /// Returns a [`GatewayConfigError`] when `RUNVIL_GATEWAY_URL` is
     /// missing or invalid, when either variable is set to a value that is not
     /// valid Unicode, or when the URL's host is not loopback (a LAN or
-    /// remote gateway) and `PROMPTFORGE_GATEWAY_API_KEY` is missing or empty.
+    /// remote gateway) and `RUNVIL_GATEWAY_API_KEY` is missing or empty.
     pub fn from_env() -> Result<GatewayChat, GatewayConfigError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
@@ -213,7 +213,7 @@ impl GatewayChat {
     ///
     /// The returned [`Completion`] holds the reassembled turn, the metadata
     /// parsed from the stream's summary chunk, and a
-    /// [`ClientTiming`](promptforge::metrics::ClientTiming) measured on this
+    /// [`ClientTiming`](runvil::metrics::ClientTiming) measured on this
     /// client's own clock: time to first token, mean inter-token latency,
     /// and end-to-end time.
     ///
@@ -322,17 +322,17 @@ impl GatewayChat {
 fn from_env_with(
     lookup: impl Fn(&str) -> Result<Option<String>, GatewayConfigError>,
 ) -> Result<GatewayChat, GatewayConfigError> {
-    let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
-        .ok_or_else(|| GatewayConfigError::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
+    let base_url = lookup("RUNVIL_GATEWAY_URL")?
+        .ok_or_else(|| GatewayConfigError::MissingEnv("RUNVIL_GATEWAY_URL".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url)?;
-    let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
+    let key = lookup("RUNVIL_GATEWAY_API_KEY")?
         .map(SecretString::new)
         .and_then(Result::ok);
     match key {
         Some(key) => Ok(GatewayChat::new(endpoint, key)),
         None if endpoint.is_loopback() => Ok(GatewayChat::keyless(endpoint)),
         None => Err(GatewayConfigError::MissingEnv(
-            "PROMPTFORGE_GATEWAY_API_KEY".into(),
+            "RUNVIL_GATEWAY_API_KEY".into(),
         )),
     }
 }

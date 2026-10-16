@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use harness_runner::effect_loop::drive_run;
 use harness_runner::recorder::{MemoryRecorder, Record, RecordKind, RunId, RunOutcome};
-use promptforge::cancel::CancelHandle;
-use promptforge::vfs::VfsRef;
+use runvil::cancel::CancelHandle;
+use runvil::vfs::VfsRef;
 use serde_json::json;
 
 use super::{answers, assert_one_answer_per_effect, begun_log, kinds};

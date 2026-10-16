@@ -1,7 +1,7 @@
 //! The chat-completions request body: the one JSON shape every transport
 //! sends for a round, built from the wire types and the frozen options.
 
-use promptforge::model::{CompletionOptions, Message, ToolSchema};
+use runvil::model::{CompletionOptions, Message, ToolSchema};
 use serde_json::Value;
 
 /// Builds the JSON body of a streaming chat-completions request.

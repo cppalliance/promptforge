@@ -3,7 +3,7 @@
 //! cannot express. Only a value that passed [`SearchRequest::from_args`]
 //! becomes the provider's [`SearchQuery`].
 
-use promptforge_plugin::{ToolError, ToolErrorKind};
+use runvil_plugin::{ToolError, ToolErrorKind};
 
 use super::{MAX_COUNT, MAX_DOMAINS, MAX_QUERY_LEN, MAX_STRING_LEN};
 use crate::provider::{Freshness, SafeSearch, SearchQuery};

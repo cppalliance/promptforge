@@ -6,7 +6,7 @@ todos:
     content: "D1-1: remove Environment; add the RunContext builders tools, plugins, and preludes and RunContext::prepare; rename the getter RunContext::tools to catalog; Harness composes the context in prepare.rs; migrate every caller and test helper, and rename the tests, helpers, and docs that refer to the removed type; RETIRED_SEEDS gains Environment; bless the public API"
     status: completed
   - id: mcp-retry
-    content: "plugin-mcp: after a failed start, retry in the background (1 s doubling to 60 s) until the server answers; runs never wait after the first attempt; switchable fixture flag and tests; crate docs; the Plugin trait's ready docs in promptforge-plugin say a failure holds for that run, not forever"
+    content: "plugin-mcp: after a failed start, retry in the background (1 s doubling to 60 s) until the server answers; runs never wait after the first attempt; switchable fixture flag and tests; crate docs; the Plugin trait's ready docs in runvil-plugin say a failure holds for that run, not forever"
     status: completed
 isProject: false
 ---
@@ -15,7 +15,7 @@ isProject: false
 
 ### Context for a fresh reader
 
-- Repository: `c:\Users\Vinnie\cursor\promptforge` (git). Paths are relative to it.
+- Repository: `c:\Users\Vinnie\cursor\runvil` (git). Paths are relative to it.
 - Baseline: `7502bf8b4` (`Close plan: plugin-offering`), which is also `origin/master`. Citations were checked there; search by name if a line has moved. "Today" and "as today" in this plan mean the code at this commit.
 - Target work analyzed: `2286da760..7502bf8b4`, eight commits:
   - the plugin-offering plan (`vibe/2026-10-13-1-plugin-offering.md`): `a01be9154`, `6a4e414bc`, `1c82e5d51`, `1ec8b5215`, `ba6a741f4`, `7502bf8b4`
@@ -25,7 +25,7 @@ isProject: false
 - Shell: PowerShell on Windows.
   - `$env:NAME='value'; <command>` sets the variable for the rest of the session, not only that command. Clear it with `Remove-Item Env:NAME` when a later command must not see it.
   - Run cargo commands one at a time, because they share the target directory's lock. Don't append `2>&1` to them, because PowerShell turns cargo's stderr into error records. Judge a cargo step by its result lines and `$LASTEXITCODE`.
-- Before editing, read the root `AGENTS.md` and `crates/promptforge-internal/engine/AGENTS.md`. The Harness, `plugin-mcp`, and `promptforge-plugin` crates have no `AGENTS.md` of their own.
+- Before editing, read the root `AGENTS.md` and `crates/runvil-internal/engine/AGENTS.md`. The Harness, `plugin-mcp`, and `runvil-plugin` crates have no `AGENTS.md` of their own.
 - Plan record and commits:
   - When execution starts, copy this plan into `vibe/` under the next free `YYYY-MM-DD-N-remove-environment.md` name for that day, and create `vibe/ACTIVE` naming it. Mark each step `[completed]` in that copy as it lands.
   - Each commit message has a one-line summary, a body, `Design:` lines in the format the plugin-offering commits use (`git log -6 --format=%B 7502bf8b4`), and a `Plan: vibe/<file>` trailer.
@@ -33,7 +33,7 @@ isProject: false
   - Close with a commit `Close plan: remove-environment` that carries the same trailer. Nothing is pushed.
 - Terms:
   - Engine, Harness, Host, and Plugin are as `AGENTS.md` defines them.
-  - *`RunContext`*: the Engine's per-run input object (`crates/promptforge-internal/engine/src/execute/config.rs`), built with `RunContext::new` and builder methods such as `model` and `vfs`.
+  - *`RunContext`*: the Engine's per-run input object (`crates/runvil-internal/engine/src/execute/config.rs`), built with `RunContext::new` and builder methods such as `model` and `vfs`.
   - *prepare*: the step before a run is built. It binds the prompt's model roles to the context's current model and returns a `Requirements` report that the caller merges with its own and checks for a refusal.
   - *stage 2*: the next stage of the late-bound Plugin offering design, which follows the plugin-offering plan. It isn't part of this plan.
   - *`HostContext`*: the Harness's long-lived object. The Host builds it once at startup, installs every Plugin into it permanently, and every run shares it (`crates/harness-internal/runner/src/host.rs` lines 1-17). It isn't the Engine's `Environment`, and this plan doesn't change it.
@@ -72,8 +72,8 @@ isProject: false
 
 - Debt added: D1-1 (worsened), from `ba6a741f4`.
   - Evidence:
-    - `crates/promptforge-internal/engine/src/execute/environment.rs` lines 21-22: "It is safe to share across concurrent runs (it is `Sync`). Everything that can change per run sits on the [`RunContext`]."
-    - The same commit added `Environment::plugins` (lines 71-96), whose doc says "Sets the run's roster", and listed it in `crates/promptforge/public-api.txt` line 391.
+    - `crates/runvil-internal/engine/src/execute/environment.rs` lines 21-22: "It is safe to share across concurrent runs (it is `Sync`). Everything that can change per run sits on the [`RunContext`]."
+    - The same commit added `Environment::plugins` (lines 71-96), whose doc says "Sets the run's roster", and listed it in `crates/runvil/public-api.txt` line 391.
     - The sharing rule is the 2026-09-13 decision in `vibe/2026-09/2026-09-13-1-capabilities-global-naming.md` lines 600 and 634.
   - Relationship to the target work:
     - The roster is per-run: the Harness builds it from each run's services and `ready` results (`crates/harness-internal/runner/src/host-run.rs` lines 111-134).
@@ -82,7 +82,7 @@ isProject: false
   - Impact: an embedder that follows the doc and shares one `Environment` hands every run the catalog, roster, and preludes of the run it was built for.
   - Target state: `Environment` no longer exists. Every run input sits on `RunContext`, and `RunContext::prepare` binds the prompt's model roles.
 - Cheap fixes: none.
-- Exposed pre-existing debt, reported here and not remediated: D1-2. No gate builds the Lua crate's docs without features or with private items, so test-gated and private-module doc links break unnoticed. `ba4a63beb` fixed three; `6c818272f` fixed the same kinds in the Engine, and `9c96f123e` then gated only `promptforge-engine` (`.github/workflows/ci.yml` lines 126-138).
+- Exposed pre-existing debt, reported here and not remediated: D1-2. No gate builds the Lua crate's docs without features or with private items, so test-gated and private-module doc links break unnoticed. `ba4a63beb` fixed three; `6c818272f` fixed the same kinds in the Engine, and `9c96f123e` then gated only `runvil-engine` (`.github/workflows/ci.yml` lines 126-138).
 - Rejected candidates, 22 in all:
   - 9 residual-but-acceptable: the plan's intended design, or a cheap local refactor with no consequence shown.
   - 7 weak or speculative: no caller reaches them.
@@ -113,14 +113,14 @@ isProject: false
 Nearly everything is a move. `RunContext` already has the `tools`, `roster`, and `preludes` fields and the `model_bindings` field that `prepare` fills (`config.rs` lines 87-110). `Environment::prepare` only copied its own three fields into the first three and called `fill_model_bindings` for the last. Moving the three builders and `prepare` onto `RunContext` deletes the copy step and the type. The Harness already computes all three values on its per-run snapshot, so it hands them to the context directly. The one new piece of logic is the MCP retry loop.
 
 - Engine:
-  - Delete `crates/promptforge-internal/engine/src/execute/environment.rs` (173 lines).
-  - `crates/promptforge-internal/engine/src/execute.rs`: drop `mod environment;` (line 42) and `pub use environment::Environment;` (line 59), and rewrite the module-map line (line 15) to say `config` holds `RunContext` and its `prepare`.
-  - `crates/promptforge-internal/engine/src/lib.rs` line 37: drop `Environment` from the re-export list.
-  - `crates/promptforge-internal/engine/src/execute/config.rs` (367 lines, to about 450):
+  - Delete `crates/runvil-internal/engine/src/execute/environment.rs` (173 lines).
+  - `crates/runvil-internal/engine/src/execute.rs`: drop `mod environment;` (line 42) and `pub use environment::Environment;` (line 59), and rewrite the module-map line (line 15) to say `config` holds `RunContext` and its `prepare`.
+  - `crates/runvil-internal/engine/src/lib.rs` line 37: drop `Environment` from the re-export list.
+  - `crates/runvil-internal/engine/src/execute/config.rs` (367 lines, to about 450):
     - Add the builders `tools`, `plugins`, and `preludes` and the method `prepare` to `impl RunContext`, with the bodies and docs moved from `Environment` (see Declarations).
     - Add the imports `crate::parser::Prompt`, `super::fill::fill_model_bindings`, and `super::requirements::{Requirements, UnavailablePlugin}`.
     - The catalog builder takes the field's name, `tools`, the way `model`, `vfs`, and the other builders do, so every migrated call keeps `.tools(c)` and only moves to the context.
-    - The getter `tools(&self) -> &ToolCatalog` (lines 291-300) is renamed `catalog(&self) -> &ToolCatalog`, following the `vfs`/`vfs_handle` and `model`/`current_model` pairs. Its known callers are `crates/promptforge/tests/suite/prepare.rs` lines 295 and 314, and the compiler finds any other.
+    - The getter `tools(&self) -> &ToolCatalog` (lines 291-300) is renamed `catalog(&self) -> &ToolCatalog`, following the `vfs`/`vfs_handle` and `model`/`current_model` pairs. Its known callers are `crates/runvil/tests/suite/prepare.rs` lines 295 and 314, and the compiler finds any other.
     - Rewrite the type doc (lines 23-29). Update every doc that links `Environment::prepare` to link `RunContext::prepare`: the field docs (lines 87-110), `model` (line 223), `vfs` (line 240), `model_bindings` (line 283), and the renamed getter (line 293), which now says the `tools` builder sets the catalog.
   - Doc links that name `Environment`, each rewritten to the matching `RunContext` item:
     - `execute/bindings.rs` line 10
@@ -128,12 +128,12 @@ Nearly everything is a move. `RunContext` already has the `tools`, `roster`, and
     - `execute/run.rs` line 100
     - `execute/requirements.rs` lines 11, 23, 60, and 154
     - `test_support/fixture.rs` line 100
-  - `crates/promptforge-internal/engine/src/test_support.rs`: `run_with_fixture` (lines 131-156) drops its `env: &Environment` parameter and calls `ctx.prepare(prompt)`. Its doc (lines 134-136) says the run offers the context's catalog, set with `RunContext::tools`.
-- Facade, `crates/promptforge/src/lib.rs`:
-  - Drop `pub use promptforge_engine::Environment;` (line 13).
+  - `crates/runvil-internal/engine/src/test_support.rs`: `run_with_fixture` (lines 131-156) drops its `env: &Environment` parameter and calls `ctx.prepare(prompt)`. Its doc (lines 134-136) says the run offers the context's catalog, set with `RunContext::tools`.
+- Facade, `crates/runvil/src/lib.rs`:
+  - Drop `pub use runvil_engine::Environment;` (line 13).
   - Lines 8-9 say: before the run starts, the caller puts the tools a run may offer on its [`RunContext`], and [`RunContext::prepare`] binds the prompt's model roles.
-  - `crates/promptforge/public-api.txt` loses `Environment`, its five functions, and the getter `RunContext::tools(&self)`. It gains the builders `RunContext::tools(self, ToolCatalog)`, `RunContext::plugins`, and `RunContext::preludes`, the method `RunContext::prepare`, and the getter `RunContext::catalog(&self)`. Regenerate it with `cargo +nightly-2026-09-05 xtask api --bless`.
-- Guard, `crates/build-xtask/src/engine_guards.rs`: `RETIRED_SEEDS` gains `Environment`, and its length goes from 31 to 32. The scan matches whole identifiers in live Engine source only, meaning the `promptforge` facade, `promptforge-plugin`, and every crate under `crates/promptforge-internal/`, after stripping comments, string literals, and test code (`crates/build-xtask/src/engine_guards.rs` lines 1-10, `crates/build-xtask/src/retired_symbols.rs` lines 1-10). So prose such as the refusal notice's "the environment cannot satisfy this prompt" can't trip it, and no live code in those crates names `Environment` once the type is gone.
+  - `crates/runvil/public-api.txt` loses `Environment`, its five functions, and the getter `RunContext::tools(&self)`. It gains the builders `RunContext::tools(self, ToolCatalog)`, `RunContext::plugins`, and `RunContext::preludes`, the method `RunContext::prepare`, and the getter `RunContext::catalog(&self)`. Regenerate it with `cargo +nightly-2026-09-05 xtask api --bless`.
+- Guard, `crates/build-xtask/src/engine_guards.rs`: `RETIRED_SEEDS` gains `Environment`, and its length goes from 31 to 32. The scan matches whole identifiers in live Engine source only, meaning the `runvil` facade, `runvil-plugin`, and every crate under `crates/runvil-internal/`, after stripping comments, string literals, and test code (`crates/build-xtask/src/engine_guards.rs` lines 1-10, `crates/build-xtask/src/retired_symbols.rs` lines 1-10). So prose such as the refusal notice's "the environment cannot satisfy this prompt" can't trip it, and no live code in those crates names `Environment` once the type is gone.
 - Harness:
   - `crates/harness-internal/runner/src/host.rs`: `begin_run` (lines 174-206) stops building an `Environment` and returns `(HostRunContext, Requirements)`. Drop `Environment` from the import on line 26. Its doc says the snapshot gives the run's catalog, roster, and declared preludes and performs the run's tool calls.
   - `crates/harness-internal/runner/src/host-run.rs`: `catalog`, `roster`, and `preludes` (lines 92, 114, and 138) widen from `pub(super)` to `pub(crate)` so `prepare.rs` can call them. Their bodies don't change.
@@ -150,7 +150,7 @@ Nearly everything is a move. `RunContext` already has the `tools`, `roster`, and
     - `run` (line 280) and `run_with_context` (line 336) build `Environment::new()` themselves (lines 287 and 340). `run` puts the catalog on the context with `ctx.tools(catalog)` in place of `env.tools(catalog)` (line 298), and both stop passing an environment to `run_with_fixture`.
     - The stale `Environment::run` doc at line 217 names `run_with_fixture`.
   - `bench_env` in `engine/benches/models_loop.rs` (lines 117-121) returns an empty `Environment` and goes, along with its two uses (lines 133 and 171) and `Environment` in the import on line 26.
-  - The `Send + Sync` assertions for `Environment` go: `crates/promptforge/tests/suite/auto_traits.rs` line 22 (and `Environment` in its import on line 8) and `execute/tests/context.rs` line 45.
+  - The `Send + Sync` assertions for `Environment` go: `crates/runvil/tests/suite/auto_traits.rs` line 22 (and `Environment` in its import on line 8) and `execute/tests/context.rs` line 45.
   - The 13 `begin_run` destructurings in `crates/harness-internal/runner/src/host-tests.rs` drop `_env`. The prelude tests (starting at lines 266, 331, and 354, with their `run.preludes` calls at lines 274, 345-346, and 365-366) keep calling `run.preludes(&prompt)`.
 - Stale names and prose. Each names the removed type, its old `run`, or its copy step, and the compiler doesn't flag it. Assertions don't change:
   - facade `tests/suite/prepare.rs`: `prepare_copies_the_caller_supplied_catalog_onto_the_context` (line 279) becomes `a_prepared_context_keeps_the_caller_supplied_catalog`, since `prepare` no longer copies anything.
@@ -179,9 +179,9 @@ Nearly everything is a move. `RunContext` already has the `tools`, `roster`, and
   - `crates/plugin-mcp/src/server.rs`: only the `State` doc (lines 26-27) changes. `ready` already waits only while the state is `Starting`, so after the first attempt every run's `ready` answers at once.
   - `crates/plugin-mcp/src/lib.rs`: the crate doc (lines 26-30) replaces "A server that fails to start is unavailable, with the reason" with: a server that fails to start is unavailable to each run that starts while it is down, with the reason, and the Plugin keeps trying in the background, waiting 1 second after the first failure and doubling up to a minute, so a later run offers its tools once it answers.
   - The retry loop needs no drop check: `Server`'s `Drop` (`server.rs` lines 126-132) aborts the connection task, which ends a loop that is sleeping or mid-attempt.
-- `promptforge-plugin`, docs only (see Declarations):
-  - `crates/promptforge-plugin/src/plugin.rs`: the `ready` doc's summary (lines 38-39), its first invariant (lines 49-50), and its `# Errors` section (lines 59-61) stop saying an `Err` means the Plugin never will be ready. The invariant that `ready` answers at once after its first resolution unless the Plugin's state has changed (lines 54-56) already allows a recovery and stays.
-  - `crates/promptforge-plugin/src/lib.rs`: the crate doc's `ready` bullet (lines 37-40) follows.
+- `runvil-plugin`, docs only (see Declarations):
+  - `crates/runvil-plugin/src/plugin.rs`: the `ready` doc's summary (lines 38-39), its first invariant (lines 49-50), and its `# Errors` section (lines 59-61) stop saying an `Err` means the Plugin never will be ready. The invariant that `ready` answers at once after its first resolution unless the Plugin's state has changed (lines 54-56) already allows a recovery and stays.
+  - `crates/runvil-plugin/src/lib.rs`: the crate doc's `ready` bullet (lines 37-40) follows.
   - The Harness docs that say a Plugin whose `ready` fails is unavailable to that run (`host.rs` line 11, `prepare.rs` line 197) are already accurate and don't change.
 - Constraints:
   - Every `.rs` file stays under 500 lines.
@@ -190,7 +190,7 @@ Nearly everything is a move. `RunContext` already has the `tools`, `roster`, and
 
 ### Declarations
 
-`crates/promptforge-internal/engine/src/execute/config.rs`, the `RunContext` type doc after:
+`crates/runvil-internal/engine/src/execute/config.rs`, the `RunContext` type doc after:
 
 ```rust
 /// The inputs for one run of a prompt.
@@ -271,7 +271,7 @@ pub fn prepare(mut self, prompt: &Prompt) -> (RunContext, Requirements) {
 
 Unchanged and reused: the fields `tools: ToolCatalog`, `roster: BTreeMap<PluginId, Option<String>>`, `preludes: Vec<Prelude>`, and `model_bindings: ModelBindings` on `RunContext`, `fill_model_bindings`, `Requirements`, `UnavailablePlugin`, and `bound_tool_set` (`context-bound.rs`), which reads the context's fields as today.
 
-`crates/promptforge-internal/engine/src/test_support.rs`, after:
+`crates/runvil-internal/engine/src/test_support.rs`, after:
 
 ```rust
 pub async fn run_with_fixture(
@@ -396,7 +396,7 @@ pub(crate) async fn run(
 /// attempt succeeds, and a `Ready` one stays `Ready`.
 ```
 
-`crates/promptforge-plugin/src/plugin.rs`, the changed parts of the `ready` doc after. Lines 41-45 and the other invariants stay:
+`crates/runvil-plugin/src/plugin.rs`, the changed parts of the `ready` doc after. Lines 41-45 and the other invariants stay:
 
 ```rust
 /// Resolves once the Plugin's tool list is complete, or with the
@@ -417,7 +417,7 @@ pub(crate) async fn run(
 /// it connects to refuses it or is down.
 ```
 
-`crates/promptforge-plugin/src/lib.rs`, the `ready` bullet after:
+`crates/runvil-plugin/src/lib.rs`, the `ready` bullet after:
 
 ```rust
 //! - [`Plugin::ready`] resolves `Ok` once [`Plugin::tools`] is complete,
@@ -452,14 +452,14 @@ The check at line 154 reads `shared.reject.load(Ordering::SeqCst)`, and `spawn` 
 ## Testing Plan
 
 - D1-1:
-  - New, in `crates/promptforge/tests/suite/plugins.rs`: `two_runs_whose_contexts_carry_different_rosters_each_see_their_own`. Two contexts prepare the same prompt, which returns `tostring(plugins.get('kit') ~= nil)`.
+  - New, in `crates/runvil/tests/suite/plugins.rs`: `two_runs_whose_contexts_carry_different_rosters_each_see_their_own`. Two contexts prepare the same prompt, which returns `tostring(plugins.get('kit') ~= nil)`.
     - The first carries `.plugins(vec![kit], vec![])` and returns `"true"`.
     - The second carries `.plugins(vec![], vec![UnavailablePlugin::new(kit, "down")])` and returns `"false"`.
     - Drive each run with the same `step` loop as the prelude test in that file. The prompt declares no Plugins and calls no tools, so the run finishes without effects.
     - This fails to compile at the baseline, which has no `RunContext::plugins`.
   - Changed by the migration only, with their assertions kept:
     - every caller and helper the Technical Design lists, and every test it renames under "Stale names and prose"
-    - `a_prelude_on_the_environment_defines_a_function_the_section_calls` in `crates/promptforge/tests/suite/plugins.rs`, renamed `a_prelude_on_the_context_defines_a_function_the_section_calls`, along with the module doc (lines 1-3)
+    - `a_prelude_on_the_environment_defines_a_function_the_section_calls` in `crates/runvil/tests/suite/plugins.rs`, renamed `a_prelude_on_the_context_defines_a_function_the_section_calls`, along with the module doc (lines 1-3)
     - the facade's `tests/suite/prepare.rs` and the Engine's `execute/tests/suite/prepare.rs`, which now prepare through `RunContext::prepare` and keep their model-binding and requirements assertions. The facade file's two catalog reads (lines 295 and 314) become `ctx.catalog().tools()`. They now pin that `prepare` leaves the caller's catalog in place.
   - Removed: the `Environment` lines of the `Send + Sync` assertions. `RunContext`'s own lines stay.
   - Regression, passing unchanged:
@@ -479,14 +479,14 @@ The check at line 154 reads `shared.reject.load(Ordering::SeqCst)`, and `spawn` 
   - Passing unchanged: every other `plugin-mcp` test, including `dropping_the_plugin_ends_the_session_...` (line 250).
 - Exit checks:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, which includes `build-xtask`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
-  - The Workshop tests and the Workshop clippy need the gateway sidecar staged: `cargo build --locked -p gateway --no-default-features` and `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe` before them, and `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` after them, always.
+  - The Workshop tests and the Workshop clippy need the gateway sidecar staged: `cargo build --locked -p gateway --no-default-features` and `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe` before them, and `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` after them, always.
   - With `$env:CARGO_BUILD_WARNINGS='deny'`: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`, `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, and `cargo check -p gateway --no-default-features`
   - `cargo fmt --all --check`
-  - With `$env:RUSTDOCFLAGS='-D warnings'`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+  - With `$env:RUSTDOCFLAGS='-D warnings'`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
   - `cargo +nightly-2026-09-05 xtask api --check`, after the bless
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
-  - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/promptforge crates/promptforge-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing
-  - `rg -n -e "fails to start is unavailable, with the reason" -e "never will be" -e "will never offer" crates/plugin-mcp crates/promptforge-plugin` finds nothing
+  - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/runvil crates/runvil-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing
+  - `rg -n -e "fails to start is unavailable, with the reason" -e "never will be" -e "will never offer" crates/plugin-mcp crates/runvil-plugin` finds nothing
 
 </verification-contract>
 <decision-record>
@@ -542,38 +542,38 @@ The Engine's `Environment` goes. Its three per-run inputs and its `prepare` step
 ## Project Survey
 
 - Status: complete
-- Build command: `cargo build --locked` builds only the gateway (package `gateway` in `crates/gateway/app`, binary `promptforge-gateway`), the workspace's one default member. Any other crate builds with `cargo build --locked -p <package>`, and the desktop app with `cargo build --locked -p workshop`; `cargo workshop` (alias for `build-workshop`) builds the gateway, stages it as the Tauri sidecar, builds Workshop, and removes the staged copy. Crate build scripts bundle the TypeScript UIs, so a fresh checkout first needs `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` (both `node_modules` trees exist on this machine). Toolchain is `stable` per `rust-toolchain.toml`; Windows links with `rust-lld` and the static CRT per `.cargo/config.toml`.
+- Build command: `cargo build --locked` builds only the gateway (package `gateway` in `crates/gateway/app`, binary `runvil-gateway`), the workspace's one default member. Any other crate builds with `cargo build --locked -p <package>`, and the desktop app with `cargo build --locked -p workshop`; `cargo workshop` (alias for `build-workshop`) builds the gateway, stages it as the Tauri sidecar, builds Workshop, and removes the staged copy. Crate build scripts bundle the TypeScript UIs, so a fresh checkout first needs `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` (both `node_modules` trees exist on this machine). Toolchain is `stable` per `rust-toolchain.toml`; Windows links with `rust-lld` and the static CRT per `.cargo/config.toml`.
 - Focused test command pattern: `cargo nextest run --locked -p <package> --all-features <test-name-substring>`; leave out `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. A single JS test file runs with `node --test <path-to-file.mjs>`.
 - Component test command pattern: `cargo nextest run --locked -p <package> --all-features`, with the same `--all-features` exception for the three Workshop crates. CI also runs `cargo nextest run --locked -p workshop-server --features headless` and `cargo nextest run --locked -p workshop-workspace --all-features` on their own. Workshop UI packages (npm workspaces `ui`, `look`, `platform`): `npm test --workspaces --if-present` and `npm run typecheck --workspaces --if-present` from `crates/workshop`; gateway config UI: `npm test` and `npm run typecheck` from `crates/gateway/config-ui/ui`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, then `node --test crates/workshop/ui/test/docs-claims.mjs`. The workspace run includes `build-xtask`, whose tests are the boundary and structural checks (`cargo xtask tidy` prints the same report on demand); its nightly-only fixtures run with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`. `.config/nextest.toml` sets a 60-second slow timeout with termination after three periods, a 250 ms leak timeout, and a `heavy` test group for `gateway-stt` and `gateway-stt-backend-whisper`.
 - Linter command: with `CARGO_BUILD_WARNINGS=deny` (PowerShell: `$env:CARGO_BUILD_WARNINGS='deny'`), run `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`, then `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, plus `cargo check -p gateway --no-default-features` for the headless build shape. Never run a standalone `cargo check --workspace` beside clippy. Supply chain: `cargo deny check`, `cargo audit`, and `cargo hakari verify` (all three installed here). The pre-push hook runs docs-claims, the headless check, workspace clippy, and `cargo deny --log-level error check`.
 - Formatter check command: `cargo fmt --all --check` (rustfmt `style_edition = "2024"`; `core.hooksPath` is `.githooks`, whose pre-commit hook runs it).
-- Docs command: with `RUSTDOCFLAGS="-D warnings"` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps` for the two facades with default features, then `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items` and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. When the `promptforge` facade's public surface changes, also run `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`, installed here), which compares against `crates/promptforge/public-api.txt`; `--bless` rewrites the listing.
+- Docs command: with `RUSTDOCFLAGS="-D warnings"` (PowerShell: `$env:RUSTDOCFLAGS='-D warnings'`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p runvil --no-deps` and `cargo doc -p harness --no-deps` for the two facades with default features, then `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items` and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. When the `runvil` facade's public surface changes, also run `cargo +nightly-2026-09-05 xtask api --check` (the nightly pinned in `crates/build-xtask/src/api/toolchain.rs`, installed here), which compares against `crates/runvil/public-api.txt`; `--bless` rewrites the listing.
 - Test placement and naming conventions:
-  - Unit tests live in a sibling file wired from the module as `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (183 such files, for example `promptforge-plugin/src/context.rs` beside `context-tests.rs`, `harness-internal/runner/src/packages.rs` beside `packages-tests.rs`, `plugin-web/src/web.rs` beside `web-tests.rs`). A module with three or more test files uses a `tests/` subdirectory under `src` instead (for example `promptforge-internal/lua/src/tests/`, `promptforge-internal/engine/src/execute/tests/`). Older code, mostly `gateway/cloud-providers` and `gateway/stt`, keeps an inline `#[cfg(test)] mod tests { }`, as do a few `plugin-web` files (`url_policy.rs`, `response.rs`, `address.rs`).
-  - Integration tests compile as one binary per crate: `tests/suite/main.rs` for the `promptforge` and `harness` facades, `tests/it/main.rs` elsewhere (`promptforge-plugin`, `plugin-mcp`, `plugin-user-input`, `harness-runner`, `gateway`, `gateway-stt`, `gateway-api-discovery`, `build-ui`, and the Workshop crates `agents`, `menu`, `protocol`, `registry`, `run-log`, `server`, `status`, `support`, `user-state`, `workspace`). Each topic is a `mod` file beside `main.rs`. `plugin-web` and `harness-gateway-client` have unit tests only. Prompt fixtures live under `crates/promptforge/tests/prompts/` and `crates/promptforge-internal/engine/tests/prompts/`.
+  - Unit tests live in a sibling file wired from the module as `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (183 such files, for example `runvil-plugin/src/context.rs` beside `context-tests.rs`, `harness-internal/runner/src/packages.rs` beside `packages-tests.rs`, `plugin-web/src/web.rs` beside `web-tests.rs`). A module with three or more test files uses a `tests/` subdirectory under `src` instead (for example `runvil-internal/lua/src/tests/`, `runvil-internal/engine/src/execute/tests/`). Older code, mostly `gateway/cloud-providers` and `gateway/stt`, keeps an inline `#[cfg(test)] mod tests { }`, as do a few `plugin-web` files (`url_policy.rs`, `response.rs`, `address.rs`).
+  - Integration tests compile as one binary per crate: `tests/suite/main.rs` for the `runvil` and `harness` facades, `tests/it/main.rs` elsewhere (`runvil-plugin`, `plugin-mcp`, `plugin-user-input`, `harness-runner`, `gateway`, `gateway-stt`, `gateway-api-discovery`, `build-ui`, and the Workshop crates `agents`, `menu`, `protocol`, `registry`, `run-log`, `server`, `status`, `support`, `user-state`, `workspace`). Each topic is a `mod` file beside `main.rs`. `plugin-web` and `harness-gateway-client` have unit tests only. Prompt fixtures live under `crates/runvil/tests/prompts/` and `crates/runvil-internal/engine/tests/prompts/`.
   - Test functions are snake_case sentences stating the behavior (for example `construct_fails_with_a_tool_error_when_a_host_wide_service_is_missing`); a `test_` prefix appears on about 21 of roughly 5,460 tests.
-  - Test-only hooks sit behind a `test-support` feature (`promptforge-plugin`, `promptforge-lua`, `promptforge-parser`, `promptforge-engine`) or `test-fixtures` (gateway crates, `gateway-api-discovery`, and Workshop crates). Only `[dev-dependencies]` may enable `test-support`, which `build-xtask`'s leak guard enforces.
-  - Doctests are banned: `build-xtask` fails on any compiled code block in a doc comment, so examples belong in tests or `examples/` (`crates/promptforge/examples`, `crates/harness/examples`). Benches use criterion with `harness = false` (`promptforge-lua`, `promptforge-engine`). JS tests are `*.test.mjs` beside the source or `*.mjs` under `test/`, run by `node --test`; each `tools/*.mjs` script has a sibling `.test.mjs`.
+  - Test-only hooks sit behind a `test-support` feature (`runvil-plugin`, `runvil-lua`, `runvil-parser`, `runvil-engine`) or `test-fixtures` (gateway crates, `gateway-api-discovery`, and Workshop crates). Only `[dev-dependencies]` may enable `test-support`, which `build-xtask`'s leak guard enforces.
+  - Doctests are banned: `build-xtask` fails on any compiled code block in a doc comment, so examples belong in tests or `examples/` (`crates/runvil/examples`, `crates/harness/examples`). Benches use criterion with `harness = false` (`runvil-lua`, `runvil-engine`). JS tests are `*.test.mjs` beside the source or `*.mjs` under `test/`, run by `node --test`; each `tools/*.mjs` script has a sibling `.test.mjs`.
 - Directory map:
-  - `crates/`: all code. The top level holds the public and shared layer: the Engine facade `promptforge` and the Plugin contract `promptforge-plugin`; the Harness facade `harness` and `harness-gateway-client`; the Plugins `plugin-web`, `plugin-mcp`, and `plugin-user-input`; the gateway's client-facing `gateway-api-types` and `gateway-api-discovery`; `shared-error-source`, `shared-loopback`, and `shared-ui` (a TypeScript and CSS package excluded from the workspace, not a crate); tooling `build-xtask` (`cargo xtask tidy`, `api`, `site`, and `new-crate`, which scaffolds `workshop-*` crates), `build-workshop` (`cargo workshop`), `build-ui`, `build-user-guide`, `build-ceiling`, and `build-llama-cuda`; and `workspace-hack` for cargo-hakari.
-  - `crates/promptforge-internal/`: the private Engine crates `types`, `vfs`, `model-client`, `lua`, `parser`, and `engine`.
+  - `crates/`: all code. The top level holds the public and shared layer: the Engine facade `runvil` and the Plugin contract `runvil-plugin`; the Harness facade `harness` and `harness-gateway-client`; the Plugins `plugin-web`, `plugin-mcp`, and `plugin-user-input`; the gateway's client-facing `gateway-api-types` and `gateway-api-discovery`; `shared-error-source`, `shared-loopback`, and `shared-ui` (a TypeScript and CSS package excluded from the workspace, not a crate); tooling `build-xtask` (`cargo xtask tidy`, `api`, `site`, and `new-crate`, which scaffolds `workshop-*` crates), `build-workshop` (`cargo workshop`), `build-ui`, `build-user-guide`, `build-ceiling`, and `build-llama-cuda`; and `workspace-hack` for cargo-hakari.
+  - `crates/runvil-internal/`: the private Engine crates `types`, `vfs`, `model-client`, `lua`, `parser`, and `engine`.
   - `crates/harness-internal/runner`: `harness-runner`, the private Harness crate behind the `harness` facade, which re-exports `Harness`, `RunRequest`, `RunReport`, `RunControl`, and the `plugin` (`HostContext`, `InstallError`, `PackageRegistry`, `PluginKind`, `HostServices`, `PluginId`), `record`, and `vfs` modules.
   - `crates/gateway/`: private gateway crates; `app` is the binary, beside `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the `stt/` speech subsystem (`api` is the public `gateway-stt`, plus `engine`, `backend-whisper`, and `whisper-ffi`).
-  - `crates/workshop/`: the Workshop Host: `desktop` (Tauri app, package `workshop`), `server` and `server-api`, the tier crates `agents`, `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, and `workspace`, and the npm workspaces `ui`, `look`, and `platform`. `workshop-server`'s `src/agents.rs` (`with_plugins`) builds the Host's `PackageRegistry` from `plugin_web::PACKAGE`, `plugin_user_input::PACKAGE`, and `plugin_mcp::PACKAGE`, then installs `web`, `user-input`, `promptforge/subagents`, and one `plugin-mcp` install per configured MCP server.
+  - `crates/workshop/`: the Workshop Host: `desktop` (Tauri app, package `workshop`), `server` and `server-api`, the tier crates `agents`, `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, and `workspace`, and the npm workspaces `ui`, `look`, and `platform`. `workshop-server`'s `src/agents.rs` (`with_plugins`) builds the Host's `PackageRegistry` from `plugin_web::PACKAGE`, `plugin_user_input::PACKAGE`, and `plugin_mcp::PACKAGE`, then installs `web`, `user-input`, `runvil/subagents`, and one `plugin-mcp` install per configured MCP server.
   - Repository root: `guide/` (docs site sources `books`, `chrome`, `landing`), `prompts/` (example prompts), `tools/` (Node scripts for the gateway sidecar and live TTS checks), `vibe/` (tracked dated plan and run records, `YYYY-MM-DD-N-slug.md`, older months filed under `2026-09/` and `2026-10/`), `local/` (gitignored machine-local gateway config, profiles, and fixtures), `images/`, and an empty untracked `cabinet/`. Root config: `Cargo.toml` (workspace, lints, and every dependency pin), `clippy.toml`, `rustfmt.toml`, `rust-toolchain.toml`, `deny.toml`, `dist-workspace.toml` (cargo-dist), and `gateway.local.example.toml`. `.github/workflows/` holds CI (`ci.yml`, gated by `ci-green`), release, nightly, and site jobs; `.githooks/` holds pre-commit and pre-push; `.config/` holds nextest and hakari config; `.cargo/config.toml` holds the `workshop` and `xtask` aliases; `.cursor/rules/` holds `workshop-architecture.mdc` and `workshop-spa.mdc`. 21 crates carry their own `AGENTS.md` and 23 a `README.md`.
 - Component boundaries (enforced by `cargo test -p build-xtask`):
-  - Engine internal graph: `types` and `vfs` depend on no Engine crate; `model-client` depends on `types`; `lua` on `types`, `vfs`, and `model-client`; `parser` on `lua` and `types`; `engine` on all five. The `promptforge` facade re-exports from all six. `promptforge-plugin` depends only on `types` and `vfs`. Engine manifests may not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` outside dev tables (except an optional entry only `test-support` enables). Other families reach the Engine only through `promptforge` and `promptforge-plugin`.
-  - Harness crates depend outside their family only on `promptforge`, `promptforge-plugin`, and `workspace-hack`, never on gateway, shared, Workshop, or `build-*` crates, and declare no normal `tokio` or `tokio-util` dependency. `harness-runner` is private to `harness`; outsiders use `harness` and `harness-gateway-client`.
-  - Plugin crates depend only on `promptforge-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. Engine, gateway, and Harness crates must not depend on a Plugin crate, except `harness-gateway-client`, which depends on `plugin-web` to implement its `SearchProvider`. The Host depends on Plugin crates directly (`workshop-server` on all three, `workshop-agents` on `plugin-user-input`).
+  - Engine internal graph: `types` and `vfs` depend on no Engine crate; `model-client` depends on `types`; `lua` on `types`, `vfs`, and `model-client`; `parser` on `lua` and `types`; `engine` on all five. The `runvil` facade re-exports from all six. `runvil-plugin` depends only on `types` and `vfs`. Engine manifests may not name `tokio`, `tokio-util`, `async-trait`, or `reqwest` outside dev tables (except an optional entry only `test-support` enables). Other families reach the Engine only through `runvil` and `runvil-plugin`.
+  - Harness crates depend outside their family only on `runvil`, `runvil-plugin`, and `workspace-hack`, never on gateway, shared, Workshop, or `build-*` crates, and declare no normal `tokio` or `tokio-util` dependency. `harness-runner` is private to `harness`; outsiders use `harness` and `harness-gateway-client`.
+  - Plugin crates depend only on `runvil-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. Engine, gateway, and Harness crates must not depend on a Plugin crate, except `harness-gateway-client`, which depends on `plugin-web` to implement its `SearchProvider`. The Host depends on Plugin crates directly (`workshop-server` on all three, `workshop-agents` on `plugin-user-input`).
   - Gateway crates depend on no Engine, Workshop, or Harness crate; the container is private to the family, `crates/gateway/stt/` is a nested subsystem whose only public member is `gateway-stt`, and Workshop sees the gateway only through `gateway-api-types` and `gateway-api-discovery`.
   - Workshop tiers flow one way: the server (`workshop-server`), then features (`agents`, `run-log`, `user-state`, `workspace`), then services (`gateway`, `menu`, `status`), then vocabulary (`protocol`, `registry`, `support`). A crate depends only on lower tiers; in the vocabulary tier `workshop-registry` depends on `workshop-protocol`. The desktop app's only Workshop dependency is `workshop-server-api`, which depends only on `workshop-server`.
   - `shared-*` crates depend on no product crate. Every `workshop-*`, `harness-*`, and `plugin-*` crate root must carry a `//! ## Invariants` section. Only `gateway`, `gateway-whisper-ffi`, `gateway-api-discovery`, and `workshop` may relax `unsafe_code`.
 - Conventions summary:
   - Engine, Harness, Host, and Plugin are capitalized terms with exactly one meaning each (root `AGENTS.md` Definitions). A Plugin is never a capability, pack, or addon, and its lifecycle words are installed, snapshotted, and declared. Engine crates say "the caller" and never mention the Host. `docs-claims.mjs` enforces this wording in every `AGENTS.md`, `## Invariants` crate doc, and `.cursor/rules` file.
   - Every member inherits strict workspace lints (`[lints] workspace = true`, checked by `build-xtask`): clippy `all` and `pedantic` at deny, `unwrap_used` and `expect_used` denied outside tests, `#[allow]` banned in favor of `#[expect(..., reason = "...")]`, `unsafe_code` denied, `missing_docs` and `unreachable_pub` warned, broken and private intra-doc links denied. `clippy.toml` bans installing process-global state (panic hook, logger, tracing default, rustls default provider) outside binary entry points.
-  - Crate roots open with a `//!` doc. A Plugin crate exports one `pub const PACKAGE: Package` built with `Package::new("<vendor>/<name>", construct)` (`promptforge/user-input`, for example), and its crate doc names the default install name and the services it needs.
-  - Source directories are flat: a subdirectory needs three or more files, otherwise use `parent-label.rs` siblings wired with `#[path]`, converting in either direction when touching a group on the wrong side of the line. No Rust file under a crate's `src`, `tests`, `benches`, or `examples` may exceed 500 lines: every build script runs `build_ceiling::check()`, and Harness and Plugin crates (plus `promptforge-vfs`) include its source through `#[path]` because they may name no `build-*` crate.
+  - Crate roots open with a `//!` doc. A Plugin crate exports one `pub const PACKAGE: Package` built with `Package::new("<vendor>/<name>", construct)` (`runvil/user-input`, for example), and its crate doc names the default install name and the services it needs.
+  - Source directories are flat: a subdirectory needs three or more files, otherwise use `parent-label.rs` siblings wired with `#[path]`, converting in either direction when touching a group on the wrong side of the line. No Rust file under a crate's `src`, `tests`, `benches`, or `examples` may exceed 500 lines: every build script runs `build_ceiling::check()`, and Harness and Plugin crates (plus `runvil-vfs`) include its source through `#[path]` because they may name no `build-*` crate.
   - A removed Engine symbol is added to `RETIRED_SEEDS` in `crates/build-xtask/src/engine_guards.rs`, and the retired-symbol scan then fails if live Engine source names it again.
   - Dependencies are declared once in `[workspace.dependencies]`, with comments explaining each pin and disabled feature, and members name them with `.workspace = true`. The gateway links exactly one rustls backend (aws-lc-rs); CI fails if `ring` enters its normal closure.
   - Reuse an existing facility before adding machinery (root `AGENTS.md` Principles). Error and status messages are written for model consumption: concise, naming what is missing with required versus actual. Comments explain only non-obvious constraints, and platform workarounds cite the upstream issue URL.
@@ -595,29 +595,29 @@ Two steps, no components (Bounded path). Each step is one commit that leaves its
 - Component: `none`
 - Tests:
   - `cargo +nightly-2026-09-05 xtask api --check`
-  - `cargo nextest run --locked -p promptforge-engine -p promptforge -p harness-runner -p harness -p harness-gateway-client -p build-xtask --all-features`
-  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p promptforge-engine -p promptforge -p harness-runner -p harness -p harness-gateway-client --all-targets --all-features`. `--all-targets` also builds the Engine's bench (`benches/models_loop.rs`), which no test run builds.
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-engine -p promptforge -p harness-runner`, then `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+  - `cargo nextest run --locked -p runvil-engine -p runvil -p harness-runner -p harness -p harness-gateway-client -p build-xtask --all-features`
+  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p runvil-engine -p runvil -p harness-runner -p harness -p harness-gateway-client --all-targets --all-features`. `--all-targets` also builds the Engine's bench (`benches/models_loop.rs`), which no test run builds.
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p runvil-engine -p runvil -p harness-runner`, then `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
   - `cargo fmt --all --check`
-  - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/promptforge crates/promptforge-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing, so rg exits 1
+  - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/runvil crates/runvil-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing, so rg exits 1
 - Commit: one commit with the summary `Move every run input onto RunContext and remove Environment`, a body, `Design:` lines in the format the plugin-offering commits use (`git log -6 --format=%B 7502bf8b4`), and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
-- Contract items: the Technical Design's Engine, Facade, Guard, and Harness lists, its "Callers and test helpers" and "Stale names and prose" lists, and the Declarations for `config.rs`, `test_support.rs`, `host.rs`, `host-run.rs`, `prepare.rs`, and `engine_guards.rs`. The `plugin-mcp` and `promptforge-plugin` items are Step 2's.
-- Before editing: read the root `AGENTS.md` and `crates/promptforge-internal/engine/AGENTS.md`. The Harness crates have no `AGENTS.md` of their own.
+- Contract items: the Technical Design's Engine, Facade, Guard, and Harness lists, its "Callers and test helpers" and "Stale names and prose" lists, and the Declarations for `config.rs`, `test_support.rs`, `host.rs`, `host-run.rs`, `prepare.rs`, and `engine_guards.rs`. The `plugin-mcp` and `runvil-plugin` items are Step 2's.
+- Before editing: read the root `AGENTS.md` and `crates/runvil-internal/engine/AGENTS.md`. The Harness crates have no `AGENTS.md` of their own.
 - Baseline: `7502bf8b4` (`Close plan: plugin-offering`, also `origin/master`). Line citations were checked there. Search by name if a line has moved.
 - Shell: PowerShell on Windows. `$env:NAME='value'; <command>` sets the variable for the rest of the session. Run cargo commands one at a time, since they share the target directory's lock. Don't append `2>&1` to them, because PowerShell turns cargo's stderr into error records. Judge each by its result lines and `$LASTEXITCODE`.
 - Terms:
-  - `RunContext`: the Engine's per-run input object (`crates/promptforge-internal/engine/src/execute/config.rs`), built with `RunContext::new` and builder methods such as `model` and `vfs`.
+  - `RunContext`: the Engine's per-run input object (`crates/runvil-internal/engine/src/execute/config.rs`), built with `RunContext::new` and builder methods such as `model` and `vfs`.
   - prepare: the step before a run is built. It binds the prompt's model roles to the context's current model and returns a `Requirements` report that the caller merges with its own and checks for a refusal.
   - `HostContext`: the Harness's long-lived object. The Host builds it once at startup and installs every Plugin into it, and every run shares it. It isn't the Engine's `Environment`, and this step changes only `begin_run`'s return value.
   - the catalog: the tool descriptors a run may offer. The roster: each installed Plugin, usable or unavailable with a reason, for one run. A prelude: Lua source a Plugin package ships, which every section VM of a run installs for the Plugins the prompt declares.
 
 Artifacts:
 
-- Removed: `crates/promptforge-internal/engine/src/execute/environment.rs`, its `mod` and `pub use` in `execute.rs`, and the `Environment` re-exports in the Engine's `lib.rs` and the facade's `lib.rs`.
-- `crates/promptforge-internal/engine/src/execute/config.rs`: `impl RunContext` gains the builders `tools`, `plugins`, and `preludes` and the method `prepare`, with the bodies and docs moved from `Environment`. The getter `tools(&self)` becomes `catalog(&self)`. The type doc and every doc that links `Environment::prepare` are rewritten as the Technical Design and Declarations show.
+- Removed: `crates/runvil-internal/engine/src/execute/environment.rs`, its `mod` and `pub use` in `execute.rs`, and the `Environment` re-exports in the Engine's `lib.rs` and the facade's `lib.rs`.
+- `crates/runvil-internal/engine/src/execute/config.rs`: `impl RunContext` gains the builders `tools`, `plugins`, and `preludes` and the method `prepare`, with the bodies and docs moved from `Environment`. The getter `tools(&self)` becomes `catalog(&self)`. The type doc and every doc that links `Environment::prepare` are rewritten as the Technical Design and Declarations show.
 - Doc links that name `Environment`, in `execute/bindings.rs`, `execute/context.rs`, `execute/run.rs`, `execute/requirements.rs`, and `test_support/fixture.rs`, and the module-map line in `execute.rs`.
 - `test_support::run_with_fixture` without its `env: &Environment` parameter, and its 14 calls.
-- The facade's `crates/promptforge/src/lib.rs` lines 8-9, and `crates/promptforge/public-api.txt`, regenerated with `cargo +nightly-2026-09-05 xtask api --bless` as part of the change so the commit includes it.
+- The facade's `crates/runvil/src/lib.rs` lines 8-9, and `crates/runvil/public-api.txt`, regenerated with `cargo +nightly-2026-09-05 xtask api --bless` as part of the change so the commit includes it.
 - `RETIRED_SEEDS` in `crates/build-xtask/src/engine_guards.rs`, from 31 to 32 names with `Environment`.
 - Harness: `HostContext::begin_run` returning `(HostRunContext, Requirements)`, `HostRunContext::catalog`, `roster`, and `preludes` widened to `pub(crate)` with unchanged bodies, the context composition in `prepare.rs`, and that file's module doc and `prepare` doc.
 - Every helper, bench, and test file the Technical Design lists, including `env_run` renamed `run_assembled`, `bench_env` removed, the 13 `begin_run` destructurings in `host-tests.rs` without `_env`, and the `Environment` lines of the `Send + Sync` assertions removed.
@@ -638,15 +638,15 @@ Behavior:
 
 Test cases, in this order:
 
-- First, and confirm it fails to compile at the baseline, which has no `RunContext::plugins`: `two_runs_whose_contexts_carry_different_rosters_each_see_their_own` in `crates/promptforge/tests/suite/plugins.rs`. Two contexts prepare the same prompt, which returns `tostring(plugins.get('kit') ~= nil)`.
+- First, and confirm it fails to compile at the baseline, which has no `RunContext::plugins`: `two_runs_whose_contexts_carry_different_rosters_each_see_their_own` in `crates/runvil/tests/suite/plugins.rs`. Two contexts prepare the same prompt, which returns `tostring(plugins.get('kit') ~= nil)`.
   - The first is built with `.plugins(vec![kit], vec![])` and returns `"true"`.
   - The second is built with `.plugins(vec![], vec![UnavailablePlugin::new(kit, "down")])` and returns `"false"`.
   - Drive each run with the same `step` loop as the prelude test in that file. The prompt declares no Plugins and calls no tools, so the run finishes without effects.
 - Then make the change, migrate the callers, and make the renames. Migrated tests keep their assertions:
   - every caller and helper the Technical Design lists, and every test it renames under "Stale names and prose"
-  - `a_prelude_on_the_environment_defines_a_function_the_section_calls` in `crates/promptforge/tests/suite/plugins.rs` becomes `a_prelude_on_the_context_defines_a_function_the_section_calls`, and the module doc (lines 1-3) follows
+  - `a_prelude_on_the_environment_defines_a_function_the_section_calls` in `crates/runvil/tests/suite/plugins.rs` becomes `a_prelude_on_the_context_defines_a_function_the_section_calls`, and the module doc (lines 1-3) follows
   - the facade's `tests/suite/prepare.rs` and the Engine's `execute/tests/suite/prepare.rs` prepare through `RunContext::prepare` and keep their model-binding and requirements assertions. The facade file's two catalog reads (lines 295 and 314) become `ctx.catalog().tools()`, which now pin that `prepare` leaves the caller's catalog in place.
-- Removed: the `Environment` lines of the `Send + Sync` assertions in `crates/promptforge/tests/suite/auto_traits.rs` and `execute/tests/context.rs`. `RunContext`'s own lines stay.
+- Removed: the `Environment` lines of the `Send + Sync` assertions in `crates/runvil/tests/suite/auto_traits.rs` and `execute/tests/context.rs`. `RunContext`'s own lines stay.
 - Regression, passing unchanged:
   - `execute/tests/preludes.rs`, apart from building its context with `.tools` and `.preludes`
   - `lua/src/plugins-tests.rs` and `engine/src/execute/tests/offering-plugins.rs`
@@ -673,28 +673,28 @@ Constraints: every `.rs` file stays under 500 lines (`config.rs` goes from 367 t
 
 - Component: `none`
 - Tests:
-  - `cargo nextest run --locked -p plugin-mcp -p promptforge-plugin --all-features`
-  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p plugin-mcp -p promptforge-plugin --all-targets --all-features`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p plugin-mcp -p promptforge-plugin`
-  - `node --test crates/workshop/ui/test/docs-claims.mjs`, which checks the Plugin wording in `promptforge-plugin`
+  - `cargo nextest run --locked -p plugin-mcp -p runvil-plugin --all-features`
+  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p plugin-mcp -p runvil-plugin --all-targets --all-features`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p plugin-mcp -p runvil-plugin`
+  - `node --test crates/workshop/ui/test/docs-claims.mjs`, which checks the Plugin wording in `runvil-plugin`
   - `cargo fmt --all --check`
-  - `rg -n -e "fails to start is unavailable, with the reason" -e "never will be" -e "will never offer" crates/plugin-mcp crates/promptforge-plugin` finds nothing, so rg exits 1
+  - `rg -n -e "fails to start is unavailable, with the reason" -e "never will be" -e "will never offer" crates/plugin-mcp crates/runvil-plugin` finds nothing, so rg exits 1
   - Then the rest of the Testing Plan's exit checks, which cover both steps, in this order:
     - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, which includes `build-xtask`
     - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
     - `$env:CARGO_BUILD_WARNINGS='deny'; cargo check -p gateway --no-default-features`
     - `cargo build --locked -p gateway --no-default-features`
-    - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+    - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
     - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
     - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`
     - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`, always, even when an earlier command failed
-    - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p promptforge --no-deps`, then `cargo doc -p harness --no-deps`, then `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+    - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p runvil --no-deps`, then `cargo doc -p harness --no-deps`, then `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
     - `cargo +nightly-2026-09-05 xtask api --check`
-    - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/promptforge crates/promptforge-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing, so rg exits 1
+    - `rg -n -e "\bEnvironment\b" -e "default environment" -e "environment's" -e "shout_environment" -e "env_run" -e "bench_env" -e "prepare_copies" crates/runvil crates/runvil-internal crates/harness crates/harness-internal crates/harness-gateway-client/src/wire` finds nothing, so rg exits 1
 - Commit: one commit with the summary `Keep retrying an MCP server that failed to start`, a body, `Design:` lines in the format the plugin-offering commits use (`git log -6 --format=%B 7502bf8b4`), and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
-- Contract items: the Technical Design's `plugin-mcp` and `promptforge-plugin` lists, and the Declarations for `connect.rs`, `server.rs`, `promptforge-plugin`'s `plugin.rs` and `lib.rs`, and `tests/it/fixture.rs`.
-- Before editing: read the root `AGENTS.md`. The `plugin-mcp` and `promptforge-plugin` crates have no `AGENTS.md` of their own.
-- Baseline: Step 1's commit. Step 1 doesn't touch `plugin-mcp` or `promptforge-plugin`, so their line citations, checked at `7502bf8b4`, still hold. Search by name if a line has moved.
+- Contract items: the Technical Design's `plugin-mcp` and `runvil-plugin` lists, and the Declarations for `connect.rs`, `server.rs`, `runvil-plugin`'s `plugin.rs` and `lib.rs`, and `tests/it/fixture.rs`.
+- Before editing: read the root `AGENTS.md`. The `plugin-mcp` and `runvil-plugin` crates have no `AGENTS.md` of their own.
+- Baseline: Step 1's commit. Step 1 doesn't touch `plugin-mcp` or `runvil-plugin`, so their line citations, checked at `7502bf8b4`, still hold. Search by name if a line has moved.
 - Shell: PowerShell on Windows. `$env:NAME='value'; <command>` sets the variable for the rest of the session. Run cargo commands one at a time, since they share the target directory's lock. Don't append `2>&1` to them, because PowerShell turns cargo's stderr into error records. Judge each by its result lines and `$LASTEXITCODE`.
 - Terms: `ready` is the `Plugin` trait method the Harness awaits before each run's snapshot. A Plugin whose `ready` fails is unavailable to that run. `State` is `plugin-mcp`'s published connection state: `Starting`, `Ready`, or `Failed` with a reason. `HostContext` is the Harness's long-lived object that holds every installed Plugin for as long as the Host keeps it.
 
@@ -707,8 +707,8 @@ Artifacts:
   - The doc of `run` (lines 54-60) says it retries until the first success. Today's paragraph on rmcp's missing timeouts stays.
 - `crates/plugin-mcp/src/server.rs`: only the `State` doc (lines 26-27) changes. `ready` already waits only while the state is `Starting`. The loop needs no drop check: `Server`'s `Drop` (lines 126-132) aborts the connection task, which ends a loop that is sleeping or mid-attempt.
 - `crates/plugin-mcp/src/lib.rs`: the crate doc (lines 26-30) replaces "A server that fails to start is unavailable, with the reason" with: a server that fails to start is unavailable to each run that starts while it is down, with the reason, and the Plugin keeps trying in the background, waiting 1 second after the first failure and doubling up to a minute, so a later run offers its tools once it answers.
-- `crates/promptforge-plugin/src/plugin.rs`: the `ready` doc's summary (lines 38-39), its first invariant (lines 49-50), and its `# Errors` section (lines 59-61), as the Declarations show. Lines 41-45 and the invariant that `ready` answers at once after its first resolution unless the Plugin's state has changed (lines 54-56) stay.
-- `crates/promptforge-plugin/src/lib.rs`: the crate doc's `ready` bullet (lines 37-40).
+- `crates/runvil-plugin/src/plugin.rs`: the `ready` doc's summary (lines 38-39), its first invariant (lines 49-50), and its `# Errors` section (lines 59-61), as the Declarations show. Lines 41-45 and the invariant that `ready` answers at once after its first resolution unless the Plugin's state has changed (lines 54-56) stay.
+- `crates/runvil-plugin/src/lib.rs`: the crate doc's `ready` bullet (lines 37-40).
 - Unchanged: the Harness docs that say a Plugin whose `ready` fails is unavailable to that run (`host.rs` line 11, `prepare.rs` line 197), which are already accurate.
 - `crates/plugin-mcp/tests/it/fixture.rs`: `Shared.reject` becomes an `AtomicBool`, documented as answering every `POST` with `401` while set. `Fixture::accept` clears it, the check at line 154 reads it with `Ordering::SeqCst`, and `spawn` builds it with `AtomicBool::new(reject)`.
 - Tests in `crates/plugin-mcp/tests/it/main.rs` and `crates/plugin-mcp/src/connect-tests.rs`, listed below.

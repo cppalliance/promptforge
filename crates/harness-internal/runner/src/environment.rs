@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use promptforge::model::{CompletionError, ModelDescriptor, ModelId};
+use runvil::model::{CompletionError, ModelDescriptor, ModelId};
 
 use crate::performers::InferenceBroker;
 

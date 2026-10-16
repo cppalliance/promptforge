@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Workshop family look: the Cursor Dark palette, the size and semantic token tiers, the codicon icon strings, the shimmer, and the behavioral components (modal, dropdown, toast stack, status bar view, progress bar, button/input/select/switch bases) shared by the Workshop's UIs.",
+  "description": "Runvil Workshop family look: the Cursor Dark palette, the size and semantic token tiers, the codicon icon strings, the shimmer, and the behavioral components (modal, dropdown, toast stack, status bar view, progress bar, button/input/select/switch bases) shared by the Workshop's UIs.",
   "exports": {
     "./tokens.css": "./tokens.css",
     "./sizes.css": "./sizes.css",

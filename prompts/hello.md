@@ -1,7 +1,7 @@
 ---
 name: hello
 description: Say hello
-promptforge: 0
+runvil: 0
 models:
   writer: {}
 ---

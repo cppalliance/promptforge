@@ -32,7 +32,7 @@ use workshop_server::AppState;
 use crate::common::{spawn_router, test_config};
 
 const CATALOG: &str =
-    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
+    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"runvil"}]}"#;
 
 /// A mock `/health` whose answer flips under test control.
 async fn flippable_health(State(healthy): State<Arc<AtomicBool>>) -> Response {

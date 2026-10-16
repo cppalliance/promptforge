@@ -1,7 +1,7 @@
 //! The recorded outcome of a run: what the loop hands the recorder when a
 //! run ends, and what a refused preparation records in its place.
 
-use promptforge::{RunError, RunResult};
+use runvil::{RunError, RunResult};
 
 use crate::display_chain::display_chain;
 use crate::recorder::RunOutcome;

@@ -24,7 +24,7 @@ A task can currently read the history of events another task reported, through a
 
 - Problem and users:
   - The read path forces the Harness log to be readable during a run. That blocks planned work on a host-owned log and on dropping tokio from the Harness.
-  - Nothing in the repository or outside it uses the feature besides its own tests and docs. The only Lua callers are prompts embedded in Rust tests (`crates/promptforge-internal/engine/src/execute/tests/task_events.rs`, `crates/harness-internal/runner/tests/it/performers.rs`).
+  - Nothing in the repository or outside it uses the feature besides its own tests and docs. The only Lua callers are prompts embedded in Rust tests (`crates/runvil-internal/engine/src/execute/tests/task_events.rs`, `crates/harness-internal/runner/tests/it/performers.rs`).
   - Affected users are prompt authors (Lua), models (built-in tools), Host developers, Engine and Harness maintainers, and guide readers.
 - Goals:
   - Remove all three entry points and the mechanism behind them in the Engine, the Lua protocol, the Harness runner and the Harness log.
@@ -37,10 +37,10 @@ A task can currently read the history of events another task reported, through a
   - No push and no Cicerone run.
 - Success criteria: The residual searches in the Testing Plan return nothing relevant, the verification in the Testing Plan passes, `git status` is clean, three work commits exist (plus the run tool's closing commit), and nothing is pushed.
 - Constraints:
-  - Repository `c:\Users\Vinnie\cursor\promptforge`, branch `master` tracking `origin/master`. Never touch `c:\Users\Vinnie\cursor\promptforge2`, `promptforge3` or `promptforge-design` (a separate repo of research notes). Never edit an existing record under `vibe/` (dated plan records). The run tool's own additions there (this plan's dated copy and the `vibe/ACTIVE` pointer) are allowed, and the residual searches skip `vibe/`. Do not push.
-  - Write Engine, Harness and Host capitalized, with these meanings only. Engine: the `promptforge` crates under `crates/promptforge/` and `crates/promptforge-internal/`, which parse a prompt, step a run and emit effects. Harness: the `harness` crates under `crates/harness/` and `crates/harness-internal/`, which step the Engine, perform effects, return answers and keep the run log. Host: an application such as Workshop or Papergate that runs prompts through the Harness and makes every policy decision.
+  - Repository `c:\Users\Vinnie\cursor\runvil`, branch `master` tracking `origin/master`. Never touch `c:\Users\Vinnie\cursor\runvil2`, `runvil3` or `runvil-design` (a separate repo of research notes). Never edit an existing record under `vibe/` (dated plan records). The run tool's own additions there (this plan's dated copy and the `vibe/ACTIVE` pointer) are allowed, and the residual searches skip `vibe/`. Do not push.
+  - Write Engine, Harness and Host capitalized, with these meanings only. Engine: the `runvil` crates under `crates/runvil/` and `crates/runvil-internal/`, which parse a prompt, step a run and emit effects. Harness: the `harness` crates under `crates/harness/` and `crates/harness-internal/`, which step the Engine, perform effects, return answers and keep the run log. Host: an application such as Workshop or Papergate that runs prompts through the Harness and makes every policy decision.
   - Prose: plain English, no em dashes, no double dashes in prose (flags inside code spans are fine), guide code fences open with four backticks, one paragraph per line in guide Markdown.
-  - Structure: 500-line file ceiling in crates that have an `## Invariants` marker (split first, then edit; the Engine states the marker in `crates/promptforge-internal/engine/src/lib.rs`), flat source directories, error messages written for a model reader.
+  - Structure: 500-line file ceiling in crates that have an `## Invariants` marker (split first, then edit; the Engine states the marker in `crates/runvil-internal/engine/src/lib.rs`), flat source directories, error messages written for a model reader.
   - The Cicerone update run that the repository requires when a facade item is removed (`AGENTS.md`, line 98) is waived by the owner for this change, because a run takes hours. Hand-edit the facade pages and leave the rule text in `AGENTS.md` untouched.
 - Open questions: None
 
@@ -59,7 +59,7 @@ After the change a prompt author, a model and a Host see the same task features 
   - Engine and Harness public API: `Effect`, `EffectRecord`, `EffectAnswer` and `AnswerRecord` each lose their `TaskEvents` variant.
 - States and validation:
   - Every `Event` variant and every event emission stays, and so does `provenance.seq`.
-  - The phrase "task events" meaning the lifecycle events `task_started` and friends stays (for example the sentence at `crates/promptforge/src/ids.md` line 7).
+  - The phrase "task events" meaning the lifecycle events `task_started` and friends stays (for example the sentence at `crates/runvil/src/ids.md` line 7).
   - Unrelated senses of "history" stay: the `chat` agent's message history, conversation history, and the task history rendered to the model in task notices (`guide/src/language/09-the-store.md`, the sentence linking to "Task notices to the model"; judge it, but it describes what the model sees and is expected to stay).
 - Errors and recovery:
   - If any step finds a use of the feature outside tests and docs, stop and report instead of working around it.
@@ -70,7 +70,7 @@ After the change a prompt author, a model and a Host see the same task features 
 - Acceptance criteria:
   - The final residual searches find no hit outside `vibe/`, `target/` and `node_modules/` except judged unrelated senses.
   - The guide has 17 language chapters, with the links, anchors and exports consistent.
-  - `crates/promptforge/public-api.txt` loses exactly ten `TaskEvents` lines.
+  - `crates/runvil/public-api.txt` loses exactly ten `TaskEvents` lines.
   - Event emission, log append and `Session::transcript` tests still pass, apart from the tests deleted with the feature.
 
 </product-contract>
@@ -82,7 +82,7 @@ The feature is one vertical cut through four layers that share a single mechanis
 
 - Architecture:
   - Three entry points converge on one effect, which the Harness answers by reading the run log. All of it goes. The Harness log stays append-only during a run and is read only by session transcript views and reconnect.
-  - Entry points: Lua `tasks.events(task, { last = seq })` in `crates/promptforge-internal/lua/src/__impl_tasks.lua` yields a `task_events` request; the model's built-in tool `task_events { id, last? }` is the fifth of its task tools; the Engine arm in `crates/promptforge-internal/engine/src/execute/scheduler/task_events.rs` issues `Effect::TaskEvents { task, last }`.
+  - Entry points: Lua `tasks.events(task, { last = seq })` in `crates/runvil-internal/lua/src/__impl_tasks.lua` yields a `task_events` request; the model's built-in tool `task_events { id, last? }` is the fifth of its task tools; the Engine arm in `crates/runvil-internal/engine/src/execute/scheduler/task_events.rs` issues `Effect::TaskEvents { task, last }`.
 
   ```mermaid
   flowchart LR
@@ -94,44 +94,44 @@ The feature is one vertical cut through four layers that share a single mechanis
   ```
 
 - Modules and interfaces (everything below is removed):
-  - Engine (`promptforge-engine`): `Effect::TaskEvents`, `EffectRecord::TaskEvents`, `EffectAnswer::TaskEvents`, `AnswerRecord::TaskEvents` and their two conversions; `Continuation::TaskEvents`; `TaskEventsReader`; the `task_history` accessor in `execute.rs`; the `task_events` built-in tool and its schema.
-  - Lua (`promptforge-lua`): `tasks.events`; `Request::TaskEvents`; `Answer::TaskEvents`; `parse_task_events`; `event_sequence`.
+  - Engine (`runvil-engine`): `Effect::TaskEvents`, `EffectRecord::TaskEvents`, `EffectAnswer::TaskEvents`, `AnswerRecord::TaskEvents` and their two conversions; `Continuation::TaskEvents`; `TaskEventsReader`; the `task_history` accessor in `execute.rs`; the `task_events` built-in tool and its schema.
+  - Lua (`runvil-lua`): `tasks.events`; `Request::TaskEvents`; `Answer::TaskEvents`; `parse_task_events`; `event_sequence`.
   - Harness runner (`harness-runner`): `TaskEventsPerformer`; the `task_events` field of `Performers`; `LogTaskEvents`.
   - Harness log (`harness-log`): `RunLog::events_for_task`; `RecordFilter::task`; `SELECT_TASK_RECORDS`; the `records_by_task` index.
   - Kept on purpose: `task_id_argument` and `model_task` (cancel and status use them), the `tasks` blocked label for `JoinAny`, the `kind` and `last` log filters, and the helpers `text_of` and `drive_scripted` (they move).
 - File and public API changes:
-  - Engine source (`crates/promptforge-internal/engine/src`):
+  - Engine source (`crates/runvil-internal/engine/src`):
     - Delete `execute/scheduler/task_events.rs`; remove `mod task_events;` and the module-doc lines that name it from `execute/scheduler.rs`, keeping the doc list well-formed.
     - Remove the `Continuation::TaskEvents` variant, its import and its two arms in `execute/scheduler/pending.rs` and `execute/scheduler/apply.rs`.
     - `execute/scheduler/dispatch.rs`: remove the module-doc mention, the `Request::TaskEvents` alternative in the `Some("tasks")` blocked-label arm (the label stays for `JoinAny`) and the `Request::TaskEvents` arm.
     - `execute/scheduler/builtins.rs`, `builtins-schemas.rs`, `tool_call.rs`: remove `"task_events"` from the reserved-name lists, the dispatch arm and the schema block, and every comment that names it. Change "five" and "the fifth" to "four". Then delete whatever only the removed arm used (check `BuiltinOutcome::Issued` and the leaf-effect path of the built-in answers). If a test or comment still says the built-ins number five, fix it.
     - `execute/run/effect.rs`: remove the `TaskEvents` variant of the four types and the two conversions.
     - `execute.rs`: remove `task_history` and its doc. `test_support.rs`, `test_support/tokio_driver.rs` and `tokio_driver-performers.rs`: remove the `TaskEvents` arms, docs and imports. Keep returning collected events to callers; remove any history buffer that only existed to answer reads.
-    - Prose: `lib.md` and `README.md` (effects become `Chat`, `ToolCall`, `Store`, `Timer`; delete "read of a task's reported history"). `crates/promptforge-internal/types/AGENTS.md`: delete the bullet about read-side history.
+    - Prose: `lib.md` and `README.md` (effects become `Chat`, `ToolCall`, `Store`, `Timer`; delete "read of a task's reported history"). `crates/runvil-internal/types/AGENTS.md`: delete the bullet about read-side history.
   - Engine tests (`execute/tests`):
     - First move `text_of` and `drive_scripted` (with the imports `model_task_context_with`, `NullObserver`, `SlowTool` and `perform_locally` that it needs) out of `task_events.rs` into `serial_driver.rs`. Repoint `run_inputs.rs` (`text_of`) and `model_task_trust.rs` (both).
     - Delete `task_events.rs` and `mod task_events;` in `execute/tests.rs`.
     - Delete these tests and fix the header comment each leaves behind: `the_task_events_read_wraps_a_forging_history_under_the_readers_nonce` in `model_task_trust.rs`, `a_task_events_answer_reports_the_turn_it_was_dispatched_under` in `batch_turn.rs`, `a_task_events_effect_records_its_task_and_last_bound` in `execute/run/tests.rs`.
     - Edit `tool_call_arm.rs` and `model_tasks.rs` (drop `task_events` from the name list and the expected string) and `serial_driver.rs` (the doc, the `task_history` import and the two arms).
     - Rename lookalike helpers, which extract task lifecycle observations and are not the removed read: free function `task_events` in `model_task_acceptance.rs` and `fanout_acceptance.rs` becomes `task_lifecycle`; `Recorder::task_events` in `waits.rs` becomes `observations_of`. Fix every caller (`run_termination.rs`, `model_task_ids_and_scope.rs`, `timeouts.rs` and the acceptance suites).
-  - Lua source and tests (`crates/promptforge-internal/lua/src`): delete `tasks_events` (comment and function) and the `events = tasks_events` export in `__impl_tasks.lua`; remove `Request::TaskEvents` and its doc in `protocol/request.rs`; remove `parse_task_events` from `protocol/parse.rs` (import and arm) and `protocol/parse/tasks.rs` (function, and fix the module doc); remove `Answer::TaskEvents`, its `map_err` arm and the `Event` import if nothing else uses it from `protocol/answer.rs`; delete `event_sequence` and its two arms from `protocol/render.rs`. Tests: the `a_task_events_answer_resumes_event_tables...` test and its imports in `protocol/tests/answer.rs`; the two `task_events_*` tests in `protocol/tests/parse_tasks.rs`.
+  - Lua source and tests (`crates/runvil-internal/lua/src`): delete `tasks_events` (comment and function) and the `events = tasks_events` export in `__impl_tasks.lua`; remove `Request::TaskEvents` and its doc in `protocol/request.rs`; remove `parse_task_events` from `protocol/parse.rs` (import and arm) and `protocol/parse/tasks.rs` (function, and fix the module doc); remove `Answer::TaskEvents`, its `map_err` arm and the `Event` import if nothing else uses it from `protocol/answer.rs`; delete `event_sequence` and its two arms from `protocol/render.rs`. Tests: the `a_task_events_answer_resumes_event_tables...` test and its imports in `protocol/tests/answer.rs`; the two `task_events_*` tests in `protocol/tests/parse_tasks.rs`.
   - Harness runner (`crates/harness-internal/runner`):
     - `src/performers.rs`: remove the trait, the field and the `LogTaskEvents` re-export; the doc that lists "four" runner-supplied performers becomes three.
     - `src/performers-builtin.rs`: delete `LogTaskEvents`, its `Debug` and trait impls and the trait import.
     - `src/prepare.rs`: remove the import and the `task_events: Arc::new(LogTaskEvents::new(...))` construction; drop variables that become unused.
     - `src/effect_loop.rs`: remove the `Effect::TaskEvents` arm. Reword the module doc and the `SharedLog` doc so they no longer give the removed read as a reason, keeping the behavior (events are appended before the step's effects are issued). Before rewording the `SharedLog` mutex comment, check who else reads the log (`Session::transcript` in `harness-sessions`) and state that accurately.
     - Tests: `tests/it/support.rs` (the import, the `TaskEventsPerformer for Unused` impl and the field) and `tests/it/performers.rs` (the import and the two tests `task_events_returns_the_tasks_slice...` and `task_events_of_a_task_that_never_logged...`).
-  - Facade pages (hand-edited; scan `lib.md`, `event.md`, `model.md`, `tools.md` and `capabilities.md` in `crates/promptforge/src` for effect lists that still name five kinds):
-    - `crates/promptforge/src/effect.md` (about 430 lines; read the whole page first). Its two runnable tours share a greeter prompt that calls `tasks.events`; rewrite both to four effect kinds (model round, tool call, store operation, timer).
-    - Setup in both tours: description becomes "Asks a model and a tool at once, and waits."; delete the Lua line `local history = tasks.events(ask)`; the return line becomes `return results[1].result .. ' / ' .. results[2].result`; remove `use promptforge::event::Event;` if it becomes unused.
+  - Facade pages (hand-edited; scan `lib.md`, `event.md`, `model.md`, `tools.md` and `capabilities.md` in `crates/runvil/src` for effect lists that still name five kinds):
+    - `crates/runvil/src/effect.md` (about 430 lines; read the whole page first). Its two runnable tours share a greeter prompt that calls `tasks.events`; rewrite both to four effect kinds (model round, tool call, store operation, timer).
+    - Setup in both tours: description becomes "Asks a model and a tool at once, and waits."; delete the Lua line `local history = tasks.events(ask)`; the return line becomes `return results[1].result .. ' / ' .. results[2].result`; remove `use runvil::event::Event;` if it becomes unused.
     - Helper code: `answer(effect: Effect, log: &[Event])` becomes `answer(effect: Effect)` with no `TaskEvents` arm; the tour-1 comment becomes "Answer each effect with the answer of its own kind."; in `drive`, drop the `log` vector and write `Step::Pending { mut effects, .. }`; in tour 2 the `events` vector and `answer(effect, &events)` go the same way. Remove "committing each step's events first" from comments and prose.
     - Asserts: tour 1 expects `"hi there / HI THERE"`. Tour 2 counts issued effects and logs one line per effect; re-derive every count, kind list and assertion from a real run, because the run now issues one fewer effect.
     - Prose: delete "or read a task's history" and "and task history reads" in the opening; "four kinds of outside work" (drop the `[task](crate::ids)` link if only used there); "asks for all four"; delete the `TaskEvents` bullet in the numbered notes; note 3 ("ending in `task_succeeded`, the last event in `Ask`'s history") becomes "Both runs return the same text."; delete the `TaskEvents` row of the diagram and change "any of the five" to "any of the four"; delete the clause about history reads growing the log in the `AnswerRecord` note; remove every `TaskEvents` row or bullet in the reference tables at the end.
     - `crates/harness/src/lib.md`: delete "and a read of a task's history" so it reads "An agent that starts background tasks can also ask for a timer."
     - `crates/harness/src/vfs.md`: one link points at `.../language/17-limits-and-errors.html#...`; it must follow the renumbering to `16-limits-and-errors.html`.
-    - `tools/cicerone/plans/promptforge.md`: the canned-example instruction names "a timer, and a task history read"; remove the history read.
-    - Leave `crates/promptforge/src/ids.md` alone (its "task events" means lifecycle events).
-  - Public API: regenerate `crates/promptforge/public-api.txt` with the xtask `api --bless` command on the pinned nightly (`nightly-2026-09-05`, defined in `crates/build-xtask/src/api/toolchain.rs`). The diff must remove only the ten `TaskEvents` lines: two on `AnswerRecord`, three on `Effect`, two on `EffectAnswer`, three on `EffectRecord`.
+    - `tools/cicerone/plans/runvil.md`: the canned-example instruction names "a timer, and a task history read"; remove the history read.
+    - Leave `crates/runvil/src/ids.md` alone (its "task events" means lifecycle events).
+  - Public API: regenerate `crates/runvil/public-api.txt` with the xtask `api --bless` command on the pinned nightly (`nightly-2026-09-05`, defined in `crates/build-xtask/src/api/toolchain.rs`). The diff must remove only the ten `TaskEvents` lines: two on `AnswerRecord`, three on `Effect`, two on `EffectAnswer`, three on `EffectRecord`.
   - Harness log (`crates/harness-internal/log`):
     - Remove `RunLog::events_for_task` from `src/read.rs`, `RecordFilter::task` and its docs from `src/record.rs`, `SELECT_TASK_RECORDS`, the `records_by_task` index and the doc lines about slicing a run by task from `src/schema.rs`, and the `match filter.task` branch in `RunLog::records` (keep the plain query). The `kind` and `last` filters stay.
     - `README.md`: line 3 no longer says the run is indexed by task, sliced by task, or read by a `TaskEvents` performer. It keeps: append-only record of every run's effects, answers and events; session transcript views and reconnect read it.
@@ -154,7 +154,7 @@ The feature is one vertical cut through four layers that share a single mechanis
     - After the edits, scan for leftovers and judge each hit: `rg -n -e "provenance" -e "model_turn" -e "_started" -e "_succeeded" -e "_failed" -e "_finished" -e "assistant_reply" -e "tool_result" -e "task_notice" guide/src/language`. Keep hits that are not about events (for example error kind names).
 - Data, persistence, failure, security, and privacy constraints:
   - Log schema: the DDL in `crates/harness-internal/log/src/schema.rs` is applied on every open with `IF NOT EXISTS` and no schema version, fingerprint or migration (`crates/harness-internal/log/src/append.rs`). Logs persist on disk, so existing databases keep an unused `records_by_task` index; that is harmless and needs no migration. The `task_id` and `task_seq` columns and the `Record` fields stay as the stored provenance of each record.
-  - File ceiling: `crates/promptforge-internal/engine/src/execute/tests/serial_driver.rs` is 423 lines today. About 20 lines of helpers move in and a few lines of its own come out, so it should stay under 500; recount after the move.
+  - File ceiling: `crates/runvil-internal/engine/src/execute/tests/serial_driver.rs` is 423 lines today. About 20 lines of helpers move in and a few lines of its own come out, so it should stay under 500; recount after the move.
   - Public URLs: renumbering moves the published pages for old chapters 17 and 18. Old links break and no redirects are planned.
   - Error messages that are reworded stay written for a model reader.
   - Removal rules: delete, never stub. No alias, deprecation note, comment, retired-name guard or retired-symbol seed for the removed names. Delete any test, helper or import that only the removed code used. Each commit compiles, passes clippy with `-D warnings`, and is green for the crates it touches.
@@ -171,20 +171,20 @@ Verification is light and per step. Each step runs the touched crates' tests, fo
   - Engine, Lua, runner, log and sessions tests pass unchanged apart from the deleted feature tests, the edited name lists and the renamed helpers. No new test is written: a deletion has no behavior to pin, and a retired-name guard is excluded by decision.
   - For each touched crate: `cargo nextest run --locked -p CRATE --all-features`, `cargo fmt --all --check` (run `cargo fmt --all` first, because it rewrites files) and `cargo clippy --locked -p CRATE --all-targets --all-features -- -D warnings`.
 - Integration and end-to-end:
-  - Doctests for the touched doc-bearing crates (`promptforge`, `promptforge-engine`, `harness`): `cargo test --locked --doc -p CRATE`. They are the likeliest break because of `effect.md`.
-  - Docs build for the facade and the Engine: `$env:RUSTDOCFLAGS="-D warnings"; cargo doc --locked --no-deps -p promptforge -p promptforge-engine; $env:RUSTDOCFLAGS=""`.
-  - Guide: `cargo run --locked -q -p build-user-guide` (no check mode; it rewrites all three exports), then `git diff --stat -- guide` must list only the language chapters and `guide/promptforge-language-guide.md` with the gateway and workshop exports unchanged, then `cargo xtask site --books-only`. That site build includes a link check, but it covers guide HTML only, not facade pages.
-  - Docs-claims guard: `node --test test/docs-claims.mjs` run from `crates/workshop/ui` (the file `crates/workshop/ui/test/docs-claims.mjs`). It reads every `AGENTS.md` in the repository, including the edited `crates/promptforge-internal/types/AGENTS.md`, so run it in the step that edits that file.
+  - Doctests for the touched doc-bearing crates (`runvil`, `runvil-engine`, `harness`): `cargo test --locked --doc -p CRATE`. They are the likeliest break because of `effect.md`.
+  - Docs build for the facade and the Engine: `$env:RUSTDOCFLAGS="-D warnings"; cargo doc --locked --no-deps -p runvil -p runvil-engine; $env:RUSTDOCFLAGS=""`.
+  - Guide: `cargo run --locked -q -p build-user-guide` (no check mode; it rewrites all three exports), then `git diff --stat -- guide` must list only the language chapters and `guide/runvil-language-guide.md` with the gateway and workshop exports unchanged, then `cargo xtask site --books-only`. That site build includes a link check, but it covers guide HTML only, not facade pages.
+  - Docs-claims guard: `node --test test/docs-claims.mjs` run from `crates/workshop/ui` (the file `crates/workshop/ui/test/docs-claims.mjs`). It reads every `AGENTS.md` in the repository, including the edited `crates/runvil-internal/types/AGENTS.md`, so run it in the step that edits that file.
 - Regression, security, and performance:
-  - Public API: after `cargo +nightly-2026-09-05 xtask api --bless`, `git diff crates/promptforge/public-api.txt` removes only the ten `TaskEvents` lines, then `cargo +nightly-2026-09-05 xtask api --check` passes.
+  - Public API: after `cargo +nightly-2026-09-05 xtask api --bless`, `git diff crates/runvil/public-api.txt` removes only the ten `TaskEvents` lines, then `cargo +nightly-2026-09-05 xtask api --check` passes.
   - Structural rules: `cargo test --locked -p build-xtask` (500-line ceiling, boundaries) in the step that moves helpers into `serial_driver.rs`.
-  - Facade scan: `rg -n -i -e "five kinds" -e "five effects" -e "any of the five" -e "history read" -e "task history" crates/promptforge/src crates/harness/src` returns nothing relevant. There is no separate proofreading pass: the step review reads `effect.md`, and the doctests and the docs build catch broken code and links.
+  - Facade scan: `rg -n -i -e "five kinds" -e "five effects" -e "any of the five" -e "history read" -e "task history" crates/runvil/src crates/harness/src` returns nothing relevant. There is no separate proofreading pass: the step review reads `effect.md`, and the doctests and the docs build catch broken code and links.
   - Trust and nonce coverage for the remaining built-ins stays; only the history-read tests go.
   - Residual searches, run from the repository root, expected empty (judge any remaining hit; unrelated senses of "history" stay):
     - `rg -n -i -e TaskEvents -e task_events -e "tasks\.events" -e task_history -e LogTaskEvents -e events_for_task -e event_sequence -e readable_task -e 16-task-events -e "history read" -e "reported history" -e "task's history" . -g "!vibe/**" -g "!target/**" -g "!node_modules/**"`
     - Case-sensitive `rg -n "Task Events" . -g "!vibe/**" -g "!target/**" -g "!node_modules/**"`; the capital-E title appears nowhere else.
     - Renumbering stragglers: `rg -n -e 17-limits-and-errors -e 18-quick-reference -e the-models-status-cancel-and-history-tools . -g "!vibe/**" -g "!target/**" -g "!node_modules/**"`. This catches the `crates/harness/src/vfs.md` link and any export drift.
-    - Leftover counts: `rg -n -i -e "\bfive\b" -e "\bfifth\b" crates/promptforge-internal crates/harness-internal crates/promptforge crates/harness guide/src | rg -i "task|built-?in|effect|performer"`, and `rg -c "task_events" guide/promptforge-language-guide.md` must report 0.
+    - Leftover counts: `rg -n -i -e "\bfive\b" -e "\bfifth\b" crates/runvil-internal crates/harness-internal crates/runvil crates/harness guide/src | rg -i "task|built-?in|effect|performer"`, and `rg -c "task_events" guide/runvil-language-guide.md` must report 0.
   - No performance work; the change only removes code paths.
 - Exit criteria:
   - The first two steps pass their touched-crate tests, formatter check and lint, plus the commands their Tests lines name. The last step passes the workspace suite once: formatter check, workspace clippy, workspace nextest (Workshop crates excluded) and the facade and Engine docs build, plus the guide site build and the residual searches.
@@ -243,7 +243,7 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 - Deferred: a host-owned log and dropping tokio from the Harness. This removal unblocks both; revisit when that work is planned.
 - Deferred: any redesigned way to read task history. Revisit only if a concrete use appears.
 - Deferred: regenerating the facade pages with Cicerone. Revisit at the next regular run.
-- Out of scope: `c:\Users\Vinnie\cursor\promptforge2`, `promptforge3` and `promptforge-design`.
+- Out of scope: `c:\Users\Vinnie\cursor\runvil2`, `runvil3` and `runvil-design`.
 - Out of scope: anything under `vibe/`.
 - Out of scope: the rule text in `AGENTS.md`.
 - Out of scope: structural checks or retired-symbol seeds for the removed names.
@@ -256,30 +256,30 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 
 - Status: complete
 - Build command: None for this plan. Clippy and nextest compile every target this change touches, so no separate build runs. The repository's own build, `cargo build --locked -p gateway`, is unrelated to this change.
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features` for each touched crate, optionally narrowed with a test-name substring; nextest does not run doctests, so for a touched `promptforge`, `promptforge-engine` or `harness` also run `cargo test --locked --doc -p <crate>`; a single Node test file runs as `node --test <path>` from `crates/workshop/ui`.
-- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` for each touched crate, then `cargo test --locked --doc -p <crate>` when the crate is `promptforge`, `promptforge-engine` or `harness`. The Workshop trio and the UI suites are not part of this plan's run.
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features` for each touched crate, optionally narrowed with a test-name substring; nextest does not run doctests, so for a touched `runvil`, `runvil-engine` or `harness` also run `cargo test --locked --doc -p <crate>`; a single Node test file runs as `node --test <path>` from `crates/workshop/ui`.
+- Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` for each touched crate, then `cargo test --locked --doc -p <crate>` when the crate is `runvil`, `runvil-engine` or `harness`. The Workshop trio and the UI suites are not part of this plan's run.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`. Workspace doctests, the Workshop trio and the UI `npm test` suites are left out of this plan's run: no Workshop or gateway file names a removed item, the only code outside the Harness crates that touches `RecordFilter` calls `RecordFilter::default()`, and the first step runs the doctests of the three doc-bearing crates it touches. The repository's complete gate list is in `AGENTS.md` (Verification section) and `.github/workflows/ci.yml`.
 - Linter command: per touched crate `cargo clippy --locked -p <crate> --all-targets --all-features -- -D warnings`; for the full scope `cargo clippy --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`. The Workshop clippy, the headless gate `cargo check -p gateway --no-default-features` and the UI typecheck are left out for the same reason. Never run a standalone `cargo check --workspace` beside clippy.
 - Formatter check command: `cargo fmt --all --check` (the pre-commit hook runs it). Run `cargo fmt --all` first, because it rewrites files.
-- Docs command: on PowerShell `$env:RUSTDOCFLAGS = "-D warnings"; cargo doc --locked --no-deps -p promptforge -p promptforge-engine -p harness; $env:RUSTDOCFLAGS = ""`. Other docs gates stay out of the generic run and appear in a step's Tests line when that step needs them: the user guide `cargo xtask site --books-only`, and the facade surface `cargo +<pinned nightly> xtask api --check`, where the nightly is named in `crates/build-xtask/src/api/toolchain.rs`.
+- Docs command: on PowerShell `$env:RUSTDOCFLAGS = "-D warnings"; cargo doc --locked --no-deps -p runvil -p runvil-engine -p harness; $env:RUSTDOCFLAGS = ""`. Other docs gates stay out of the generic run and appear in a step's Tests line when that step needs them: the user guide `cargo xtask site --books-only`, and the facade surface `cargo +<pinned nightly> xtask api --check`, where the nightly is named in `crates/build-xtask/src/api/toolchain.rs`.
 - Test placement and naming conventions:
   - Rust crates use stable `rust-toolchain.toml` (edition 2024); `clippy.toml` allows `unwrap` and `expect` in tests only.
-  - Unit tests live inside the crate's `src/`: the Engine keeps them in `crates/promptforge-internal/engine/src/execute/tests/` (snake_case files by topic, such as `model_tasks.rs`, with kebab-case siblings like `tasks-chain-end.rs` for a group under three files); the Lua crate keeps `*-tests.rs` siblings beside the module they test (`coro-tests.rs`, `dispatch-tests.rs`).
-  - Integration tests use one binary per crate with a `main.rs` and modules beside it: `tests/suite/` for the `promptforge` and `harness` facades, `tests/it/` for the `harness-internal` crates and the gateway (`--test it`); shared fixtures sit in `support.rs`; Engine prompt fixtures are Markdown files under `crates/promptforge-internal/engine/tests/prompts/{execution,invalid}/` named in kebab-case.
+  - Unit tests live inside the crate's `src/`: the Engine keeps them in `crates/runvil-internal/engine/src/execute/tests/` (snake_case files by topic, such as `model_tasks.rs`, with kebab-case siblings like `tasks-chain-end.rs` for a group under three files); the Lua crate keeps `*-tests.rs` siblings beside the module they test (`coro-tests.rs`, `dispatch-tests.rs`).
+  - Integration tests use one binary per crate with a `main.rs` and modules beside it: `tests/suite/` for the `runvil` and `harness` facades, `tests/it/` for the `harness-internal` crates and the gateway (`--test it`); shared fixtures sit in `support.rs`; Engine prompt fixtures are Markdown files under `crates/runvil-internal/engine/tests/prompts/{execution,invalid}/` named in kebab-case.
   - Test function names are descriptive sentences in snake_case, for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`.
   - UI tests are Node test files: `crates/workshop/ui/test/*.mjs` and `crates/workshop/ui/src/**/*.test.mjs`, including the `docs-claims.mjs` guard that enforces the Engine, Harness and Host vocabulary in every `AGENTS.md`, `## Invariants` crate doc and `.cursor/rules` file; repository tools keep theirs in `tools/*.test.mjs`.
   - Behavior changes ship with tests in the same change; per `AGENTS.md`, structural checks are added only with explicit user approval.
 - Directory map:
-  - `crates/promptforge/` is the Engine's public facade, with `public-api.txt` and facade pages as `src/*.md`; `crates/promptforge-internal/` holds `engine`, `types`, `parser`, `lua`, `vfs` and `model-client`.
+  - `crates/runvil/` is the Engine's public facade, with `public-api.txt` and facade pages as `src/*.md`; `crates/runvil-internal/` holds `engine`, `types`, `parser`, `lua`, `vfs` and `model-client`.
   - `crates/harness/` is the Harness facade; `crates/harness-internal/` holds `runner`, `models`, `plugins`, `log`, `sessions`, `web`, `webfetch` and `web-search`.
   - `crates/gateway/` is a private container (`app`, `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/` with its own four crates), beside the public root crates `gateway-api-types` and `gateway-api-discovery`.
   - `crates/workshop/` holds the desktop app, the in-process `server`, `server-api`, the subsystem crates (`gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`) and the TypeScript packages `ui`, `look` and `platform` under one npm workspace.
   - `crates/shared-*` are the cross-product crates (`shared-error-source`, `shared-loopback`), `crates/shared-ui` is the TypeScript and CSS package for the Gateway config UI, `crates/build-*` are meta tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`), and `crates/workspace-hack` is the cargo-hakari unification crate.
   - `guide/` holds the three books (`src/language/`, `src/gateway/`, `src/workshop/`) plus `CONTRIBUTING.md`; `tools/` holds `cicerone.md` with its scripts and plans and the Node sidecar scripts; `vibe/` holds `archdoc.md` and dated plan records; `.github/workflows/` holds CI and release workflows; `.githooks/` holds `pre-commit` and `pre-push`; `.cargo/config.toml` defines the `xtask` and `workshop` aliases; `.config/` holds `nextest.toml` and `hakari.toml`; `cabinet/`, `local/`, `prompts/`, `images/`, `target/` and `target-msrv/` hold working material and build output.
 - Component boundaries:
-  - Dependencies flow Host to Harness to Engine: the Harness depends only on `promptforge` among product crates and is reached by outside crates only through `harness`; the Engine parses and steps and never performs I/O; Workshop crates may name only the gateway public pair, the `promptforge` API and `harness`.
-  - Each family has one public root crate and a manifestless private container (`promptforge-internal`, `harness-internal`, `gateway`, `workshop`); a container crate may depend only on crates at the `crates/` root and its own siblings, and `build-*` crates are exempt.
-  - Gateway crates never depend on `promptforge`, Harness or Workshop crates; `promptforge-*` crates never depend on gateway, Workshop or Harness crates; shared crates depend on no product crate; the desktop app depends on `workshop-server-api`, never on `workshop-server`.
+  - Dependencies flow Host to Harness to Engine: the Harness depends only on `runvil` among product crates and is reached by outside crates only through `harness`; the Engine parses and steps and never performs I/O; Workshop crates may name only the gateway public pair, the `runvil` API and `harness`.
+  - Each family has one public root crate and a manifestless private container (`runvil-internal`, `harness-internal`, `gateway`, `workshop`); a container crate may depend only on crates at the `crates/` root and its own siblings, and `build-*` crates are exempt.
+  - Gateway crates never depend on `runvil`, Harness or Workshop crates; `runvil-*` crates never depend on gateway, Workshop or Harness crates; shared crates depend on no product crate; the desktop app depends on `workshop-server-api`, never on `workshop-server`.
   - Workshop tiers run one way: server, features, services, vocabulary; the SPA's lazy panels never import the entry bundle.
 - Conventions summary:
   - Workspace lints forbid `unsafe_code`, deny clippy `all` and `pedantic`, and deny `unwrap_used` and `expect_used`; `missing_docs` and `unreachable_pub` warn; rustdoc broken links are denied.
@@ -301,7 +301,7 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 ### Step 1: Remove the task history read [completed]
 
 - Component: task-history-code
-- Artifacts: the Engine (`crates/promptforge-internal/engine`), the Lua protocol (`crates/promptforge-internal/lua`), the Harness runner (`crates/harness-internal/runner`), the types prose (`crates/promptforge-internal/types/AGENTS.md`), the facade pages `crates/promptforge/src/effect.md` and `crates/harness/src/lib.md`, `tools/cicerone/plans/promptforge.md`, and `crates/promptforge/public-api.txt`. Every file, symbol and rewrite is listed under Technical Design, "File and public API changes" (Engine source, Engine tests, Lua source and tests, Harness runner, Facade pages, Public API).
+- Artifacts: the Engine (`crates/runvil-internal/engine`), the Lua protocol (`crates/runvil-internal/lua`), the Harness runner (`crates/harness-internal/runner`), the types prose (`crates/runvil-internal/types/AGENTS.md`), the facade pages `crates/runvil/src/effect.md` and `crates/harness/src/lib.md`, `tools/cicerone/plans/runvil.md`, and `crates/runvil/public-api.txt`. Every file, symbol and rewrite is listed under Technical Design, "File and public API changes" (Engine source, Engine tests, Lua source and tests, Harness runner, Facade pages, Public API).
 - Work, inside-out so the build stays green while you go (the Engine, Lua and runner changes compile only together once the effect variant goes):
   - First rewrite both tours in `effect.md` so the greeter prompt no longer calls `tasks.events`, and re-derive the tour-2 numbers from a real doctest run. This works while the feature still exists.
   - Then remove the two entry points: `tasks_events` and its export in `__impl_tasks.lua`, and the `task_events` built-in in `builtins.rs`, `builtins-schemas.rs` and `tool_call.rs`. Move `text_of` and `drive_scripted` into `serial_driver.rs` and repoint `run_inputs.rs` and `model_task_trust.rs` before deleting `execute/tests/task_events.rs`. Delete the listed tests and the two runner tests in `tests/it/performers.rs` that run `tasks.events` prompts, and edit the name lists.
@@ -309,13 +309,13 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
   - Then remove the effect and its performer together: the four `TaskEvents` variants and two conversions in `execute/run/effect.rs`, `task_history`, the `test_support` arms, `TaskEventsPerformer`, the `Performers` field, `LogTaskEvents`, the `prepare.rs` construction, the `effect_loop.rs` arm and the runner test support. Finish `effect.md` (the `TaskEvents` arm, tables and prose), then bless `public-api.txt`.
   - Last, rename the lookalike test helpers and edit the remaining prose (Engine `lib.md` and `README.md`, `types/AGENTS.md`, `crates/harness/src/lib.md`, the Cicerone plan line).
 - Tests: no new test, because a deletion has no behavior to pin and a retired-name guard is excluded by decision; the existing suites are the check. Besides the touched-crate tests, formatter check and lint, run these as written:
-  - `cargo test --locked --doc -p promptforge -p promptforge-engine -p harness --all-features`
-  - `$env:RUSTDOCFLAGS="-D warnings"; cargo doc --locked --no-deps -p promptforge -p promptforge-engine; $env:RUSTDOCFLAGS=""`
-  - `cargo +nightly-2026-09-05 xtask api --bless`, then `git diff crates/promptforge/public-api.txt` must remove only the ten `TaskEvents` lines, then `cargo +nightly-2026-09-05 xtask api --check`
+  - `cargo test --locked --doc -p runvil -p runvil-engine -p harness --all-features`
+  - `$env:RUSTDOCFLAGS="-D warnings"; cargo doc --locked --no-deps -p runvil -p runvil-engine; $env:RUSTDOCFLAGS=""`
+  - `cargo +nightly-2026-09-05 xtask api --bless`, then `git diff crates/runvil/public-api.txt` must remove only the ten `TaskEvents` lines, then `cargo +nightly-2026-09-05 xtask api --check`
   - `cargo test --locked -p build-xtask`
   - `node --test test/docs-claims.mjs` from `crates/workshop/ui`
-  - `rg -n -i -e TaskEvents -e task_events -e "tasks\.events" -e task_history -e LogTaskEvents -e event_sequence crates/promptforge crates/promptforge-internal crates/harness crates/harness-internal/runner tools` finds nothing
-  - the facade scan `rg -n -i -e "five kinds" -e "five effects" -e "any of the five" -e "history read" -e "task history" crates/promptforge/src crates/harness/src` finds nothing relevant
+  - `rg -n -i -e TaskEvents -e task_events -e "tasks\.events" -e task_history -e LogTaskEvents -e event_sequence crates/runvil crates/runvil-internal crates/harness crates/harness-internal/runner tools` finds nothing
+  - the facade scan `rg -n -i -e "five kinds" -e "five effects" -e "any of the five" -e "history read" -e "task history" crates/runvil/src crates/harness/src` finds nothing relevant
 
 </step-1>
 <step-2>
@@ -333,12 +333,12 @@ The owner chose a complete cut with no leftovers, and fixed the guide shape and 
 ### Step 3: Remove the Task Events chapter [completed]
 
 - Component: guide-chapter
-- Artifacts: `guide/src/language/16-task-events.md` (deleted), `17-limits-and-errors.md` and `18-quick-reference.md` (renamed to `16-limits-and-errors.md` and `17-quick-reference.md`), the chapters `01`, `04`, `05`, `10`, `11`, `12` and `15-tasks.md`, `guide/src/introduction.md`, `crates/harness/src/vfs.md`, and the regenerated `guide/promptforge-language-guide.md`. All edits are listed under Technical Design, "File and public API changes" (Guide).
+- Artifacts: `guide/src/language/16-task-events.md` (deleted), `17-limits-and-errors.md` and `18-quick-reference.md` (renamed to `16-limits-and-errors.md` and `17-quick-reference.md`), the chapters `01`, `04`, `05`, `10`, `11`, `12` and `15-tasks.md`, `guide/src/introduction.md`, `crates/harness/src/vfs.md`, and the regenerated `guide/runvil-language-guide.md`. All edits are listed under Technical Design, "File and public API changes" (Guide).
 - Work, in this order because later edits depend on the renames: `git rm` chapter 16 and `git mv` 17 and 18; rewrite the two chapter names in every link under `guide/src` and in `crates/harness/src/vfs.md` with a short Python script; rename the `15-tasks.md` heading, delete its `### History reads` subsection and rewrite the old anchor in every link; apply the per-site edits chapter by chapter; run the leftover scan from Technical Design and judge each hit; regenerate the exports once at the end.
 - Tests: no new test (prose only). Run these as written, one at a time:
-  - `cargo run --locked -q -p build-user-guide`, then `git diff --stat -- guide` lists only the language chapters and `guide/promptforge-language-guide.md`, with the gateway and workshop exports unchanged
+  - `cargo run --locked -q -p build-user-guide`, then `git diff --stat -- guide` lists only the language chapters and `guide/runvil-language-guide.md`, with the gateway and workshop exports unchanged
   - `cargo xtask site --books-only`
-  - the residual searches from the Testing Plan: the removed-name search, the case-sensitive `Task Events` search, the renumbering-straggler search, the "five" and "fifth" search, and `rg -c "task_events" guide/promptforge-language-guide.md` reporting 0
+  - the residual searches from the Testing Plan: the removed-name search, the case-sensitive `Task Events` search, the renumbering-straggler search, the "five" and "fifth" search, and `rg -c "task_events" guide/runvil-language-guide.md` reporting 0
   - The last step also gets the full-scope run from the project survey; judge any residual hit and keep the unrelated senses of "history".
 
 </step-3>

@@ -129,13 +129,13 @@ jobs:
       # Each facade as consumers read it and as the docs site publishes it: the
       # topic docs build alone, with default features.
       - name: Facade docs
-        run: cargo doc -p promptforge --no-deps
+        run: cargo doc -p runvil --no-deps
 
       - name: Harness facade docs
         run: cargo doc -p harness --no-deps
 
       - name: Engine docs (private items)
-        run: cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items
+        run: cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items
 
   check-workshop:
     runs-on: windows-latest
@@ -169,7 +169,7 @@ jobs:
         run: cargo build --locked -p gateway --no-default-features
 
       - name: Stage Gateway sidecar
-        run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe
+        run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe
 
       # workshop-server-api is the desktop app's re-export view of workshop-server,
       # so it runs in this partition with the crates it fronts and stays
@@ -250,7 +250,7 @@ jobs:
         run: cargo build --locked -p gateway --no-default-features
 
       - name: Stage Gateway sidecar
-        run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-unknown-linux-gnu --source target/debug/promptforge-gateway
+        run: node tools/stage-gateway-sidecar.mjs stage --target x86_64-unknown-linux-gnu --source target/debug/runvil-gateway
 
       - name: Build (workshop, Linux)
         run: cargo build --locked -p workshop
@@ -419,7 +419,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Build the Engine crates at the floor
-        run: cargo build --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-types -p promptforge-vfs -p promptforge-model-client
+        run: cargo build --locked -p runvil -p runvil-engine -p runvil-lua -p runvil-parser -p runvil-types -p runvil-vfs -p runvil-model-client
 
   # Single required status check for branch protection: it fails when any
   # job fails or is cancelled, so a cancelled job cannot read as green.

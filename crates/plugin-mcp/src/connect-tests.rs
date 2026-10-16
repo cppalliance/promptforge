@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use promptforge_plugin::PluginId;
+use runvil_plugin::PluginId;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 

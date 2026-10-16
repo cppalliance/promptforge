@@ -60,13 +60,13 @@ fn an_env_change_that_breaks_a_reference_is_refused() {
     std::fs::write(
         &config_path,
         "config-version = 0\n\n[server]\nbind = \"127.0.0.1:0\"\n\
-         api_key = \"${PF_TEST_ROLLBACK_KEY}\"\n",
+         api_key = \"${RV_TEST_ROLLBACK_KEY}\"\n",
     )
     .expect("write config");
 
     let env_path = config_path.with_extension("env");
 
-    std::fs::write(&env_path, "PF_TEST_ROLLBACK_KEY=booted\n")
+    std::fs::write(&env_path, "RV_TEST_ROLLBACK_KEY=booted\n")
         .expect("writing env file should succeed");
 
     write_shadow(&env_path, "OTHER=value\n").expect("writing to shadow should succeed");

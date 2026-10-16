@@ -1,4 +1,4 @@
-//! The facade shape check, live: every `.rs` file under the `promptforge`
+//! The facade shape check, live: every `.rs` file under the `runvil`
 //! and `harness` facades' `src/` holds only grouping `pub mod` blocks with
 //! doc comments, single-item `pub use internal_crate::path::Item;`
 //! re-exports, and doc attributes, so every surface item is defined in an
@@ -23,9 +23,9 @@ use syn::spanned::Spanned;
 use syn::{Attribute, Item, ItemMod, ItemUse, Meta};
 use syn::{UseTree, Visibility};
 
-/// The `promptforge` facade's crate directory, relative to the workspace
+/// The `runvil` facade's crate directory, relative to the workspace
 /// root.
-pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "promptforge"];
+pub(crate) const FACADE_DIR: [&str; 2] = ["crates", "runvil"];
 
 /// Every facade the shape check covers, relative to the workspace root.
 pub(crate) const FACADE_DIRS: [[&str; 2]; 2] = [FACADE_DIR, ["crates", "harness"]];

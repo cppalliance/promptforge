@@ -64,7 +64,7 @@ models.use("analyst")  -- override for this section only
 
 ### 1. Declaration recording
 
-In [lua.rs](promptforge/crates/promptforge-core/src/lua.rs) / [lua_models.rs](promptforge/crates/promptforge-core/src/lua_models.rs) (wherever `models.need` binding lives):
+In [lua.rs](runvil/crates/runvil-core/src/lua.rs) / [lua_models.rs](runvil/crates/runvil-core/src/lua_models.rs) (wherever `models.need` binding lives):
 
 - Add `models.always(alias)` callback in binding mode (same rules as `tools.always`: alias must have been declared by `models.need`, at most once, H1 only)
 - Record it on `ModelBindings` (add an `always: Option<String>` field - only one model can be the default, unlike tools where multiple can be always-on)

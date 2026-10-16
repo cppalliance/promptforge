@@ -5,7 +5,7 @@
 //! auth header shape, pagination, and response mapping stay private to the
 //! file. No other crate links the library. Its `shared-cloud-providers`
 //! binary builds the cloud model sheet (`cloud-provider-models.json`), a
-//! weekly workflow in the separate `cppalliance/promptforge-cloud-providers`
+//! weekly workflow in the separate `cppalliance/runvil-cloud-providers`
 //! repository publishes it, and the Gateway downloads the published sheet.
 
 use gateway_api_types::{EnvRole, ModelEntry, Tier};

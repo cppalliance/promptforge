@@ -25,7 +25,7 @@ isProject: false
 
 # Progressive transcription: committed + tentative + vocabulary biasing
 
-Six tight commits. Each is the largest slice one test covers completely. Coder then review-and-fix per commit; Verify on commits 3 and 6 (and whenever review dirties the tree). Follow the rust-rulebook and vibe-rulebook. Append design log entries (design/design-promptforge-wb-1.md, numbered, Choice/Evidence/Cost; last entry is ~79) in the commit that makes each decision.
+Six tight commits. Each is the largest slice one test covers completely. Coder then review-and-fix per commit; Verify on commits 3 and 6 (and whenever review dirties the tree). Follow the rust-rulebook and vibe-rulebook. Append design log entries (design/design-runvil-wb-1.md, numbered, Choice/Evidence/Cost; last entry is ~79) in the commit that makes each decision.
 
 Direction (adjudicated with the user): build on the existing whisper-rs stack. Do NOT switch to transcribe-cpp (different GGUF format, pre-1.0, single maintainer). Steal the stable-prefix idea, not the crate.
 
@@ -80,7 +80,7 @@ Direction (adjudicated with the user): build on the existing whisper-rs stack. D
 
 **Goal:** domain terms (MCP, Lua, GGUF, axum, tokio, Boost.Beast, coroutine, etc.) resolve correctly instead of being misheard.
 
-**`config.rs`:** `VoiceConfig` gains `vocabulary: Vec<String>` (default empty). Generated template in `promptforge-wb/src/discover.rs` gets a commented-out example line. `workbench.example.toml` documents it.
+**`config.rs`:** `VoiceConfig` gains `vocabulary: Vec<String>` (default empty). Generated template in `runvil-wb/src/discover.rs` gets a commented-out example line. `workbench.example.toml` documents it.
 
 **`transcribe.rs`:** format the vocabulary as a glossary prompt - `"Glossary: term1, term2, ..."` (this format measurably outperforms raw keyword lists per the research). Prepend to the existing segment-conditioning prompt on the final worker; pass as `initial_prompt` on the interim worker. Respect whisper's 224-token prompt cap: truncate the glossary to fit (log a warning when truncated).
 
@@ -114,7 +114,7 @@ The plan was born mid-session when the user rejected the batch-style transcripti
 
 > "once we have so much text that the beginning is unlikely to be reinterpreted, then I wanna speculatively run the large model ... we can crystallize what the beginning is gonna be, and then as they keep talking, then we crystallize the next segment. ... the end of the text is gonna be volatile, it's gonna keep getting rewritten. But once you go past a certain size, we shouldn't be rewriting the beginning. ... by the time that if the user stops recording After a big input of text, we've already done the big model ... and then the suffix we can just resolve. ... this is how Cursor works. ... I want prior art now."
 
-Requirements (verbatim fragments): "I wanna be able to have accuracy, and I want the user to see the words visibly" and "it doesn't have to be real time. So we can trade that off a little bit" - accuracy over latency. Plus domain vocabulary: "I want to have the capability to give it a vocabulary that's like specific to PromptForge ... like MCP, like it knows what MCP is. So when the user says a word that's ambiguous, then it can resolve it in the context of ... some kind of AI work with PromptForge." The textarea growth bug was folded in from the same message ("the edit box doesn't grow vertically ... There's a bug in the UI").
+Requirements (verbatim fragments): "I wanna be able to have accuracy, and I want the user to see the words visibly" and "it doesn't have to be real time. So we can trade that off a little bit" - accuracy over latency. Plus domain vocabulary: "I want to have the capability to give it a vocabulary that's like specific to Runvil ... like MCP, like it knows what MCP is. So when the user says a word that's ambiguous, then it can resolve it in the context of ... some kind of AI work with Runvil." The textarea growth bug was folded in from the same message ("the edit box doesn't grow vertically ... There's a bug in the UI").
 
 Decomposition constraint (user, verbatim): "decompose this if possible I want these commits tight."
 

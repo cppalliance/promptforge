@@ -2,7 +2,7 @@ name: Deploy docs site to Pages
 on:
   push:
     branches: [main, master]
-  # The chapters live in cppalliance/promptforge-docs, whose pushes do not
+  # The chapters live in cppalliance/runvil-docs, whose pushes do not
   # start this workflow, so a nightly run publishes them.
   schedule:
     - cron: "17 7 * * *"
@@ -23,18 +23,18 @@ concurrency:
 jobs:
   # Forks have no Pages site for these docs; skip both jobs there.
   build:
-    if: github.repository == 'cppalliance/promptforge'
+    if: github.repository == 'cppalliance/runvil'
     runs-on: ubuntu-latest
     env:
       MDBOOK_VERSION: 0.4.44
-      PROMPTFORGE_DOCS: ${{ github.workspace }}/promptforge-docs
+      RUNVIL_DOCS: ${{ github.workspace }}/runvil-docs
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/checkout@v4
         with:
-          repository: cppalliance/promptforge-docs
-          path: promptforge-docs
+          repository: cppalliance/runvil-docs
+          path: runvil-docs
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
@@ -62,7 +62,7 @@ jobs:
         with:
           path: target/site
   deploy:
-    if: github.repository == 'cppalliance/promptforge' && github.event_name != 'pull_request'
+    if: github.repository == 'cppalliance/runvil' && github.event_name != 'pull_request'
     needs: build
     # The Pages permissions live only on this job, which never runs on PRs.
     permissions:

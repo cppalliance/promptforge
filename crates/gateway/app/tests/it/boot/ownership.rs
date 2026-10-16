@@ -29,7 +29,7 @@ fn spawn_at_ownership_rendezvous(
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        !gateway_api_discovery::gateway_discovery_file_path(&home.join(".promptforge").join("run"))
+        !gateway_api_discovery::gateway_discovery_file_path(&home.join(".runvil").join("run"))
             .exists(),
         "neither process can acquire ownership or publish before release"
     );
@@ -94,7 +94,7 @@ fn assert_exactly_one_process_owns(
 
 #[cfg(feature = "test-fixtures")]
 fn assert_one_canonical_log(home: &std::path::Path) {
-    let logs = home.join(".promptforge").join("logs");
+    let logs = home.join(".runvil").join("logs");
     let log_path = logs.join("gateway.log");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let log = loop {
@@ -113,7 +113,7 @@ fn assert_one_canonical_log(home: &std::path::Path) {
         "a losing process never rotates the owner's canonical log"
     );
     assert_eq!(
-        log.matches("promptforge-gateway").count(),
+        log.matches("runvil-gateway").count(),
         1,
         "only the owner writes the versioned startup record: {log}"
     );
@@ -131,7 +131,7 @@ fn assert_one_canonical_log(home: &std::path::Path) {
 fn simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let run_dir = temp.path().join(".promptforge").join("run");
+    let run_dir = temp.path().join(".runvil").join("run");
     let (mut first, mut second) = spawn_at_ownership_rendezvous(&config, temp.path());
 
     let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
@@ -159,7 +159,7 @@ fn simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff() {
 fn workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let run_dir = temp.path().join(".promptforge").join("run");
+    let run_dir = temp.path().join(".runvil").join("run");
     let gateway_api_discovery::LaunchDecision::Launch(workshop_lock) =
         gateway_api_discovery::launch_or_attach(&run_dir, Duration::from_secs(5))
             .expect("Workshop wins the parent launch election")
@@ -200,7 +200,7 @@ fn workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot() {
 fn the_default_binary_ignores_test_rendezvous_environment() {
     let temp = tempfile::tempdir().unwrap();
     let config = race_config(&temp);
-    let run_dir = temp.path().join(".promptforge").join("run");
+    let run_dir = temp.path().join(".runvil").join("run");
     let ready = temp.path().join("default-build-ready");
     let absent_release = temp.path().join("default-build-release");
     let mut gateway =

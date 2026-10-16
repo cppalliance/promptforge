@@ -1,6 +1,6 @@
 ---
 name: Remove hakari
-overview: Remove the workspace-hack crate and cargo-hakari from promptforge, delete workshop-server's `headless` feature, and fold the five Windows Workshop test runs into one nextest command, while keeping what the shipped gateway and Workshop do at runtime unchanged.
+overview: Remove the workspace-hack crate and cargo-hakari from runvil, delete workshop-server's `headless` feature, and fold the five Windows Workshop test runs into one nextest command, while keeping what the shipped gateway and Workshop do at runtime unchanged.
 todos:
   - id: baseline
     content: Capture baseline cargo tree feature lists for gateway and workshop on the five targets (scratch)
@@ -35,12 +35,12 @@ isProject: false
 
 ## Product Requirements
 
-The promptforge repository uses cargo-hakari's `workspace-hack` crate to give every workspace crate one shared third-party feature set. That compiles test-only features into the shipped gateway and Workshop binaries, puts the async and HTTP stack under the sans-I/O Engine crates, and carries Workshop-only features into the gateway. This change removes hakari entirely, deletes the `headless` feature of `workshop-server`, and folds the Windows Workshop CI job's five test commands into one. Shipped runtime behavior stays the same, apart from the intended removals.
+The runvil repository uses cargo-hakari's `workspace-hack` crate to give every workspace crate one shared third-party feature set. That compiles test-only features into the shipped gateway and Workshop binaries, puts the async and HTTP stack under the sans-I/O Engine crates, and carries Workshop-only features into the gateway. This change removes hakari entirely, deletes the `headless` feature of `workshop-server`, and folds the Windows Workshop CI job's five test commands into one. Shipped runtime behavior stays the same, apart from the intended removals.
 
 - Problem and users:
-  - Users: the repository owner, the agents that build, test, and change promptforge, and CI. All paths below are relative to the promptforge repository root.
-  - `crates/workspace-hack/Cargo.toml:69` and `:142` list tokio with `test-util` as a normal and a build dependency. Every direct request for `test-util` is a dev-dependency: `crates/promptforge-internal/engine/Cargo.toml:44`, `crates/gateway/app/Cargo.toml:158`, `crates/workshop/server/Cargo.toml:83`, `crates/workshop/support/Cargo.toml:28`, `crates/workshop/status/Cargo.toml:17`, and `crates/gateway/stt/engine/Cargo.toml:16`. Release builds compile it anyway.
-  - Six of the seven Engine crates depend on `workspace-hack`: `crates/promptforge/Cargo.toml:18`, plus the `workspace-hack.workspace = true` lines in `crates/promptforge-internal/{engine,lua,model-client,parser,types}/Cargo.toml`. The seventh, `crates/promptforge-internal/vfs`, declares no dependencies at all. So `cargo build -p promptforge-types` compiles tokio, reqwest, hyper, and Workshop GUI crates.
+  - Users: the repository owner, the agents that build, test, and change runvil, and CI. All paths below are relative to the runvil repository root.
+  - `crates/workspace-hack/Cargo.toml:69` and `:142` list tokio with `test-util` as a normal and a build dependency. Every direct request for `test-util` is a dev-dependency: `crates/runvil-internal/engine/Cargo.toml:44`, `crates/gateway/app/Cargo.toml:158`, `crates/workshop/server/Cargo.toml:83`, `crates/workshop/support/Cargo.toml:28`, `crates/workshop/status/Cargo.toml:17`, and `crates/gateway/stt/engine/Cargo.toml:16`. Release builds compile it anyway.
+  - Six of the seven Engine crates depend on `workspace-hack`: `crates/runvil/Cargo.toml:18`, plus the `workspace-hack.workspace = true` lines in `crates/runvil-internal/{engine,lua,model-client,parser,types}/Cargo.toml`. The seventh, `crates/runvil-internal/vfs`, declares no dependencies at all. So `cargo build -p runvil-types` compiles tokio, reqwest, hyper, and Workshop GUI crates.
   - The hack has already forced one workaround. `tauri-plugin-updater`'s default `rustls-tls` feature would have put `ring` into every member, the gateway included (`Cargo.toml:242-251`).
   - The Windows `check-workshop` job runs five test commands on different package sets (`.github/workflows/ci.yml:182-210`). The Linux `check-workshop-linux` job repeats five race tests (`.github/workflows/ci.yml:265-272`).
 - Goals:
@@ -55,7 +55,7 @@ The promptforge repository uses cargo-hakari's `workspace-hack` crate to give ev
   - Adding a standing CI check that compiles each crate alone.
 - Success criteria:
   - `rg -n --hidden "hakari|workspace-hack|workspace_hack" --glob '!vibe/**' --glob '!.git/**'` from the repository root returns nothing, `Cargo.lock` included. Without `--hidden`, rg skips `.github/` and `.config/`.
-  - The normal closure of `promptforge-types` (`cargo tree --locked -p promptforge-types -e normal --prefix none`) has no `tokio` line. `cargo tree -i tokio` can't express this: it exits with an error when tokio isn't in the crate's graph at all.
+  - The normal closure of `runvil-types` (`cargo tree --locked -p runvil-types -e normal --prefix none`) has no `tokio` line. `cargo tree -i tokio` can't express this: it exits with an error when tokio isn't in the crate's graph at all.
   - In the gateway's `cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none` output, the tokio line has no `test-util`.
   - The Windows `check-workshop` job has exactly one test step, and that step still runs the five race tests on Windows.
   - `ci.yml` is green on the branch. A dispatched `release-workshop.yml` run builds all five targets.
@@ -112,8 +112,8 @@ Feature unification goes back to cargo's default: within one command, across the
   - Dependency features still unify across all packages selected in one command. This is the cargo behavior that lets the merged Windows command share one build (Cargo reference, features page, "Feature unification").
 - Modules and interfaces:
   - build-xtask's product-boundary matrix (`crates/build-xtask/src/product.rs:15-23`, `:159-161`, `:231-236`, `:276-284`) changes as follows:
-    - Outside their family, Harness crates may name only `promptforge` and `promptforge-plugin`. Any unaffiliated crate is a breach.
-    - Plugin crates may name only `promptforge-plugin`, `shared-*` crates, and outside libraries.
+    - Outside their family, Harness crates may name only `runvil` and `runvil-plugin`. Any unaffiliated crate is a breach.
+    - Plugin crates may name only `runvil-plugin`, `shared-*` crates, and outside libraries.
   - build-xtask's ceiling-wiring check loses its special case for a crate without a build script. The affected code is the `WORKSPACE_HACK` and `LINE_LIMIT` constants, the doc line, the branch, and `workspace_hack_violations` (`crates/build-xtask/src/tidy-wiring.rs:13-17`, `:25`, `:40-47`, `:193-213`). The `else` body of the branch stays.
   - workshop-server's asset layer becomes `EmbeddedAssets` alone. The `AssetServer` trait only existed to choose between `EmbeddedAssets` and `NoopAssets`, so it collapses into `EmbeddedAssets`, and `ui_asset` loses its server argument (`crates/workshop/server/src/assets.rs:66-141`, `crates/workshop/server/src/routes/assets.rs:11-24`). `NoopAssets` and its test `the_noop_asset_layer_serves_nothing` are deleted.
 - File and public API changes:
@@ -128,16 +128,16 @@ Feature unification goes back to cargo's default: within one command, across the
   - Member manifests: delete the line `workspace-hack.workspace = true` from every member `Cargo.toml` under `crates/` that has it. There are 49, each with no adjoining comment; `rg -l '^workspace-hack\.workspace = true' crates` lists them.
   - Comments that name hakari or the hack:
     - `crates/build-ceiling/Cargo.toml:9-12`
-    - `crates/promptforge-internal/vfs/Cargo.toml:9-12`
+    - `crates/runvil-internal/vfs/Cargo.toml:9-12`
     - `crates/build-xtask/src/engine_deps.rs:22-23`
     - `crates/build-xtask/src/test_support_leak.rs:34-35`
     - `crates/build-xtask/src/harness_bans.rs:11-12`
   - `## Invariants` docs that list `workspace-hack` as an allowed dependency:
-    - `crates/promptforge-plugin/src/lib.rs:22-23`
+    - `crates/runvil-plugin/src/lib.rs:22-23`
     - `crates/plugin-mcp/src/lib.rs:57-58`
     - `crates/plugin-user-input/src/lib.rs:68-69`
     - `crates/plugin-web/src/lib.rs:48-49`
-    - `crates/promptforge-internal/types/src/lib.rs:31`
+    - `crates/runvil-internal/types/src/lib.rs:31`
   - build-xtask tests:
     - `crates/build-xtask/src/product/harness_tests.rs`: delete `a_harness_crate_depending_on_workspace_hack_passes` (`:53-67`) and update the expected messages at `:101` and `:122-124`.
     - `crates/build-xtask/src/product/plugin_tests.rs`: update the fixture at `:19`, `PLUGIN_RULE` at `:29`, and the passing test at `:32-39`.
@@ -154,7 +154,7 @@ Feature unification goes back to cargo's default: within one command, across the
     - `check-workshop-linux`: delete the race-test step (`:265-272`).
   - `Cargo.lock`: only the `workspace-hack` package and its dependency edges are removed. No versions change.
   - Crate manifests that relied on hakari gain the explicit features the per-crate sweep finds.
-  - No public Rust API changes. The facade listing `crates/promptforge/public-api.txt` is unaffected.
+  - No public Rust API changes. The facade listing `crates/runvil/public-api.txt` is unaffected.
 - Merged Windows test step, replacing the four steps named above:
 
   ```yaml
@@ -180,7 +180,7 @@ Feature unification goes back to cargo's default: within one command, across the
   - **Feature flags.** `--no-default-features` turns off defaults for every selected package, and `gateway/test-fixtures` enables `test-fixtures` on the gateway alone (Cargo reference, features page, "Command-line feature options"). The four Workshop crates have empty defaults (`crates/workshop/desktop/Cargo.toml:59-60`, `crates/workshop/server/Cargo.toml:64`, `crates/workshop/server-api/Cargo.toml:9-10`, `crates/workshop/workspace/Cargo.toml:9-10`). `gateway-api-discovery` has no `default` at all (`crates/gateway-api-discovery/Cargo.toml:28-32`).
   - **workshop-workspace.** Its only feature is `test-fixtures`, which its own dev-dependency on itself already enables (`crates/workshop/workspace/Cargo.toml:15`, `:36`). So the old `--all-features` run changed nothing.
   - **Filter matching.** In nextest, `package()` and `binary()` default to glob matching, which needs the full name to match, and `test()` defaults to substring matching (nextest filterset reference, "Default matchers"). `package(workshop)` therefore matches only `workshop`.
-  - **No sidecar needed.** The race tests start the gateway through `CARGO_BIN_EXE_promptforge-gateway` (`crates/gateway/app/tests/it/boot/lease.rs:31`, `:62`; `crates/gateway/app/tests/it/support/process.rs:84`). The discovery test re-launches its own test executable (`crates/gateway-api-discovery/tests/it/main.rs:201`).
+  - **No sidecar needed.** The race tests start the gateway through `CARGO_BIN_EXE_runvil-gateway` (`crates/gateway/app/tests/it/boot/lease.rs:31`, `:62`; `crates/gateway/app/tests/it/support/process.rs:84`). The discovery test re-launches its own test executable (`crates/gateway-api-discovery/tests/it/main.rs:201`).
   - **What gets built.** The gateway's only test targets are its library unit tests and `it`; it has no examples or benches (`crates/gateway/app/Cargo.toml`). Its feature-specific test modules are gated, for example `crates/gateway/app/src/boot.rs:391-392` and `crates/gateway/app/tests/it/main.rs:38-45`. `crates/gateway/app/src/main-logging-tests.rs` gates per item.
 - Data, persistence, failure, security, and privacy constraints:
   - **Proxy behavior.**
@@ -213,7 +213,7 @@ Beyond the usual gates, three checks show the change is correct. Every crate com
   - **Cross-platform build.** Dispatch `.github/workflows/release-workshop.yml` on the branch. A dispatched run builds the gateway and the Workshop for all five targets. It uploads only temporary Actions artifacts and never reaches the publish job, which is gated to pushes of `workshop-v*` tags (`.github/workflows/release-workshop.yml:16-20`, `:71-87`, `:146-192`, `:483-485`).
 - Regression, security, and performance:
   - `cargo tree --locked -p gateway -e normal -i ring` prints nothing, and so does the same command with `-p workshop`.
-  - The normal closure (`cargo tree --locked -p <crate> -e normal --prefix none`) has no `tokio` line for `promptforge-types`, `promptforge-model-client`, `promptforge-parser`, `promptforge-lua`, `promptforge-engine`, and `promptforge`.
+  - The normal closure (`cargo tree --locked -p <crate> -e normal --prefix none`) has no `tokio` line for `runvil-types`, `runvil-model-client`, `runvil-parser`, `runvil-lua`, `runvil-engine`, and `runvil`.
   - `cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}"` lists `system-proxy`.
 - Exit criteria: all of the following pass.
   - `cargo fmt --all --check`
@@ -224,9 +224,9 @@ Beyond the usual gates, three checks show the change is correct. Every crate com
   - The merged Windows command, with the sidecar staged
   - With `RUSTDOCFLAGS="-D warnings"`:
     - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
-    - `cargo doc -p promptforge --no-deps`
+    - `cargo doc -p runvil --no-deps`
     - `cargo doc -p harness --no-deps`
-    - `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+    - `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
     - `cargo doc --locked --no-deps -p workshop-server --document-private-items`
   - `cargo test -p build-xtask`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
@@ -307,31 +307,31 @@ Beyond the usual gates, three checks show the change is correct. Every crate com
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, then `node --test crates/workshop/ui/test/docs-claims.mjs`. UI suites: `npm test --workspaces --if-present` in `crates/workshop` and `npm test` in `crates/gateway/config-ui/ui`.
 - Linter command: `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `CARGO_BUILD_WARNINGS=deny cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets` (PowerShell: set `$env:CARGO_BUILD_WARNINGS = "deny"`), plus the headless gate `cargo check -p gateway --no-default-features`. Supply chain (CI `supply-chain` job): `cargo deny check`, `cargo audit`, `cargo hakari verify`, and the `cargo tree --locked -p gateway -e normal -i ring --depth 0` single-rustls-backend check. Locally installed: cargo-nextest 0.9.128, cargo-hakari 0.9.38, cargo-deny 0.20.2, Node 24.
 - Formatter check command: `cargo fmt --all --check` (also the `.githooks/pre-commit` hook).
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps` (facade, default features). CI also runs `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (nightly pinned in `crates/build-xtask/src/api/toolchain.rs`).
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps` (facade, default features). CI also runs `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check` (nightly pinned in `crates/build-xtask/src/api/toolchain.rs`).
 - Test placement and naming conventions:
-  - Unit tests sit in a kebab sibling `foo-tests.rs` wired from `foo.rs` with `#[cfg(test)]`, `#[path = "foo-tests.rs"]`, `mod tests;`. A module with three or more test files moves them into `src/<module>/tests/` (for example `promptforge-internal/engine/src/execute/tests/`).
-  - Integration tests use one target per crate, `tests/it/main.rs` (most crates) or `tests/suite/main.rs` (`harness`, `promptforge`), declaring one `mod` per topic file; shared helpers go in `tests/common/`, data in `tests/fixtures/`, prompt fixtures in `tests/prompts/`. A few crates keep flat target files instead (`gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway-cloud-providers`, `build-workshop`).
+  - Unit tests sit in a kebab sibling `foo-tests.rs` wired from `foo.rs` with `#[cfg(test)]`, `#[path = "foo-tests.rs"]`, `mod tests;`. A module with three or more test files moves them into `src/<module>/tests/` (for example `runvil-internal/engine/src/execute/tests/`).
+  - Integration tests use one target per crate, `tests/it/main.rs` (most crates) or `tests/suite/main.rs` (`harness`, `runvil`), declaring one `mod` per topic file; shared helpers go in `tests/common/`, data in `tests/fixtures/`, prompt fixtures in `tests/prompts/`. A few crates keep flat target files instead (`gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway-cloud-providers`, `build-workshop`).
   - Test functions are snake_case sentences stating the behavior, such as `a_policy_refuses_an_undeclared_path_before_the_watcher_sees_it`.
   - `.config/nextest.toml` defines `default` and `ci` profiles and a `heavy` test group for the STT crates.
   - JavaScript tests are `node --test` `.mjs` files: `crates/workshop/ui/test/`, `tools/*.test.mjs`.
 - Directory map:
-  - `crates/promptforge` is the Engine facade; `crates/promptforge-internal/` (manifestless container) holds the private Engine crates `types`, `engine`, `lua`, `parser`, `vfs`, `model-client`; `crates/promptforge-plugin` is the Plugin API.
+  - `crates/runvil` is the Engine facade; `crates/runvil-internal/` (manifestless container) holds the private Engine crates `types`, `engine`, `lua`, `parser`, `vfs`, `model-client`; `crates/runvil-plugin` is the Plugin API.
   - `crates/harness`, `crates/harness-internal/runner`, and `crates/harness-gateway-client` are the Harness.
   - `crates/plugin-web`, `crates/plugin-mcp`, `crates/plugin-user-input` are linked Plugins.
   - `crates/gateway/` (container) holds the gateway family: `app` (the `gateway` crate), `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `cloud-providers`, `web-search`, and `stt/{api,engine,backend-whisper,whisper-ffi}`. `crates/gateway-api-types` and `crates/gateway-api-discovery` are the gateway's cross-family wire types and discovery.
   - `crates/workshop/` (container) holds the Workshop Host: Rust crates `desktop` (the Tauri `workshop` crate), `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, `run-log`, `agents`, and an npm workspace (`ui`, `look`, `platform`) rooted at `crates/workshop/package.json`.
   - `crates/shared-error-source` and `crates/shared-loopback` are shared Rust crates; `crates/shared-ui` is a TypeScript and CSS package excluded from the Cargo workspace.
   - `crates/build-*` are tooling: `build-xtask` (`cargo xtask` alias: structural checks, API surface, site), `build-workshop` (`cargo workshop` alias: build orchestrator), `build-ui`, `build-user-guide`, `build-ceiling`, `build-llama-cuda`.
-  - `crates/workspace-hack` is the cargo-hakari feature-unification crate (generated `### BEGIN/END HAKARI SECTION` in its `Cargo.toml`, one-line `src/lib.rs`), configured by `.config/hakari.toml`. Its footprint: root `Cargo.toml` (`workspace-hack` entry in `[workspace.dependencies]` with its comment, and the `tauri-plugin-updater` comment), 49 member manifests with `workspace-hack.workspace = true`, explanatory comments in the `build-ceiling` and `promptforge-vfs` manifests, `.github/workflows/ci.yml` (`supply-chain` job installs cargo-hakari and runs `cargo hakari verify`; the ring-check comment names hakari), `build-xtask` (`WORKSPACE_HACK` allowances in `product.rs` with `product/harness_tests.rs` and `product/plugin_tests.rs`, the `WORKSPACE_HACK` line-limit check and its tests in `tidy-wiring.rs`, doc comments in `engine_deps.rs`, `harness_bans.rs`, `test_support_leak.rs`), and crate docs in `promptforge-plugin`, `plugin-web`, and `promptforge-types` `lib.rs`.
+  - `crates/workspace-hack` is the cargo-hakari feature-unification crate (generated `### BEGIN/END HAKARI SECTION` in its `Cargo.toml`, one-line `src/lib.rs`), configured by `.config/hakari.toml`. Its footprint: root `Cargo.toml` (`workspace-hack` entry in `[workspace.dependencies]` with its comment, and the `tauri-plugin-updater` comment), 49 member manifests with `workspace-hack.workspace = true`, explanatory comments in the `build-ceiling` and `runvil-vfs` manifests, `.github/workflows/ci.yml` (`supply-chain` job installs cargo-hakari and runs `cargo hakari verify`; the ring-check comment names hakari), `build-xtask` (`WORKSPACE_HACK` allowances in `product.rs` with `product/harness_tests.rs` and `product/plugin_tests.rs`, the `WORKSPACE_HACK` line-limit check and its tests in `tidy-wiring.rs`, doc comments in `engine_deps.rs`, `harness_bans.rs`, `test_support_leak.rs`), and crate docs in `runvil-plugin`, `plugin-web`, and `runvil-types` `lib.rs`.
   - Root config: `Cargo.toml`, `Cargo.lock`, `clippy.toml`, `deny.toml`, `rustfmt.toml`, `rust-toolchain.toml` (stable), `dist-workspace.toml` (cargo-dist); `.cargo/config.toml` (rust-lld and static CRT on Windows MSVC, `xtask` and `workshop` aliases); `.config/` (`hakari.toml`, `nextest.toml`); `.github/workflows/` (`ci.yml` plus release, nightly, site, and smoke workflows); `.githooks/` (pre-commit fmt; pre-push docs-claims, headless check, clippy, cargo deny); `.cursor/rules/` (Workshop rules).
   - Non-code: `guide/` (user guide sources), `prompts/` (example prompts), `tools/` (Node scripts for gateway sidecar staging and TTS), `images/`, `vibe/` (plan archive), `local/` (gitignored operator config), `cabinet/`.
 - Component boundaries (normal dependencies, from `cargo metadata`):
-  - Engine: `promptforge-types` and `promptforge-vfs` are leaves; `promptforge-model-client` uses `types`; `promptforge-lua` uses `model-client`, `types`, `vfs`; `promptforge-parser` uses `lua`, `types`; `promptforge-engine` uses all five; the `promptforge` facade re-exports all six. `promptforge-plugin` uses `types` and `vfs`. No Engine crate depends on the Harness or a Host.
-  - Plugins: each `plugin-*` crate depends only on `promptforge-plugin` (rule allows `shared-*`, `workspace-hack`, and outside libraries).
-  - Harness: `harness-runner` uses `promptforge` and `promptforge-plugin`; `harness` adds `harness-runner`; `harness-gateway-client` uses `harness`, `promptforge`, `plugin-web`. Outside their family Harness crates may name only `promptforge`, `promptforge-plugin`, and `workspace-hack`.
+  - Engine: `runvil-types` and `runvil-vfs` are leaves; `runvil-model-client` uses `types`; `runvil-lua` uses `model-client`, `types`, `vfs`; `runvil-parser` uses `lua`, `types`; `runvil-engine` uses all five; the `runvil` facade re-exports all six. `runvil-plugin` uses `types` and `vfs`. No Engine crate depends on the Harness or a Host.
+  - Plugins: each `plugin-*` crate depends only on `runvil-plugin` (rule allows `shared-*`, `workspace-hack`, and outside libraries).
+  - Harness: `harness-runner` uses `runvil` and `runvil-plugin`; `harness` adds `harness-runner`; `harness-gateway-client` uses `harness`, `runvil`, `plugin-web`. Outside their family Harness crates may name only `runvil`, `runvil-plugin`, and `workspace-hack`.
   - Gateway: `gateway-api-types` is a leaf; `config` and `progress` use it; `protocol` uses `api-types` and `config`; `routing` uses `config` and `protocol`; `local` uses `config`, `progress`, `protocol`, `routing`; `stt/engine` and `stt/whisper-ffi` are leaves, `backend-whisper` uses them and `progress`, `stt/api` (`gateway-stt`) uses `config`, `local`, `progress`, and both STT crates; `web-search` uses `config` and `protocol`; `logging` uses `gateway-api-discovery`; `config-ui` uses `shared-loopback`; `cloud-providers` (a library plus the `shared-cloud-providers` binary) has no workspace dependents. The `gateway` app sits on top of the family.
-  - Workshop: `workshop-protocol` and `workshop-support` are leaves; `registry` uses `protocol`; `menu`, `status`, `user-state`, `workspace` use `protocol`, `registry`, `support` (the last two also `shared-error-source`); `workshop-gateway` uses those plus `gateway-api-types` and `gateway-api-discovery` (no other gateway crate); `run-log` uses `harness`; `agents` uses `harness`, `promptforge`, `plugin-user-input`; `workshop-server` sits over every Workshop crate plus the Harness, `harness-gateway-client`, all three Plugins, `promptforge`, `promptforge-plugin`; `workshop-server-api` wraps the server; `workshop` (desktop) uses `workshop-server-api` and `gateway-api-discovery`.
-  - `build-*` and `shared-*` crates depend on no workspace crate. `workspace-hack` depends on no workspace crate and is depended on by every member except itself, `promptforge-vfs`, and `build-ceiling` (the `final-excludes`).
+  - Workshop: `workshop-protocol` and `workshop-support` are leaves; `registry` uses `protocol`; `menu`, `status`, `user-state`, `workspace` use `protocol`, `registry`, `support` (the last two also `shared-error-source`); `workshop-gateway` uses those plus `gateway-api-types` and `gateway-api-discovery` (no other gateway crate); `run-log` uses `harness`; `agents` uses `harness`, `runvil`, `plugin-user-input`; `workshop-server` sits over every Workshop crate plus the Harness, `harness-gateway-client`, all three Plugins, `runvil`, `runvil-plugin`; `workshop-server-api` wraps the server; `workshop` (desktop) uses `workshop-server-api` and `gateway-api-discovery`.
+  - `build-*` and `shared-*` crates depend on no workspace crate. `workspace-hack` depends on no workspace crate and is depended on by every member except itself, `runvil-vfs`, and `build-ceiling` (the `final-excludes`).
   - `cargo test -p build-xtask` enforces product and container boundaries, the Workshop tier graph, the `## Invariants` marker, and lint inheritance.
 - Conventions summary:
   - Every third-party dependency is declared once in root `[workspace.dependencies]`, usually with a comment explaining the pin or trimmed features, and members inherit it in dotted style (`name.workspace = true`); every crate has `[lints] workspace = true`.
@@ -370,7 +370,7 @@ Components, in dependency order:
 - Tests:
   - `cargo nextest run --locked -p workshop-server`
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets; Remove-Item Env:CARGO_BUILD_WARNINGS`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps -p workshop-server --document-private-items; Remove-Item Env:RUSTDOCFLAGS`
   - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`
@@ -410,7 +410,7 @@ Behavior:
 - Component: One Workshop test build
 - Tests:
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `cargo nextest run --locked --no-default-features --features gateway/test-fixtures -p workshop -p workshop-server -p workshop-server-api -p workshop-workspace -p gateway-api-discovery -p gateway -E 'package(workshop) | package(workshop-server) | package(workshop-server-api) | package(workshop-workspace) | (package(gateway-api-discovery) & test(a_process_lifetime_lease_recovers_after_its_owner_is_terminated)) | (package(gateway) & binary(it) & (test(simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff) | test(workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot) | test(a_direct_launch_recovers_the_lease_from_a_terminated_owner) | test(a_silent_process_lease_owner_causes_a_bounded_console_only_failure)))'`
   - `cargo nextest list --locked --no-default-features --features gateway/test-fixtures -p workshop -p workshop-server -p workshop-server-api -p workshop-workspace -p gateway-api-discovery -p gateway -E 'package(workshop) | package(workshop-server) | package(workshop-server-api) | package(workshop-workspace) | (package(gateway-api-discovery) & test(a_process_lifetime_lease_recovers_after_its_owner_is_terminated)) | (package(gateway) & binary(it) & (test(simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff) | test(workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot) | test(a_direct_launch_recovers_the_lease_from_a_terminated_owner) | test(a_silent_process_lease_owner_causes_a_bounded_console_only_failure)))'`
   - `cargo nextest list --locked -p workshop -p workshop-server -p workshop-server-api`
@@ -449,14 +449,14 @@ Behavior:
 - Component: Hakari removal
 - Tests:
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `foreach ($m in (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages.name) { cargo check --locked -p $m; if ($LASTEXITCODE) { throw "cargo check -p $m failed" }; cargo check --locked -p $m --all-targets --all-features; if ($LASTEXITCODE) { throw "cargo check -p $m --all-targets --all-features failed" } }`
   - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`
   - `cargo test -p build-xtask`
   - `cargo deny check`
   - `if (rg -n --hidden 'hakari|workspace-hack|workspace_hack' --glob '*.toml' --glob '*.yml' --glob 'Cargo.lock' --glob '!vibe/**' --glob '!.git/**') { throw 'hakari remains in a manifest, workflow, or Cargo.lock' }`
 - Commit: one commit with the summary `Remove cargo-hakari and the workspace-hack crate`, a body that names every feature the sweep added and the code that needs it, `Design:` lines, and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
-- Contract items: Technical Design, "Architecture", and these entries of "File and public API changes": the removed `crates/workspace-hack/` and `.config/hakari.toml`, the root `Cargo.toml` `workspace-hack` entry and `tauri-plugin-updater` comment, the member manifests, the `build-ceiling` and `promptforge-vfs` manifest comments, the `supply-chain` job, `Cargo.lock`, and the manifests the sweep fixes.
+- Contract items: Technical Design, "Architecture", and these entries of "File and public API changes": the removed `crates/workspace-hack/` and `.config/hakari.toml`, the root `Cargo.toml` `workspace-hack` entry and `tauri-plugin-updater` comment, the member manifests, the `build-ceiling` and `runvil-vfs` manifest comments, the `supply-chain` job, `Cargo.lock`, and the manifests the sweep fixes.
 - Before editing: read the root `AGENTS.md`.
 
 Artifacts:
@@ -468,7 +468,7 @@ Artifacts:
   - The reqwest pin is Step 4's.
 - Delete the line `workspace-hack.workspace = true` from each of the 49 member manifests that `rg -l '^workspace-hack\.workspace = true' crates` lists. None has an adjoining comment.
 - `crates/build-ceiling/Cargo.toml` (lines 9-12): the comment becomes "No dependencies of any kind: the six crates that may not name a build-* crate include src/lib.rs with #[path] from their build scripts, so it must compile on std alone." It loses "not even workspace-hack" and the `.config/hakari.toml` sentence.
-- `crates/promptforge-internal/vfs/Cargo.toml` (lines 9-12): keep the zero-dependency rule's first two sentences and drop the sentence beginning "workspace-hack is excluded".
+- `crates/runvil-internal/vfs/Cargo.toml` (lines 9-12): keep the zero-dependency rule's first two sentences and drop the sentence beginning "workspace-hack is excluded".
 - `.github/workflows/ci.yml`, job `supply-chain`: the install list becomes `tool: cargo-deny, cargo-audit` (line 342). Delete the `cargo hakari verify` step (lines 350-351). The ring-guard comment's parenthetical becomes "(through a reqwest bump or a Tauri plugin default)" (lines 355-356). The guard step itself (lines 353-371) is unchanged.
 - `Cargo.lock`: refresh it once with `cargo update --workspace`, which updates only workspace members. `git diff HEAD -- Cargo.lock` must show only removed lines: the `workspace-hack` package block, the `"workspace-hack",` dependency entries, and any third-party package that only the hack reached. No line is added and no version changes. Name any removed third-party package in the commit body.
 - Member manifests that relied on hakari gain the features the sweep finds.
@@ -501,7 +501,7 @@ Behavior:
   - `$out = cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}" --depth 0; if (-not ($out -match 'system-proxy')) { throw "the gateway's reqwest lacks system-proxy: $out" }`
   - `$out = cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none | Select-String '^tokio v'; if ($out -match 'test-util') { throw 'the gateway still compiles tokio test-util' }`
   - `foreach ($p in 'gateway', 'workshop') { $out = cargo tree --locked -p $p -e normal -i ring; if ($LASTEXITCODE) { throw "cargo tree -p $p failed" }; if ($out) { throw "$p links ring: $out" } }`
-  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
+  - `foreach ($c in 'runvil-types', 'runvil-model-client', 'runvil-parser', 'runvil-lua', 'runvil-engine', 'runvil') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
 - Commit: one commit with the summary `Keep the gateway's system proxy support without hakari`, a body that lists every restored feature and every accepted loss with its reason, `Design:` lines, and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
 - Contract items: Technical Design, the root `Cargo.toml` reqwest-pin entry of "File and public API changes", and the "Proxy behavior", "Gateway clients", and "Test-only features" constraints.
 - Before editing: read the root `AGENTS.md` and `crates/gateway/app/AGENTS.md`.
@@ -511,19 +511,19 @@ Artifacts:
 - Root `Cargo.toml`, the reqwest pin (line 89): its features become `["json", "query", "rustls", "stream", "system-proxy"]`. Add one comment line saying `system-proxy` keeps the gateway honoring the Windows registry and macOS system proxy settings. This goes on the workspace pin by decision, unlike the sweep fixes.
 - Crate manifests, only for a further runtime-relevant loss the diff shows: the lost feature on that crate's own dependency line.
 - `Cargo.lock`, only when the pin change leaves it stale under `--locked`: refresh it with `cargo update --workspace`. No third-party version changes.
-- Scratch that is never committed: the listings and diffs, saved as scratch outside the repository, and a temporary worktree at `$env:TEMP\pf-feature-baseline`.
+- Scratch that is never committed: the listings and diffs, saved as scratch outside the repository, and a temporary worktree at `$env:TEMP\rv-feature-baseline`.
 
 Feature diff:
 
-- Baseline tree: `$base = git rev-parse "$(git log -1 --format=%H -- crates/workspace-hack/src/lib.rs)^"` names the parent of Step 3's commit, the last tree with hakari. Check it out with `git worktree add --detach "$env:TEMP\pf-feature-baseline" $base`. Steps 1 and 2 don't change the gateway's or the Workshop's feature closure, so this stands in for a baseline taken before any manifest change.
-- For `gateway` and `workshop` on each shipping target (`x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`), run `cargo tree --locked -p <pkg> -e normal --target <triple> -f "{p} {f}" --prefix none` twice: once with `--manifest-path "$env:TEMP\pf-feature-baseline\Cargo.toml"` and once in the working tree. Drop each line's trailing ` (*)` marker, sort, de-duplicate, and save the results as the scratch files `before-<pkg>-<triple>.txt` and `after-<pkg>-<triple>.txt`. Compare each pair with `git diff --no-index`.
+- Baseline tree: `$base = git rev-parse "$(git log -1 --format=%H -- crates/workspace-hack/src/lib.rs)^"` names the parent of Step 3's commit, the last tree with hakari. Check it out with `git worktree add --detach "$env:TEMP\rv-feature-baseline" $base`. Steps 1 and 2 don't change the gateway's or the Workshop's feature closure, so this stands in for a baseline taken before any manifest change.
+- For `gateway` and `workshop` on each shipping target (`x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`), run `cargo tree --locked -p <pkg> -e normal --target <triple> -f "{p} {f}" --prefix none` twice: once with `--manifest-path "$env:TEMP\rv-feature-baseline\Cargo.toml"` and once in the working tree. Drop each line's trailing ` (*)` marker, sort, de-duplicate, and save the results as the scratch files `before-<pkg>-<triple>.txt` and `after-<pkg>-<triple>.txt`. Compare each pair with `git diff --no-index`.
 - If `cargo tree --target <triple>` can't resolve a triple on Windows, stop and return blocked with the triple and the error. The plan's fallback is to compute that triple on a matching CI runner.
 - Classify every difference:
   - Expected: tokio loses `test-util`, and crates the binary never uses disappear.
   - Restore: anything that changes runtime behavior. reqwest `system-proxy` in the gateway is already known.
   - Accept: losses that only affect performance or API surface, such as reqwest `gzip` and `brotli` in the gateway. List each one in the commit body.
   - A gained feature or crate is unexpected. Report it in the step's return.
-- After restoring, rerun the after-listings so the final diff holds only expected and accepted losses. Then run `git worktree remove "$env:TEMP\pf-feature-baseline"`.
+- After restoring, rerun the after-listings so the final diff holds only expected and accepted losses. Then run `git worktree remove "$env:TEMP\rv-feature-baseline"`.
 
 Behavior:
 
@@ -542,22 +542,22 @@ Behavior:
 - Component: Hakari removal
 - Tests:
   - `cargo test -p build-xtask`
-  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p build-xtask -p promptforge-plugin -p plugin-mcp -p plugin-user-input -p plugin-web -p promptforge-types --all-targets --all-features; Remove-Item Env:CARGO_BUILD_WARNINGS`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-plugin -p plugin-mcp -p plugin-user-input -p plugin-web -p promptforge-types; Remove-Item Env:RUSTDOCFLAGS`
+  - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p build-xtask -p runvil-plugin -p plugin-mcp -p plugin-user-input -p plugin-web -p runvil-types --all-targets --all-features; Remove-Item Env:CARGO_BUILD_WARNINGS`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p runvil-plugin -p plugin-mcp -p plugin-user-input -p plugin-web -p runvil-types; Remove-Item Env:RUSTDOCFLAGS`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
   - `cargo fmt --all --check`
   - `if (rg -n --hidden 'hakari|workspace-hack|workspace_hack' --glob '!vibe/**' --glob '!.git/**') { throw 'hakari references remain' }`
 - Commit: one commit with the summary `Drop the workspace-hack allowances from build-xtask`, a body, `Design:` lines, and a `Plan: vibe/<file>` trailer naming the run's copy of this plan.
 - Contract items: Technical Design, the build-xtask entries of "Modules and interfaces", and the comment, `## Invariants`, and build-xtask test entries of "File and public API changes".
-- Before editing: read the root `AGENTS.md` and `crates/promptforge-internal/types/AGENTS.md`.
+- Before editing: read the root `AGENTS.md` and `crates/runvil-internal/types/AGENTS.md`.
 
 Artifacts:
 
 - `crates/build-xtask/src/product.rs`:
-  - Module doc (lines 15-20): Harness crates outside their own family "may name only `promptforge` and `promptforge-plugin`, which rules out `build-*` and other unaffiliated crates". Plugin crates "may depend only on `promptforge-plugin`, `shared-*` crates, and outside libraries".
+  - Module doc (lines 15-20): Harness crates outside their own family "may name only `runvil` and `runvil-plugin`, which rules out `build-*` and other unaffiliated crates". Plugin crates "may depend only on `runvil-plugin`, `shared-*` crates, and outside libraries".
   - Delete `WORKSPACE_HACK` and its doc (lines 159-161).
-  - In `boundary_breach`, the `(Family::Harness, Family::Build)` message becomes `harness crates must not depend on build-* crates; outside their family they may name only promptforge and promptforge-plugin`. The `(Family::Harness, Family::Unaffiliated)` arm loses its `if dep.package != WORKSPACE_HACK` guard, and its message becomes `harness crates must not depend on unaffiliated crates; outside their family they may name only promptforge and promptforge-plugin`.
-  - In `plugin_breach`, delete the comment at lines 276-277. The allow-list becomes `[PLUGIN_CONTRACT, package.package.as_str()]`, and the message becomes `plugin crates may depend only on promptforge-plugin, shared-* crates, and outside libraries`.
+  - In `boundary_breach`, the `(Family::Harness, Family::Build)` message becomes `harness crates must not depend on build-* crates; outside their family they may name only runvil and runvil-plugin`. The `(Family::Harness, Family::Unaffiliated)` arm loses its `if dep.package != WORKSPACE_HACK` guard, and its message becomes `harness crates must not depend on unaffiliated crates; outside their family they may name only runvil and runvil-plugin`.
+  - In `plugin_breach`, delete the comment at lines 276-277. The allow-list becomes `[PLUGIN_CONTRACT, package.package.as_str()]`, and the message becomes `plugin crates may depend only on runvil-plugin, shared-* crates, and outside libraries`.
 - `crates/build-xtask/src/product/harness_tests.rs`: delete `a_harness_crate_depending_on_workspace_hack_passes` (lines 52-67). The expected texts at lines 101 and 122 become the two new Harness messages. The assertion message at line 124 says unaffiliated crates are closed to harness crates.
 - `crates/build-xtask/src/product/plugin_tests.rs`: the module doc (lines 1-5) drops `workspace-hack`. `plugin_web_naming` drops its `("workspace-hack", "workspace-hack")` fixture crate (line 19). `PLUGIN_RULE` (line 29) becomes the new Plugin message. The passing test (lines 31-40) becomes `a_plugin_crate_naming_the_contract_and_a_shared_crate_passes`, without its `workspace-hack` dependency line.
 - `crates/build-xtask/src/tidy-wiring.rs`:
@@ -567,14 +567,14 @@ Artifacts:
   - Tests: the `write_wired` doc drops "and a `workspace-hack` with no build script" (lines 247-248), and its last two lines (265-266) go. Delete `a_workspace_hack_file_over_the_limit_fails` (lines 337-346).
 - Guard comments in `crates/build-xtask/src/engine_deps.rs` (lines 22-23), `crates/build-xtask/src/test_support_leak.rs` (lines 34-35), and `crates/build-xtask/src/harness_bans.rs` (lines 11-12): keep "The check reads declared dependencies, not the resolved graph." and drop the clause about `workspace-hack` unification. The sentences after it stay.
 - `## Invariants` docs, reflowed:
-  - `crates/promptforge-plugin/src/lib.rs` (lines 22-23): "May depend on: `promptforge-types` and `promptforge-vfs` among workspace crates."
-  - `crates/plugin-mcp/src/lib.rs` (lines 57-58), `crates/plugin-user-input/src/lib.rs` (lines 68-69), and `crates/plugin-web/src/lib.rs` (lines 48-49): "May depend on: `promptforge-plugin`, `shared-*` crates, and outside libraries."
-  - `crates/promptforge-internal/types/src/lib.rs` (line 31): "May depend on: no workspace crate."
+  - `crates/runvil-plugin/src/lib.rs` (lines 22-23): "May depend on: `runvil-types` and `runvil-vfs` among workspace crates."
+  - `crates/plugin-mcp/src/lib.rs` (lines 57-58), `crates/plugin-user-input/src/lib.rs` (lines 68-69), and `crates/plugin-web/src/lib.rs` (lines 48-49): "May depend on: `runvil-plugin`, `shared-*` crates, and outside libraries."
+  - `crates/runvil-internal/types/src/lib.rs` (line 31): "May depend on: no workspace crate."
 
 Behavior:
 
-- Outside their family, Harness crates may name only `promptforge` and `promptforge-plugin`. Any unaffiliated crate is a breach, `workspace-hack` included.
-- Plugin crates may name only `promptforge-plugin`, `shared-*` crates, and outside libraries.
+- Outside their family, Harness crates may name only `runvil` and `runvil-plugin`. Any unaffiliated crate is a breach, `workspace-hack` included.
+- Plugin crates may name only `runvil-plugin`, `shared-*` crates, and outside libraries.
 - The ceiling-wiring check holds every crate to a package-root `build.rs` that calls `build_ceiling::check()`, with no special case for a crate without a build script.
 - The docs keep the fixed meanings of Engine, Harness, Host, and Plugin that `docs-claims.mjs` enforces.
 - After this step, `rg -n --hidden "hakari|workspace-hack|workspace_hack" --glob '!vibe/**' --glob '!.git/**'` returns nothing, `Cargo.lock` included. The `vibe/` records stay unchanged as history.
@@ -592,14 +592,14 @@ Behavior:
   - `cargo check -p gateway --no-default-features`
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api; Remove-Item Env:RUSTDOCFLAGS`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps; Remove-Item Env:RUSTDOCFLAGS`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps; Remove-Item Env:RUSTDOCFLAGS`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p harness --no-deps; Remove-Item Env:RUSTDOCFLAGS`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items; Remove-Item Env:RUSTDOCFLAGS`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items; Remove-Item Env:RUSTDOCFLAGS`
   - `cargo test -p build-xtask`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
   - `cargo deny check`
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets; Remove-Item Env:CARGO_BUILD_WARNINGS`
   - `cargo nextest run --locked --no-default-features --features gateway/test-fixtures -p workshop -p workshop-server -p workshop-server-api -p workshop-workspace -p gateway-api-discovery -p gateway -E 'package(workshop) | package(workshop-server) | package(workshop-server-api) | package(workshop-workspace) | (package(gateway-api-discovery) & test(a_process_lifetime_lease_recovers_after_its_owner_is_terminated)) | (package(gateway) & binary(it) & (test(simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff) | test(workshop_launch_lock_and_direct_launch_do_not_deadlock_or_double_boot) | test(a_direct_launch_recovers_the_lease_from_a_terminated_owner) | test(a_silent_process_lease_owner_causes_a_bounded_console_only_failure)))'`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --locked --no-deps -p workshop-server --document-private-items; Remove-Item Env:RUSTDOCFLAGS`
@@ -608,7 +608,7 @@ Behavior:
   - `$out = cargo tree --locked -p gateway -e normal -i reqwest -f "{p} {f}" --depth 0; if (-not ($out -match 'system-proxy')) { throw "the gateway's reqwest lacks system-proxy: $out" }`
   - `$out = cargo tree --locked -p gateway -e normal -f "{p} {f}" --prefix none | Select-String '^tokio v'; if ($out -match 'test-util') { throw 'the gateway still compiles tokio test-util' }`
   - `foreach ($p in 'gateway', 'workshop') { $out = cargo tree --locked -p $p -e normal -i ring; if ($LASTEXITCODE) { throw "cargo tree -p $p failed" }; if ($out) { throw "$p links ring: $out" } }`
-  - `foreach ($c in 'promptforge-types', 'promptforge-model-client', 'promptforge-parser', 'promptforge-lua', 'promptforge-engine', 'promptforge') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
+  - `foreach ($c in 'runvil-types', 'runvil-model-client', 'runvil-parser', 'runvil-lua', 'runvil-engine', 'runvil') { $out = cargo tree --locked -p $c -e normal --prefix none; if ($LASTEXITCODE) { throw "cargo tree -p $c failed" }; if ($out -match '^tokio v') { throw "$c still reaches tokio" } }`
   - `if (rg -n --hidden 'hakari|workspace-hack|workspace_hack' --glob '!vibe/**' --glob '!.git/**') { throw 'hakari references remain' }`
 - Commit: one commit holding the fixes that CI or the release build show are needed, plus the step's completion marker in the run's copy of this plan, with a body, `Design:` lines when code changes, and a `Plan: vibe/<file>` trailer naming that copy. When both runs pass with no change, the commit holds only the completion marker, and the step says so in its return.
 - Contract items: Technical Design, the "Test-only features" constraint and the manifests the sweep fixes. The Testing Plan's exit criteria are copied below.
@@ -616,7 +616,7 @@ Behavior:
 
 Artifacts:
 
-- The `remove-hakari` branch on `origin` (`git@github.com:vinniefalco/promptforge.git`), pushed with Steps 1-5, and a pull request from it into `master` opened with `gh pr create`. `ci.yml` runs only on pushes to `master` or `main` and on pull requests (`.github/workflows/ci.yml:3-6`), so the pull request is what runs it.
+- The `remove-hakari` branch on `origin` (`git@github.com:vinniefalco/runvil.git`), pushed with Steps 1-5, and a pull request from it into `master` opened with `gh pr create`. `ci.yml` runs only on pushes to `master` or `main` and on pull requests (`.github/workflows/ci.yml:3-6`), so the pull request is what runs it.
 - A green `ci.yml` run for the pull request's head, followed with `gh run watch`.
 - A dispatched `.github/workflows/release-workshop.yml` run on the same branch (`gh workflow run release-workshop.yml --ref remove-hakari`), also followed with `gh run watch`.
 - Member manifests, only for a feature that Linux- or macOS-only code took from hakari: the feature goes on that crate's own dependency line, in the matching `[target.'cfg(...)'.dependencies]` table when only that target's code uses it, and never on the root pin.

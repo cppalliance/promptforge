@@ -256,7 +256,7 @@ fn the_sibling_probe_finds_only_the_gateway_exe_beside_the_desktop_app() {
 fn the_no_gateway_error_names_both_remedies() {
     let message = no_gateway_error().to_string();
     assert!(
-        message.contains("promptforge-gateway"),
+        message.contains("runvil-gateway"),
         "the error names the Gateway component remedy: {message}"
     );
     assert!(

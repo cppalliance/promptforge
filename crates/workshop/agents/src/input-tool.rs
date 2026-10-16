@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use plugin_user_input::InputBroker;
-use promptforge::tools::{ToolError, ToolErrorKind};
+use runvil::tools::{ToolError, ToolErrorKind};
 use tokio::sync::broadcast;
 
 use super::{WaitFrame, WaitRegistry};

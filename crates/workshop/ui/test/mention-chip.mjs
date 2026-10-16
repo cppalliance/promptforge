@@ -65,7 +65,7 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-mention-chip-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-mention-chip-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, ChatBox, MentionChip, renderChip, Editor, StarterKit } = await import(
   pathToFileURL(bundlePath).href
@@ -124,7 +124,7 @@ const FULL_CHIP = {
   label: "main.ts",
   kind: "file",
   icon: "file-code",
-  preview: "pf://preview/1",
+  preview: "rv://preview/1",
   tone: "expired",
   data: { path: "src/main.ts", grants: ["r\"w"], nested: { n: 1.5, ok: true, none: null }, s: "é\n" },
 };
@@ -261,7 +261,7 @@ await assertNoLeaks(lifecycle, () => {
       "kind, icon, preview, and tone survive getJSON",
       mention?.attrs?.kind === "file" &&
         mention?.attrs?.icon === "file-code" &&
-        mention?.attrs?.preview === "pf://preview/1" &&
+        mention?.attrs?.preview === "rv://preview/1" &&
         mention?.attrs?.tone === "expired",
     );
     check(
@@ -280,7 +280,7 @@ await assertNoLeaks(lifecycle, () => {
       "setContent from the JSON rebuilds the extended attrs",
       again?.attrs?.kind === "file" &&
         again?.attrs?.icon === "file-code" &&
-        again?.attrs?.preview === "pf://preview/1" &&
+        again?.attrs?.preview === "rv://preview/1" &&
         again?.attrs?.tone === "expired" &&
         JSON.stringify(again?.attrs?.data) === JSON.stringify(FULL_CHIP.data),
     );
@@ -319,7 +319,7 @@ await assertNoLeaks(lifecycle, () => {
       "the rendered pill HTML includes a JSON data-payload and the model attributes",
       html.includes('data-kind="file"') &&
         html.includes('data-icon="file-code"') &&
-        html.includes('data-preview="pf://preview/1"') &&
+        html.includes('data-preview="rv://preview/1"') &&
         html.includes('data-tone="expired"') &&
         html.includes("data-payload="),
     );
@@ -334,7 +334,7 @@ await assertNoLeaks(lifecycle, () => {
       mention?.attrs?.id === "src/main.ts" &&
         mention?.attrs?.kind === "file" &&
         mention?.attrs?.icon === "file-code" &&
-        mention?.attrs?.preview === "pf://preview/1" &&
+        mention?.attrs?.preview === "rv://preview/1" &&
         mention?.attrs?.tone === "expired" &&
         JSON.stringify(mention?.attrs?.data) === JSON.stringify(FULL_CHIP.data),
     );

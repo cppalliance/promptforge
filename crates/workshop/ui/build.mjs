@@ -39,8 +39,8 @@ const STATIC_FILES = [
   "index.html",
   "style.css",
   "pcm-worklet.js",
-  "icons/promptforge-icon.png",
-  "icons/promptforge-icon@2x.png",
+  "icons/runvil-icon.png",
+  "icons/runvil-icon@2x.png",
 ];
 
 // Always minified: the bundle is never inspected by hand, and matching the

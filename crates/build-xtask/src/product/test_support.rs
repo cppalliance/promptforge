@@ -13,7 +13,7 @@ pub(crate) fn workspace_root() -> PathBuf {
 
 /// Writes a minimal crate manifest into a fake workspace; `dir_name` may
 /// contain a slash to nest the crate under a container
-/// (`promptforge-internal/lua`).
+/// (`runvil-internal/lua`).
 pub(crate) fn write_crate(root: &Path, dir_name: &str, package: &str, deps: &str) {
     let dir = root.join("crates").join(dir_name);
     std::fs::create_dir_all(&dir).expect("the crate directory creates");
@@ -54,7 +54,7 @@ pub(crate) fn engine_clippy_toml(omit: Option<&str>) -> String {
 pub(crate) fn write_engine_clippy_tomls(root: &Path) {
     std::fs::write(root.join("clippy.toml"), ROOT_CLIPPY_TOML)
         .expect("the root clippy.toml writes");
-    for dir in ["promptforge-internal", "promptforge", "promptforge-plugin"] {
+    for dir in ["runvil-internal", "runvil", "runvil-plugin"] {
         let dir = root.join("crates").join(dir);
         std::fs::create_dir_all(&dir).expect("the Engine clippy.toml directory creates");
         std::fs::write(dir.join("clippy.toml"), engine_clippy_toml(None))

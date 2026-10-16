@@ -28,11 +28,11 @@ fn gateway_native_realtime_keeps_its_workspace_local_fixture_root() {
     );
 }
 
-/// The 16 kHz mono 16-bit clip `PROMPTFORGE_WHISPER_AUDIO` names, or
+/// The 16 kHz mono 16-bit clip `RUNVIL_WHISPER_AUDIO` names, or
 /// `jfk.wav`, upsampled to the 24 kHz wire rate.
 pub(super) fn native_clip_24khz() -> Vec<i16> {
     clip_24khz(&require_fixture(
-        "PROMPTFORGE_WHISPER_AUDIO",
+        "RUNVIL_WHISPER_AUDIO",
         &native_fixture_root(),
         "jfk.wav",
     ))
@@ -73,7 +73,7 @@ pub(super) fn native_speech_service() -> (SpeechService, TempDir) {
 /// model from it.
 pub(super) fn native_speech_service_with(tuning: &str) -> (SpeechService, TempDir) {
     let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
+        "RUNVIL_WHISPER_MODEL",
         &native_fixture_root(),
         "ggml-tiny.en.bin",
     );

@@ -1,5 +1,5 @@
 ---
-name: PromptForge mdbook Guide
+name: Runvil mdbook Guide
 overview: Build the mdbook user guide, prepare all crates for publishing, and publish 0.1.0 to crates.io - each step as its own commit in logical order.
 todos:
   - id: commit-1-guide
@@ -23,7 +23,7 @@ todos:
 isProject: false
 ---
 
-# PromptForge 0.1.0: User Guide + Publish
+# Runvil 0.1.0: User Guide + Publish
 
 Six commits, each self-contained and reviewable. The guide comes first. Publishing comes last.
 
@@ -34,7 +34,7 @@ Create `guide/` at workspace root. 15 chapters carved from the existing per-crat
 ### Structure
 
 ```
-promptforge/guide/
+runvil/guide/
   book.toml
   src/
     SUMMARY.md
@@ -91,19 +91,19 @@ Each publishable crate gets a short README (~30-50 lines) that serves as its cra
 - Badges row (crates.io version, docs.rs, CI, license)
 - One paragraph: what this crate does
 - Minimal code or CLI example
-- Link: "See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation"
+- Link: "See the [Runvil User Guide](https://cppalliance.github.io/runvil/) for full documentation"
 - MSRV + license
 
 Create new:
-- `promptforge-webfetch/README.md`
-- `promptforge-tool-picker/README.md`
+- `runvil-webfetch/README.md`
+- `runvil-tool-picker/README.md`
 
 Rewrite existing (replace current content with the crates.io-ready format):
-- `promptforge-core/README.md`
-- `promptforge-cli/README.md`
-- `promptforge-gateway/README.md`
-- `promptforge-mcp-server/README.md`
-- `promptforge-dev/README.md`
+- `runvil-core/README.md`
+- `runvil-cli/README.md`
+- `runvil-gateway/README.md`
+- `runvil-mcp-server/README.md`
+- `runvil-dev/README.md`
 
 ### Workspace root README
 
@@ -129,30 +129,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial public release
 - {summary of what ships in 0.1.0}
 
-[0.1.0]: https://github.com/cppalliance/promptforge/releases/tag/v0.1.0
+[0.1.0]: https://github.com/cppalliance/runvil/releases/tag/v0.1.0
 ```
 
 ---
 
 ## Commit 4: Cargo.toml metadata
 
-Fix metadata gaps identified in the [audit](cabinet/_output/audit-promptforge-publish.md).
+Fix metadata gaps identified in the [audit](cabinet/_output/audit-runvil-publish.md).
 
 ### Add missing fields
 
 Per-crate changes:
 
-- **promptforge-webfetch:** add `readme = "README.md"`, `keywords`, `categories`
-- **promptforge-tool-picker:** add `readme = "README.md"`, `keywords`, `categories`
-- **promptforge-gateway:** add `readme = "README.md"`, `keywords`, `categories`
+- **runvil-webfetch:** add `readme = "README.md"`, `keywords`, `categories`
+- **runvil-tool-picker:** add `readme = "README.md"`, `keywords`, `categories`
+- **runvil-gateway:** add `readme = "README.md"`, `keywords`, `categories`
 
 ### Fix typo
 
-- **promptforge-mcp-server:** fix garbled description ("runs a prompt an agentic harness names to run_prompt")
+- **runvil-mcp-server:** fix garbled description ("runs a prompt an agentic harness names to run_prompt")
 
 ### Update comment
 
-- **promptforge-core:** update the MANIFEST-001 comment to reflect the upcoming version change
+- **runvil-core:** update the MANIFEST-001 comment to reflect the upcoming version change
 
 ### License file for subcrates
 
@@ -169,7 +169,7 @@ all-features = true
 
 ### Add `documentation` field
 
-Set `documentation = "https://cppalliance.github.io/promptforge/"` on all publishable crates. This points crates.io to the mdbook guide rather than to docs.rs (which still serves API reference automatically).
+Set `documentation = "https://cppalliance.github.io/runvil/"` on all publishable crates. This points crates.io to the mdbook guide rather than to docs.rs (which still serves API reference automatically).
 
 ### Add GitHub Pages deploy workflow
 
@@ -238,29 +238,29 @@ This is the "flip the switch" commit. No other changes.
 ### Remove `publish = false`
 
 From these 7 crates:
-- `promptforge-tool-picker`
-- `promptforge-core`
-- `promptforge-webfetch`
-- `promptforge-gateway`
-- `promptforge-mcp-server`
-- `promptforge-cli`
-- `promptforge-dev`
+- `runvil-tool-picker`
+- `runvil-core`
+- `runvil-webfetch`
+- `runvil-gateway`
+- `runvil-mcp-server`
+- `runvil-cli`
+- `runvil-dev`
 
 Keep `publish = false` on:
-- `promptforge-core-tests`
+- `runvil-core-tests`
 - `make-user-guide`
 
 ### Dry-run verification
 
 ```bash
-cargo publish --dry-run -p promptforge-tool-picker
-cargo publish --dry-run -p promptforge-core
-cargo publish --dry-run -p promptforge-webfetch
-cargo publish --dry-run -p promptforge-gateway
-cargo publish --dry-run -p promptforge-mcp-server
-cargo publish --dry-run -p promptforge-cli
-cargo publish --dry-run -p promptforge-dev
-cargo package --list -p promptforge-core  # spot-check package contents
+cargo publish --dry-run -p runvil-tool-picker
+cargo publish --dry-run -p runvil-core
+cargo publish --dry-run -p runvil-webfetch
+cargo publish --dry-run -p runvil-gateway
+cargo publish --dry-run -p runvil-mcp-server
+cargo publish --dry-run -p runvil-cli
+cargo publish --dry-run -p runvil-dev
+cargo package --list -p runvil-core  # spot-check package contents
 ```
 
 ---
@@ -284,13 +284,13 @@ Cargo resolves the dependency graph and publishes in batches: tool-picker first,
 If `cargo publish --workspace` is not available (older toolchain), fall back to manual order:
 
 ```
-1. cargo publish -p promptforge-tool-picker     (wait ~30s)
-2. cargo publish -p promptforge-core             (wait ~30s)
-3. cargo publish -p promptforge-webfetch         (parallel with gateway, wait ~30s)
-   cargo publish -p promptforge-gateway
-4. cargo publish -p promptforge-mcp-server       (parallel)
-   cargo publish -p promptforge-cli
-   cargo publish -p promptforge-dev
+1. cargo publish -p runvil-tool-picker     (wait ~30s)
+2. cargo publish -p runvil-core             (wait ~30s)
+3. cargo publish -p runvil-webfetch         (parallel with gateway, wait ~30s)
+   cargo publish -p runvil-gateway
+4. cargo publish -p runvil-mcp-server       (parallel)
+   cargo publish -p runvil-cli
+   cargo publish -p runvil-dev
 ```
 
 Tag the release: `git tag v0.1.0 && git push origin v0.1.0`
@@ -299,8 +299,8 @@ Tag the release: `git tag v0.1.0 && git push origin v0.1.0`
 
 - Check each crate page on crates.io
 - Verify docs.rs builds succeed
-- Verify `https://cppalliance.github.io/promptforge/` is live (after the GitHub Actions workflow runs)
-- `cargo install promptforge-cli` and `cargo install promptforge-dev` from a clean environment
+- Verify `https://cppalliance.github.io/runvil/` is live (after the GitHub Actions workflow runs)
+- `cargo install runvil-cli` and `cargo install runvil-dev` from a clean environment
 
 ---
 

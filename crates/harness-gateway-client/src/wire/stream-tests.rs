@@ -1,6 +1,6 @@
 //! Tests for the streaming accumulator and the SSE data-line scanner.
 
-use promptforge::model::{CompletionErrorKind, CompletionResult};
+use runvil::model::{CompletionErrorKind, CompletionResult};
 use serde_json::Value;
 
 use super::*;

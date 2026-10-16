@@ -1,4 +1,4 @@
-//! Configuration for the PromptForge inference gateway.
+//! Configuration for the Runvil inference gateway.
 //!
 //! This crate owns everything needed to turn one `gateway.toml`
 //! plus its sibling profile state into a validated [`Config`]: TOML parsing,

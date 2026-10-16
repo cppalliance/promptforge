@@ -11,8 +11,8 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-use promptforge::metrics::ClientTiming;
-use promptforge::model::{Completion, CompletionError};
+use runvil::metrics::ClientTiming;
+use runvil::model::{Completion, CompletionError};
 use serde_json::Value;
 
 use super::delta::StreamDelta;

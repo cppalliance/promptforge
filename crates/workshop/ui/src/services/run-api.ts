@@ -55,8 +55,8 @@ export interface RunContractModel {
 export interface RunContract {
   readonly name: string;
   readonly description: string;
-  /** The Engine major the `promptforge:` key declares; null when absent. */
-  readonly promptforge: number | null;
+  /** The Engine major the `runvil:` key declares; null when absent. */
+  readonly runvil: number | null;
   /** The declared tool-loop cap; null for the runtime default. */
   readonly maxToolIterations: number | null;
   readonly input: RunContractFile | null;
@@ -172,11 +172,11 @@ function parseContract(body: unknown): RunContract | null {
   if (!isRecord(body)) {
     return null;
   }
-  const { name, description, promptforge, max_tool_iterations, plugins, models } = body;
+  const { name, description, runvil, max_tool_iterations, plugins, models } = body;
   if (typeof name !== "string" || typeof description !== "string") {
     return null;
   }
-  if (promptforge !== null && typeof promptforge !== "number") {
+  if (runvil !== null && typeof runvil !== "number") {
     return null;
   }
   if (max_tool_iterations !== null && typeof max_tool_iterations !== "number") {
@@ -216,7 +216,7 @@ function parseContract(body: unknown): RunContract | null {
   return {
     name,
     description,
-    promptforge: promptforge ?? null,
+    runvil: runvil ?? null,
     maxToolIterations: max_tool_iterations ?? null,
     input,
     output,

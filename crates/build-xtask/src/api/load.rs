@@ -1,5 +1,5 @@
 //! Builds rustdoc JSON for the facade and every crate under
-//! `crates/promptforge-internal/` with default features, and parses it.
+//! `crates/runvil-internal/` with default features, and parses it.
 //!
 //! One `cargo doc` invocation selects the facade and every internal
 //! crate, so each internal crate is documented with the features the
@@ -17,7 +17,7 @@ use rustdoc_types::{Crate, FORMAT_VERSION};
 use super::toolchain::PINNED;
 
 /// The facade's package and crate name.
-pub(super) const FACADE: &str = "promptforge";
+pub(super) const FACADE: &str = "runvil";
 
 /// The rustdoc flags every build passes. Hidden items are documented
 /// because dependents can still name them, and the transport codec is
@@ -39,7 +39,7 @@ const RUSTDOC_FLAGS: [&str; 6] = [
 pub(super) struct Loaded {
     /// The facade crate.
     pub(super) facade: Crate,
-    /// Every internal crate, keyed by its crate name (`promptforge_engine`).
+    /// Every internal crate, keyed by its crate name (`runvil_engine`).
     pub(super) internal: BTreeMap<String, Crate>,
 }
 

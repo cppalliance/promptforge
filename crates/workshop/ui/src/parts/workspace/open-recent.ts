@@ -8,7 +8,7 @@
 //
 // The dynamic rows declare their own groups so they sort with the static
 // Reopen Closed Editor (1_editor), More... (y_more), and Clear Recently
-// Opened... (z_clear) rows: recent workspace files (a .pfwork suffix,
+// Opened... (z_clear) rows: recent workspace files (a .rvwork suffix,
 // any case) land in 1_workspaces and dispatch
 // workbench.action.openWorkspace with the file path, roots land in
 // 2_roots and dispatch vscode.openFolder with the root path, the other
@@ -37,17 +37,17 @@ export interface RecentProviderDeps {
 }
 
 /** The workspace file extension; the same suffix the workspace-document pickers filter on. */
-const WORKSPACE_EXTENSION = ".pfwork";
+const WORKSPACE_EXTENSION = ".rvwork";
 
 /** The command an Open Recent workspace row and a Ctrl+P workspace hit dispatch. */
 const OPEN_WORKSPACE_COMMAND = "workbench.action.openWorkspace";
 
-/** Whether a recorded path is a workspace file: a `.pfwork` suffix, any case. */
+/** Whether a recorded path is a workspace file: a `.rvwork` suffix, any case. */
 export function isWorkspaceFilePath(path: string): boolean {
   return path.toLowerCase().endsWith(WORKSPACE_EXTENSION);
 }
 
-/** The command a recent path dispatches: the workspace open for a .pfwork, the editor otherwise. */
+/** The command a recent path dispatches: the workspace open for a .rvwork, the editor otherwise. */
 function openCommandFor(path: string): string {
   return isWorkspaceFilePath(path) ? OPEN_WORKSPACE_COMMAND : "vscode.open";
 }
@@ -99,7 +99,7 @@ export function createRecentMenuProvider(deps: RecentProviderDeps = {}): MenuIte
  * then every file in the tree's fetched listings, deduped by path. The
  * filter is a case-insensitive substring match on the base name or the
  * full path. Accepting dispatches the same command the matching Open
- * Recent row dispatches: workbench.action.openWorkspace for a .pfwork hit,
+ * Recent row dispatches: workbench.action.openWorkspace for a .rvwork hit,
  * vscode.open otherwise.
  */
 export function createFileQuickAccessProvider(deps: RecentProviderDeps = {}): QuickAccessProvider {

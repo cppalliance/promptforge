@@ -1,6 +1,6 @@
 //! The `doc(hidden)` ban, live: no `.rs` file under a facade in
-//! `facade_shape::FACADE_DIRS` (`promptforge`, `harness`) or under their
-//! containers (`crates/promptforge-internal/`, `crates/harness-internal/`)
+//! `facade_shape::FACADE_DIRS` (`runvil`, `harness`) or under their
+//! containers (`crates/runvil-internal/`, `crates/harness-internal/`)
 //! carries a `doc(hidden)` attribute. An item is either on a facade's
 //! surface and documented, or off it: private, or a free function in a
 //! `detail` module the facade never re-exports. Runs as part of

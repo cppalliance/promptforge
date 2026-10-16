@@ -119,14 +119,14 @@ fn double_dollar_is_literal() {
 
 #[test]
 fn unset_variable_interpolates_to_empty() {
-    let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\n";
+    let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"${RVG_WB_DEFINITELY_UNSET_XYZ}\"\n";
     let config = Config::from_toml_str(raw).expect("unset variable resolves to empty");
     assert_eq!(config.gateway.api_key, "");
 }
 
 #[test]
 fn an_empty_base_url_is_kept_as_the_not_explicit_signal() {
-    let raw = "[gateway]\nbase_url = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\napi_key = \"k\"\n";
+    let raw = "[gateway]\nbase_url = \"${RVG_WB_DEFINITELY_UNSET_XYZ}\"\napi_key = \"k\"\n";
     let config = Config::from_toml_str(raw).expect("fixture parses");
     assert_eq!(
         config.gateway.base_url, "",

@@ -91,7 +91,7 @@ The workshop fixes plan landed the bug fixes, test repairs, doc corrections, and
     - The agent socket imports `send_frame`, `send_error`, and `cross_site_refusal` from `workshop_socket` (`agents/socket.rs:42`, `agents/socket_frames.rs:13`).
     - `workshop_socket.rs:53` imports `SessionsState` from `agents::state`, and `workshop_socket-menu.rs:21-22` imports `SessionsState` and `value_from_bytes` from `agents`.
     - A `/ws` connection is still called a session (`run_session`, `SessionLog`, `NEXT_SESSION` at `workshop_socket.rs:58-108`), and its integration tests live under `crates/workshop/server/tests/it/session*`.
-  - **The Engine reaches every subsystem through `workshop-protocol`.** `crates/workshop/protocol/Cargo.toml:13` depends on `promptforge` only for the agent frame family in `protocol/src/agent.rs:3-4` (`Event`, `CallMetrics`, `ToolCallEvent`). Every subsystem depends on `workshop-protocol`, so `workshop-status` and `workshop-user-state` compile the Engine and its vendored Lua sources.
+  - **The Engine reaches every subsystem through `workshop-protocol`.** `crates/workshop/protocol/Cargo.toml:13` depends on `runvil` only for the agent frame family in `protocol/src/agent.rs:3-4` (`Event`, `CallMetrics`, `ToolCallEvent`). Every subsystem depends on `workshop-protocol`, so `workshop-status` and `workshop-user-state` compile the Engine and its vendored Lua sources.
   - **Dead and over-wide public surface.**
     - The gateway cache API (`cache_ensure`, `CacheResponse`, `CacheEvent`, `SsePayloadStream`, `crates/workshop/gateway/src/lib.rs:34-36`) has no caller in `crates/workshop/server` or `crates/workshop/desktop`.
     - `GatewayUpdater::replace_sidecar` (`crates/workshop/gateway/src/gateway_binding.rs:286`) is called only from tests. The desktop app uses `replace_sidecar_cancellable` (`crates/workshop/desktop/src/gateway/supervisor/mod.rs:124`).
@@ -114,14 +114,14 @@ The workshop fixes plan landed the bug fixes, test repairs, doc corrections, and
   - **UI parts coupling.**
     - The file tree panel lives in `crates/workshop/ui/src/parts/layout/workshop-panel.ts`, and `parts/layout/index.ts` registers its `tree` panel factory. `parts/layout/layout.contribution.ts:22` imports `focusWorkshopTree` and `toggleWorkshopPanel` from it for eager actions.
     - The tree panel's actions live in `parts/workspace/`, so `layout` and `workspace` import each other (`layout/workshop-panel.ts:31-32`, `workspace/file-actions.ts:17`).
-    - `.pfwork` switching lives in a third folder, `parts/workspace-files/`.
+    - `.rvwork` switching lives in a third folder, `parts/workspace-files/`.
     - `showPanelDialog` lives in `parts/editor/editor-dialog.ts`, and `WORKSPACE_CHANGED_EVENT` in `parts/workspace/workspace-drops.ts:42`, though other parts import both.
     - `COMMANDS_HISTORY` is the one service token still under `parts/` (`parts/quickinput/commands-history.ts:94`).
   - **Test gaps and a build-check gap.** The test gaps are listed under Testing Plan. The build check only forbids the desktop app from depending on `workshop-server` (`crates/build-xtask/src/product.rs:136-141`), so a desktop dependency on `workshop-gateway` would pass.
 - Goals:
   - Every use of "entry bundle" under `crates/workshop/ui/src` agrees with the settled definition, and no comment under `crates/workshop/ui/src` or in `crates/workshop/ui/build.mjs` cites a plan step.
   - `workshop_socket` and `agents` don't import each other, and `/ws` owns its route and state.
-  - `workshop-server` is the only workshop crate that depends on `promptforge`.
+  - `workshop-server` is the only workshop crate that depends on `runvil`.
   - Each public item has exactly one public path and at least one user outside its crate, except test seams behind `test-fixtures`.
   - The layout rule holds everywhere in `crates/workshop/**/src`, under a wording that says how nested files count.
   - Each duplicated helper listed above exists once.
@@ -130,10 +130,10 @@ The workshop fixes plan landed the bug fixes, test repairs, doc corrections, and
   - The build check enforces the desktop app's dependency boundary.
 - Non-goals:
   - No change to any wire frame's JSON shape. The one route rename is in Functional Specification.
-  - No change to persisted formats (`ui-state.json`, `.pfwork`, `workshop.toml`).
+  - No change to persisted formats (`ui-state.json`, `.rvwork`, `workshop.toml`).
   - No remote or browser access to the server.
   - No change to the desktop package name `workshop`.
-  - No edits to `crates/promptforge*`, `crates/harness/*`, or `crates/gateway/*`.
+  - No edits to `crates/runvil*`, `crates/harness/*`, or `crates/gateway/*`.
   - No edits to `tools/document.md`; the user is handling it elsewhere.
   - No stale-phrase guard in `crates/workshop/ui/test/docs-claims.mjs`.
   - No structural check beyond the approved desktop dependency rule.
@@ -143,8 +143,8 @@ The workshop fixes plan landed the bug fixes, test repairs, doc corrections, and
   - The retired-string and retired-path checks in the Testing Plan exit criteria pass.
 - Constraints:
   - **Repository.**
-    - Root `C:\Users\Vinnie\cursor\promptforge`, branch `master`, at or after `64b24eca` ("Close plan: workshop fixes"). All paths are relative to that root. Cited line numbers are at `64b24eca`; locate code by content.
-    - Run in that main checkout. The `vibe3` branch in the `C:\Users\Vinnie\cursor\promptforge3` worktree is an ancestor of `master` that lacks `64b24eca`.
+    - Root `C:\Users\Vinnie\cursor\runvil`, branch `master`, at or after `64b24eca` ("Close plan: workshop fixes"). All paths are relative to that root. Cited line numbers are at `64b24eca`; locate code by content.
+    - Run in that main checkout. The `vibe3` branch in the `C:\Users\Vinnie\cursor\runvil3` worktree is an ancestor of `master` that lacks `64b24eca`.
   - **Edit scope.** For any edit outside this list, stop and report:
     - `crates/workshop/**`
     - `crates/build-xtask/src/product.rs`, `crates/build-xtask/src/product-tests.rs`, `crates/build-xtask/src/tidy.rs`, and `crates/build-xtask/src/tidy-tests.rs`
@@ -177,7 +177,7 @@ Nearly everything here is internal. Clients see one route path change and the UI
 
 - Actors and workflows:
   - A maintainer or agent opens a module, reads its header and docs, follows imports, and edits.
-  - A desktop user saves a workspace as a new `.pfwork` file, and launches the desktop app while a stale gateway discovery file is on disk.
+  - A desktop user saves a workspace as a new `.rvwork` file, and launches the desktop app while a stale gateway discovery file is on disk.
 - Inputs and outputs:
   - **Save Workspace As route.** `POST /workspace/file/save_as` (`crates/workshop/workspace/src/handlers/file.rs:33`) becomes `POST /workspace/file/save-as`, matching every other multi-word route (`/workspace/file/window-state`, `/admin/switch-profile`). The UI caller (`crates/workshop/ui/src/services/workspace-file-client.ts:157-158`) changes in the same commit. No alias is kept.
   - **Inbound agent frames.** `launch`, `attach`, and `cancel` on `/agents/ws` are parsed into a typed enum instead of ad hoc field reads (`crates/workshop/server/src/agents/socket.rs:234-290`). Accepted frames and every refusal frame keep their current JSON, codes, and text.
@@ -209,7 +209,7 @@ Nearly everything here is internal. Clients see one route path change and the UI
 
 ## Technical Design
 
-The crate graph loses one edge: `workshop-protocol` stops depending on `promptforge`, because the agent frame family moves into the server, its only producer. The build check gains the desktop boundary rule. Inside the server, a websocket helper module and a shared receive helper in `workshop-support` end the import cycle between the two sockets. The UI moves the tree panel and two shared helpers so its parts folders import one way, and it adds a runtime guard layer at its two socket boundaries.
+The crate graph loses one edge: `workshop-protocol` stops depending on `runvil`, because the agent frame family moves into the server, its only producer. The build check gains the desktop boundary rule. Inside the server, a websocket helper module and a shared receive helper in `workshop-support` end the import cycle between the two sockets. The UI moves the tree panel and two shared helpers so its parts folders import one way, and it adds a runtime guard layer at its two socket boundaries.
 
 - Architecture:
   - The target Cargo graph. Dotted edges are dependencies outside `crates/workshop`, and bold edges are enforced by the new build-check rule.
@@ -234,7 +234,7 @@ graph TD
   us --> vocab
   ws --> vocab
   registry --> protocol
-  server -.-> engine["promptforge"]
+  server -.-> engine["runvil"]
   server -.-> harness["harness-api"]
 ```
 
@@ -303,7 +303,7 @@ graph TD
 
 ## Testing Plan
 
-Record a baseline of every exit command before any change, and run the same commands at the end. Moves and renames need no new tests; their check is that the touched packages compile and their focused tests pass. The behavior changes, the UI frame guards, and the listed gaps each get tests. Building the `workshop` package needs the gateway sidecar staged. Run `cargo workshop` first, since it stages and then removes its own copy. Then run `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+Record a baseline of every exit command before any change, and run the same commands at the end. Moves and renames need no new tests; their check is that the touched packages compile and their focused tests pass. The behavior changes, the UI frame guards, and the listed gaps each get tests. Building the `workshop` package needs the gateway sidecar staged. Run `cargo workshop` first, since it stages and then removes its own copy. Then run `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
 
 - Unit:
   - **Server.**
@@ -353,7 +353,7 @@ Record a baseline of every exit command before any change, and run the same comm
   - **Retired strings.** Each of these finds nothing:
     - `rg -n "in the entry bundle|into the entry bundle" crates/workshop/ui/src`
     - `rg -n -i "steps 1-3|wiring step|plan step" crates/workshop/ui/src crates/workshop/ui/build.mjs`
-    - `rg -n "^promptforge|promptforge::" crates/workshop/protocol` (a dependency line or a `promptforge::` path)
+    - `rg -n "^runvil|runvil::" crates/workshop/protocol` (a dependency line or a `runvil::` path)
     - `rg -n "cache_ensure|SseDecoder|CacheEvent|CacheResponse|SsePayloadStream|reconcile_catalog_for_test" crates/workshop`
     - `rg -n "run_session|SessionLog|NEXT_SESSION|Omit::Sessions" crates/workshop`
     - `rg -n "file/save_as" crates/workshop --glob "!**/node_modules/**" --glob "!**/dist/**"` finds only the test in `crates/workshop/workspace/tests/it/` that asserts the old route answers 404. The route is matched by its path, because `Workspace::save_as` is a real method name that stays.
@@ -385,13 +385,13 @@ Record a baseline of every exit command before any change, and run the same comm
   - **Scope.** The fixes plan set aside "module moves, file-layout rule application, public-surface trimming, the `/ws` module split, the gateway cache API deletion, moving the agent frames out of `workshop-protocol`, the UI parts restructure, the desktop dependency build check, and the remaining test-coverage gaps" (`vibe/2026-09-25-2-workshop-fixes.md:238`). This plan takes all of them. The user also selected four sign-off items:
     - "Add one short crate map"
     - "New structural checks, which repo policy says need your approval: desktop may depend only on server-api, and server-api's re-export list is pinned exactly"
-    - "Remove workshop-protocol's dependency on the promptforge engine, so status and user-state stop compiling Lua"
+    - "Remove workshop-protocol's dependency on the runvil engine, so status and user-state stop compiling Lua"
     - "Restructure UI parts: move the file tree panel out of layout, rename workspace and workspace-files, break the layout/workspace import cycle"
 
     The crate map already landed in `d3024c18`, so it adds no work here.
   - **The desktop dependency rule is approved.** The user selected it, which is the explicit approval the repository requires for a structural check (`AGENTS.md:59-60`). It guards a stable product boundary with no ordinary equivalent, because Cargo cannot say "only through the facade". It is small, and it closes a real gap: today a desktop dependency on `workshop-gateway` passes (`crates/build-xtask/src/product.rs:136-141`).
   - **Pinning `workshop-server-api`'s exact re-export list stays deferred.** It was the other half of the same selection. After the cost was laid out (see Deferred and Out of Scope), the user said: "workshop-server-api stays deferred".
-  - **Move the agent frames into the server instead of mirroring Engine types in `workshop-protocol`.** This is the most valuable structural item. `workshop-status` and `workshop-user-state` compile the Engine and Lua only because protocol holds these frames. The server is their only producer and already depends on `promptforge`. A mirror of `CallMetrics` inside protocol would duplicate a rich Engine type that must stay in sync by hand. The shared agent-frames fixture already pins the wire shape (Rust: `crates/workshop/protocol/tests/it/fixture.rs:12`; UI: `crates/workshop/ui/test/agent-wire-fixtures.mjs`), so drift stays caught after the move.
+  - **Move the agent frames into the server instead of mirroring Engine types in `workshop-protocol`.** This is the most valuable structural item. `workshop-status` and `workshop-user-state` compile the Engine and Lua only because protocol holds these frames. The server is their only producer and already depends on `runvil`. A mirror of `CallMetrics` inside protocol would duplicate a rich Engine type that must stay in sync by hand. The shared agent-frames fixture already pins the wire shape (Rust: `crates/workshop/protocol/tests/it/fixture.rs:12`; UI: `crates/workshop/ui/test/agent-wire-fixtures.mjs`), so drift stays caught after the move.
   - **The layout rule counts nested files.** A directory's count includes the files in its nested subdirectories, and the conversion applies at each level. Counting only direct files is unstable. `crates/workshop/gateway/src/gateway_progress/` holds `presenter.rs` and `tests.rs` plus a `tests/` directory with `presenter.rs` and `recovery.rs`. Flattening it on a direct count yields four `gateway_progress-*` siblings, which the same rule then turns back into a directory. Record the wording at `AGENTS.md:84` before any layout move.
   - **Delete the gateway cache API rather than gate it.** Cargo features gate real build constraints, never product shape (`AGENTS.md:62`), so a feature gate is not available for a product API. Nothing in the server or desktop app calls it. Deleting it also removes `SseDecoder::feed`, which grows its buffer without a limit (`crates/workshop/gateway/src/gateway/sse.rs:80-86`).
   - **Gate `replace_sidecar` and `from_client` as test seams instead of deleting them.** Both are called only from tests, and the `test-fixtures` feature already gates the crate's other test seams. Moving about fourteen test call sites to `replace_sidecar_cancellable` would add churn without changing what production runs.
@@ -400,7 +400,7 @@ Record a baseline of every exit command before any change, and run the same comm
   - **Keep the `handles.rs` name in every crate,** and make each module doc's first line say it holds the subsystem's registration and any handle types. Renaming the files in two crates would make one word consistent at the cost of churn in five crates.
   - **Add `implements` clauses instead of renaming the parts classes** that share a name with their service interface. The clause gives the compiler the class-to-interface check. The one wrong import it enabled (`crates/workshop/ui/src/parts/workspace/workspace-drops.ts:28`) is fixed directly.
   - **Runtime guards instead of a compile-time `satisfies` over the fixture JSON.** With `resolveJsonModule`, TypeScript widens string values in imported JSON to `string`, so a frame union keyed on a literal `type` can't be checked against fixture JSON. See [microsoft/TypeScript#32063](https://github.com/microsoft/TypeScript/issues/32063) (open) and the [resolveJsonModule reference](https://www.typescriptlang.org/tsconfig/#resolveJsonModule). The guards also protect the live sockets, where a fixture test only protects the build.
-  - **Rename `parts/workspace-files/` to `parts/workspace-document/`, and keep `parts/workspace/`.** Once the tree panel moves in, `workspace` holds exactly the workspace's roots, drops, tree, and File actions. The repository already calls a `.pfwork` file "the `.pfwork` document" (`AGENTS.md:90`). `parts/workspace/files.contribution.ts` becomes `workspace.contribution.ts`, the `<feature>.contribution.ts` name that `crates/workshop/ui/AGENTS.md:17` requires.
+  - **Rename `parts/workspace-files/` to `parts/workspace-document/`, and keep `parts/workspace/`.** Once the tree panel moves in, `workspace` holds exactly the workspace's roots, drops, tree, and File actions. The repository already calls a `.rvwork` file "the `.rvwork` document" (`AGENTS.md:90`). `parts/workspace/files.contribution.ts` becomes `workspace.contribution.ts`, the `<feature>.contribution.ts` name that `crates/workshop/ui/AGENTS.md:17` requires.
   - **Move the tree panel's eager actions with the panel.** `parts/layout/layout.contribution.ts:22` statically imports `focusWorkshopTree` and `toggleWorkshopPanel`. If those actions stayed in `layout`, moving the panel would turn the `layout`-to-`workspace` import around rather than remove it.
   - **Restructure the UI parts before desktop polish.** The user plans to finish and polish the desktop app next. That work will touch `workshop-panel.ts`, `file-actions.ts`, and `workspace-drops.ts`, so settling their locations first means polish lands on final paths. The cost is about seventeen UI test files with hard-coded paths (listed under Assumptions).
   - **Make `stt` and `take` import one way by moving one interface.** `take` imports only the type `SttInsertionContext` from `stt` (`crates/workshop/ui/src/parts/take/take-registry-types.ts:7`, `take-registry.ts:10`; defined at `parts/stt/stt.ts:9`). `stt` imports values from `take` (`parts/stt/realtime-stt.ts:17-22`). Moving the interface into `take/take-registry-types.ts` leaves only the `stt`-to-`take` edge.
@@ -437,8 +437,8 @@ Record a baseline of every exit command before any change, and run the same comm
     - `parts/workspace-files`: `workspace-switch.mjs:2,49-50`, `workspace-files.mjs:2,46,52`, `menu-spec.mjs:36`
   - `crates/workshop/server/tests/it/session/menu/restart.rs:135-137` hard-codes the child-process test path `"session::menu::restart::validated_gateway_fixture_process"`. Derive it (for example from `module_path!()`) before or in the directory move, or the move compiles and then fails at runtime.
   - `crates/workshop/desktop/src/gateway.rs:10-16` already documents the `boot`/`supervisor` and `identity`/`recovery` import cycles as deliberate. The launch merge may remove one; update that doc to match whatever remains.
-  - The `vibe2` branch (worktree `C:\Users\Vinnie\cursor\promptforge2`) holds `7f5e4cc8`, "Document every public item of the promptforge facade". It touches only `crates/promptforge/src/*.md`, which is outside this plan's scope, so it can't conflict. But merging it into `master` mid-run would shift the facade docs gate and the `xtask api --check` baseline. The user chose to finish this plan first: "I was thinking to make this plan run to finish before merging vibe2". So `vibe2` stays off `master` until this plan's exit gates pass and its close commit lands. Heavy builds or test runs in the `promptforge2` worktree during this run compete for CPU with this run's timing-sensitive tests. If a test fails only while that worktree is busy, treat it as intermittent and rerun it once before calling it a regression.
-  - `64b24eca` is on the fork's `master` (`vinniefalco/promptforge`), where CI, Nightly, and STT Miri passed. `cppalliance/promptforge` `master` is at `890ae2f6`. If this work goes upstream by pull request, land the workshop fixes first, so the structure changes review on their own.
+  - The `vibe2` branch (worktree `C:\Users\Vinnie\cursor\runvil2`) holds `7f5e4cc8`, "Document every public item of the runvil facade". It touches only `crates/runvil/src/*.md`, which is outside this plan's scope, so it can't conflict. But merging it into `master` mid-run would shift the facade docs gate and the `xtask api --check` baseline. The user chose to finish this plan first: "I was thinking to make this plan run to finish before merging vibe2". So `vibe2` stays off `master` until this plan's exit gates pass and its close commit lands. Heavy builds or test runs in the `runvil2` worktree during this run compete for CPU with this run's timing-sensitive tests. If a test fails only while that worktree is busy, treat it as intermittent and rerun it once before calling it a regression.
+  - `64b24eca` is on the fork's `master` (`vinniefalco/runvil`), where CI, Nightly, and STT Miri passed. `cppalliance/runvil` `master` is at `890ae2f6`. If this work goes upstream by pull request, land the workshop fixes first, so the structure changes review on their own.
   - These review findings were already fixed at `64b24eca` and are not in scope:
     - the registry trait docs point at the implementing `handles.rs` (`crates/workshop/registry/src/traits.rs`)
     - the registry invariant names `Push::menu` as the one per-subsystem accessor (`crates/workshop/registry/src/lib.rs:28`)
@@ -450,7 +450,7 @@ Record a baseline of every exit command before any change, and run the same comm
 
 ### Deferred and Out of Scope
 
-- Deferred: pinning `workshop-server-api`'s exact re-export list. `cargo xtask api` is hard-wired to the `promptforge` facade (`crates/build-xtask/src/api/load.rs:20`, `crates/build-xtask/src/api/listing.rs:28-32`). Pointing it at the server facade needs a second facade constant, a rustdoc load set, a committed listing, and the pinned nightly. All that would guard a ten-item facade whose names `crates/workshop/server-api/src/lib-tests.rs:18-35` already lock. Revisit when `cargo xtask api` supports more than one facade, or when the server facade gains a second consumer besides the desktop app.
+- Deferred: pinning `workshop-server-api`'s exact re-export list. `cargo xtask api` is hard-wired to the `runvil` facade (`crates/build-xtask/src/api/load.rs:20`, `crates/build-xtask/src/api/listing.rs:28-32`). Pointing it at the server facade needs a second facade constant, a rustdoc load set, a committed listing, and the pinned nightly. All that would guard a ten-item facade whose names `crates/workshop/server-api/src/lib-tests.rs:18-35` already lock. Revisit when `cargo xtask api` supports more than one facade, or when the server facade gains a second consumer besides the desktop app.
 - Deferred: tests for the desktop app's `menu.rs`, `linux_media.rs`, and `window_state::apply`, which need a Tauri runtime. Revisit when the desktop crate gets runtime test fixtures.
 - Deferred: the check-then-use window between confinement and file access, acknowledged in the `tree` handler's doc in `crates/workshop/workspace/src/handlers.rs`. Revisit when remote access is designed.
 - Out of scope: remote or browser access to the server.
@@ -470,21 +470,21 @@ Record a baseline of every exit command before any change, and run the same comm
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`; structural checks `cargo test -p build-xtask`.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`. Never run a standalone `cargo check --workspace` beside these (only `cargo check -p gateway --no-default-features`).
 - Formatter check command: `cargo fmt --all --check`.
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; facade: `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`; workshop server: `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps -p workshop-server --document-private-items`; guide: `mdbook build guide`; API surface: `cargo +nightly-2026-09-05 xtask api --check` (the pinned nightly, named in `crates/build-xtask/src/api/toolchain.rs:19` and installed on this machine).
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; facade: `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps`; workshop server: `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps -p workshop-server --document-private-items`; guide: `mdbook build guide`; API surface: `cargo +nightly-2026-09-05 xtask api --check` (the pinned nightly, named in `crates/build-xtask/src/api/toolchain.rs:19` and installed on this machine).
 - Test placement and naming conventions: unit tests sit beside the module as a kebab sibling `foo-tests.rs` (or `foo-tests-<label>.rs`) wired by `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;`, or in a `foo/tests/` subdirectory once there are three or more files; integration tests live in the crate's top-level `tests/`, usually one `tests/it/main.rs` binary with topic modules plus `tests/common/` and `tests/fixtures/`; test names are snake_case behavior sentences (for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`); Workshop UI tests are `crates/workshop/ui/test/<feature>.mjs` run by `node --test` with jsdom, and the gateway config UI uses `src/**/*.test.mjs` beside sources.
-- Directory map: `crates/` holds all Rust crates, with public root crates (`promptforge`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-*`), build tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), the `shared-ui` TypeScript/CSS package, and four manifestless private family containers (`promptforge-internal/`, `gateway/` with nested `gateway/stt/`, `workshop/`, `harness/`); `crates/workshop/` holds `desktop` (Tauri app, package `workshop`), `server`, `server-api`, subsystem crates, and `ui/` (TypeScript SPA); `guide/` is the mdbook user guide; `prompts/` holds example prompt pipelines; `tools/` holds Node helper scripts; `vibe/` holds plans, archdoc, and design notes; `local/` holds local config and fixtures; `.github/workflows/` is CI; `.githooks/` has pre-commit and pre-push hooks; `.config/` has nextest and hakari config.
-- Component boundaries: executor (`promptforge` facade over `promptforge-internal/*`) is sans-I/O and depends on store, Lua VM boundary, and shared substrate; Harness depends on promptforge, the gateway public pair, and shared-*, never workshop or private gateway crates, and exposes only `harness-api`; gateway depends only on shared substrate and never on promptforge or workshop; workshop crates depend on `promptforge`, `harness-api`, the gateway public pair, and shared-*, and the desktop app sees the server only through `workshop-server-api`; shared-* depend on no product crate; family container crates may depend only on crates at the `crates/` root and their siblings; inside workshop, dependencies flow server -> features -> services -> vocabulary; on the SPA side lazy panels never import the entry bundle; `cargo test -p build-xtask` enforces these.
+- Directory map: `crates/` holds all Rust crates, with public root crates (`runvil`, `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-*`), build tooling (`build-xtask`, `build-workshop`, `build-ui`, `build-user-guide`, `build-llama-cuda`), `workspace-hack` (cargo-hakari), the `shared-ui` TypeScript/CSS package, and four manifestless private family containers (`runvil-internal/`, `gateway/` with nested `gateway/stt/`, `workshop/`, `harness/`); `crates/workshop/` holds `desktop` (Tauri app, package `workshop`), `server`, `server-api`, subsystem crates, and `ui/` (TypeScript SPA); `guide/` is the mdbook user guide; `prompts/` holds example prompt pipelines; `tools/` holds Node helper scripts; `vibe/` holds plans, archdoc, and design notes; `local/` holds local config and fixtures; `.github/workflows/` is CI; `.githooks/` has pre-commit and pre-push hooks; `.config/` has nextest and hakari config.
+- Component boundaries: executor (`runvil` facade over `runvil-internal/*`) is sans-I/O and depends on store, Lua VM boundary, and shared substrate; Harness depends on runvil, the gateway public pair, and shared-*, never workshop or private gateway crates, and exposes only `harness-api`; gateway depends only on shared substrate and never on runvil or workshop; workshop crates depend on `runvil`, `harness-api`, the gateway public pair, and shared-*, and the desktop app sees the server only through `workshop-server-api`; shared-* depend on no product crate; family container crates may depend only on crates at the `crates/` root and their siblings; inside workshop, dependencies flow server -> features -> services -> vocabulary; on the SPA side lazy panels never import the entry bundle; `cargo test -p build-xtask` enforces these.
 - Conventions summary: workspace lints deny clippy `all` and `pedantic`, `unwrap_used`, `expect_used`, and forbid `unsafe_code` (unsafe only in owned FFI boundaries with a safety comment before each block); `missing_docs` and `unreachable_pub` warn; every workshop-* and harness-* `lib.rs` opens with a `//!` doc holding a `## Invariants` marker (desktop app exempt); marked crates cap Rust files at 500 lines; source directories are flat unless a subdirectory holds three or more files, with kebab siblings wired by `#[path]`; comments state only non-obvious constraints and cite upstream issue URLs for workarounds; error messages are concise, factual, and model-readable, naming required versus actual; behavior changes ship with tests; no new structural checks without user approval; features gate real constraints only; run-log JSON round-trips exactly; SPA CSS sits beside its TypeScript, uses `--ws-*` tokens, and never uses `localStorage`; edition 2024, `--locked` in CI.
 - Run rules. Every step and every sub-agent role obeys these. They restate the plan's Constraints and step-wide rules, which sit outside the ranges sub-agents read.
-  - Edit scope: `crates/workshop/**`; `crates/build-xtask/src/product.rs`, `crates/build-xtask/src/product-tests.rs`, `crates/build-xtask/src/tidy.rs`, and `crates/build-xtask/src/tidy-tests.rs`; `Cargo.lock`; root `AGENTS.md`; `.cursor/rules/workshop-architecture.mdc` and `.cursor/rules/workshop-spa.mdc`; `.github/workflows/ci.yml`, only where it names a moved path; the plan's repository copy under `vibe/`, and `vibe/ACTIVE`. Never edit `tools/document.md`, `crates/promptforge*`, `crates/harness/*`, `crates/gateway/*`, or `crates/workspace-hack`. For any edit outside the scope, stop and report.
+  - Edit scope: `crates/workshop/**`; `crates/build-xtask/src/product.rs`, `crates/build-xtask/src/product-tests.rs`, `crates/build-xtask/src/tidy.rs`, and `crates/build-xtask/src/tidy-tests.rs`; `Cargo.lock`; root `AGENTS.md`; `.cursor/rules/workshop-architecture.mdc` and `.cursor/rules/workshop-spa.mdc`; `.github/workflows/ci.yml`, only where it names a moved path; the plan's repository copy under `vibe/`, and `vibe/ACTIVE`. Never edit `tools/document.md`, `crates/runvil*`, `crates/harness/*`, `crates/gateway/*`, or `crates/workspace-hack`. For any edit outside the scope, stop and report.
   - File-size ceiling: Rust files in `workshop-*` crates stay at or under 500 physical lines; the desktop crate (package `workshop`) is exempt. Count a file's lines before editing it. If the edit would pass 500, split the file first along an existing seam.
   - Moves: a move uses `git mv`, the one index-changing command a coding or fix sub-agent may run. A step may combine moves with their wiring (`mod` lines, `#[path]` attributes, imports, path strings) and with content edits, provided every moved file still shows as a rename under git's default 50 percent similarity. Sub-agents check with `git diff HEAD -M --name-status`, and the dispatching session re-checks with `git diff --cached -M --name-status` after staging. When an edit would push a moved file below the threshold, stop and report the file instead of making the edit, so the move can commit on its own first.
   - Checks: a step runs its Tests line. "The trio" means `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`. "The headless run" means `cargo nextest run --locked -p workshop-server --features headless`. "The UI gates" means `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`, in that order, because `npm test` boots from `dist/`.
   - Clippy: a step that changes visibility, moves items between modules, or removes re-exports also runs clippy with `-D warnings` for every package it touches: the workshop clippy partition for the trio, and `cargo clippy -p <package> --all-targets --all-features -- -D warnings` for any other package. The workspace lints warn on `unreachable_pub`, and `-D warnings` turns that into an error.
-  - Sidecar: building the `workshop` package needs the gateway sidecar staged under `crates/workshop/desktop/binaries/`. It is gitignored. Step 1 stages it, and it stays staged for the whole run. When it is missing, restage it with `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+  - Sidecar: building the `workshop` package needs the gateway sidecar staged under `crates/workshop/desktop/binaries/`. It is gitignored. Step 1 stages it, and it stays staged for the whole run. When it is missing, restage it with `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
   - Line numbers are at `64b24eca`; locate code by content. Paths change from the step that moves them onward: the gateway modules from Step 5, the workspace files from Step 8, the `/ws` integration tests from Step 12, the agent wire module from Step 13, and the UI files from Steps 18 and 19.
   - Behavior changes ship with tests in the same commit, and existing product and behavior tests survive every move. Comment-only edits change only comment lines, and a rewrapped comment stays within the width of the lines around it.
-  - Intermittent failures: heavy work in the `C:\Users\Vinnie\cursor\promptforge2` worktree competes for CPU with timing-sensitive tests. Rerun a test that fails once before calling it a regression.
+  - Intermittent failures: heavy work in the `C:\Users\Vinnie\cursor\runvil2` worktree competes for CPU with timing-sensitive tests. Rerun a test that fails once before calling it a regression.
 
 </project-survey>
 <execution-plan>
@@ -506,11 +506,11 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 - Component placement: first, because it has no dependencies, and the layout rule wording in Step 2 must land before any layout move.
 - Piece: baseline, with no code change. Its results and completion mark fold into the plan seed commit.
 - Confirm three things:
-  - the repository is `C:\Users\Vinnie\cursor\promptforge` on `master`, at or after `64b24eca`, with a clean `git status`
+  - the repository is `C:\Users\Vinnie\cursor\runvil` on `master`, at or after `64b24eca`, with a clean `git status`
   - the `vibe2` branch is not being merged into `master` during the run
   - `crates/workshop/ui/src/main.ts` statically imports `parts/layout/zones.ts`, window-chrome, and zoom. Record any that is not a static import, for Step 2's wording.
 - Run `cargo workshop` first. It builds the gateway, stages its own sidecar, builds the desktop app, and removes the staged copy.
-- Then stage the sidecar for the plan's `workshop` package runs: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`. It is gitignored. Leave it staged until Step 21.
+- Then stage the sidecar for the plan's `workshop` package runs: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`. It is gitignored. Leave it staged until Step 21.
 - Run every other exit command (copied verbatim from the Testing Plan's Exit criteria; Step 21 runs the same list):
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`
@@ -523,7 +523,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
   - both clippy partitions with `-D warnings`: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`
   - `cargo check -p gateway --no-default-features`
   - `cargo fmt --all --check`
-  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps`, each with `RUSTDOCFLAGS=-D warnings`
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p runvil --no-deps`, each with `RUSTDOCFLAGS=-D warnings`
   - `cargo +nightly-2026-09-05 xtask api --check`
   - `mdbook build guide`
   - `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`. The workshop UI's `npm test` boots from `dist/`, so run `npm run build` before it.
@@ -532,9 +532,9 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 - Record the results in a `Baseline results` list inside this step of the active plan: one line per command with pass or fail, pass counts where the tool prints them, and the names of failing and intermittent tests.
 - Commit: the recorded baseline results only.
 - Baseline results (2026-09-25, at `64b24eca` plus the plan seed, which adds only `vibe/` files; no command failed, so none was rerun and no test is intermittent):
-  - Preconditions: pass. `C:\Users\Vinnie\cursor\promptforge` is on `master` with a clean `git status` and no merge in progress, and `vibe2` is checked out only in the `promptforge2` worktree. `crates/workshop/ui/src/main.ts` imports `parts/layout/zones`, `parts/chrome/window-chrome`, and `parts/chrome/zoom` statically, and it has no dynamic `import()`.
+  - Preconditions: pass. `C:\Users\Vinnie\cursor\runvil` is on `master` with a clean `git status` and no merge in progress, and `vibe2` is checked out only in the `runvil2` worktree. `crates/workshop/ui/src/main.ts` imports `parts/layout/zones`, `parts/chrome/window-chrome`, and `parts/chrome/zoom` statically, and it has no dynamic `import()`.
   - `cargo workshop`: pass
-  - `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`: pass, sidecar staged
+  - `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`: pass, sidecar staged
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`: pass, 3936 passed, 54 skipped. One pass is marked leaky: `build-workshop::interruption platform_interrupt_after_staging_kills_child_cleans_and_fails`
   - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`: pass, 281 passed
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass, 252 passed, 4 skipped
@@ -548,7 +548,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
   - `cargo check -p gateway --no-default-features`: pass
   - `cargo fmt --all --check`: pass
   - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass
-  - `cargo doc -p promptforge --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass
+  - `cargo doc -p runvil --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass
   - `cargo +nightly-2026-09-05 xtask api --check`: pass, 0 violations, and the listing matches `public-api.txt`
   - `mdbook build guide`: pass
   - `npm run build` in `crates/workshop/ui`: pass
@@ -844,10 +844,10 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 
     No re-export is added to the server's crate root. The moved items were `pub` in protocol, and the server's `agents` module is private, so narrow them to `pub(crate)` wherever `unreachable_pub` would warn.
   - The agent-frame tests become unit tests of the moved module, in a new `crates/workshop/server/src/agents/wire-tests.rs`. `wire.rs` wires it by `#[cfg(test)] #[path = "wire-tests.rs"] mod tests;`.
-    - The tests come from `crates/workshop/protocol/tests/it/frames.rs` (the cases that build `promptforge::event::Event`, about `:164-249`) and from `tests/it/fixture.rs`.
+    - The tests come from `crates/workshop/protocol/tests/it/frames.rs` (the cases that build `runvil::event::Event`, about `:164-249`) and from `tests/it/fixture.rs`.
     - They read the fixture through `env!("CARGO_MANIFEST_DIR")` joined with `tests/fixtures/agent-frames.json`.
     - `protocol/tests/it/` keeps only the workshop-frame tests and any helper they still use.
-  - Drop `promptforge` from `crates/workshop/protocol/Cargo.toml:13`, refresh `Cargo.lock`, and update protocol's `## Invariants` block and module docs so they no longer mention agent frames.
+  - Drop `runvil` from `crates/workshop/protocol/Cargo.toml:13`, refresh `Cargo.lock`, and update protocol's `## Invariants` block and module docs so they no longer mention agent frames.
   - A `Deserialize` enum in `wire.rs` for `launch`, `attach`, and `cancel`, replacing the ad hoc field reads at `agents/socket.rs:234-290`.
     - Accepted frames and every refusal keep their JSON, codes, and text.
     - Where serde's error text would leak into a refusal, map it to the existing message.
@@ -858,7 +858,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
   - the trio and the headless run
   - the workshop clippy partition, and `cargo clippy -p workshop-protocol --all-targets --all-features -- -D warnings`
   - `node --test test/agent-wire-fixtures.mjs` in `crates/workshop/ui`
-  - `cargo tree -p workshop-status` and `cargo tree -p workshop-user-state` list no `promptforge` crate, and `rg -n "^promptforge|promptforge::" crates/workshop/protocol` finds nothing
+  - `cargo tree -p workshop-status` and `cargo tree -p workshop-user-state` list no `runvil` crate, and `rg -n "^runvil|runvil::" crates/workshop/protocol` finds nothing
   - `git diff --cached -M --name-status` lists `agent.rs` and the JSON as `R`, and the JSON's content is unchanged
 - Commit: the moves, the relocated tests, the manifest, lock, and docs, and the inbound enum.
 
@@ -1052,7 +1052,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
     - both clippy partitions with `-D warnings`: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`
     - `cargo check -p gateway --no-default-features`
     - `cargo fmt --all --check`
-    - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps`, each with `RUSTDOCFLAGS=-D warnings`
+    - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p runvil --no-deps`, each with `RUSTDOCFLAGS=-D warnings`
     - `cargo +nightly-2026-09-05 xtask api --check`
     - `mdbook build guide`
     - `npm run build`, `npm test`, and `npm run typecheck` in `crates/workshop/ui`
@@ -1060,7 +1060,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
   - Retired strings. Each of these finds nothing:
     - `rg -n "in the entry bundle|into the entry bundle" crates/workshop/ui/src`
     - `rg -n -i "steps 1-3|wiring step|plan step" crates/workshop/ui/src crates/workshop/ui/build.mjs`
-    - `rg -n "^promptforge|promptforge::" crates/workshop/protocol` (a dependency line or a `promptforge::` path)
+    - `rg -n "^runvil|runvil::" crates/workshop/protocol` (a dependency line or a `runvil::` path)
     - `rg -n "cache_ensure|SseDecoder|CacheEvent|CacheResponse|SsePayloadStream|reconcile_catalog_for_test" crates/workshop`
     - `rg -n "run_session|SessionLog|NEXT_SESSION|Omit::Sessions" crates/workshop`
     - `rg -n "file/save_as" crates/workshop --glob "!**/node_modules/**" --glob "!**/dist/**"` finds only the test in `crates/workshop/workspace/tests/it/` that asserts the old route answers 404. The route is matched by its path, because `Workspace::save_as` is a real method name that stays.
@@ -1085,7 +1085,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
 - Commit: the doc edits and the recorded exit results.
 - Exit results (2026-09-25, at `3cac5eb5` plus this step's doc edits; no command failed, so none was rerun and no test is intermittent). Step 1's baseline sits in brackets:
   - `cargo workshop`: pass [pass]
-  - `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`: pass, sidecar staged and left staged [pass]
+  - `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`: pass, sidecar staged and left staged [pass]
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`: pass, 3937 passed, 54 skipped, with the same leaky pass `build-workshop::interruption platform_interrupt_after_staging_kills_child_cleans_and_fails` [3936 passed, 54 skipped, same leaky pass]
   - `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`: pass, 281 passed [281 passed]
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`: pass, 274 passed, 4 skipped [252 passed, 4 skipped]
@@ -1099,7 +1099,7 @@ Components, in dependency order: Wording (Steps 1-2), Build check (3), Gateway (
   - `cargo check -p gateway --no-default-features`: pass [pass]
   - `cargo fmt --all --check`: pass [pass]
   - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
-  - `cargo doc -p promptforge --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
+  - `cargo doc -p runvil --no-deps` with `RUSTDOCFLAGS=-D warnings`: pass [pass]
   - `cargo +nightly-2026-09-05 xtask api --check`: pass, 0 violations, and the listing matches `public-api.txt` [same]
   - `mdbook build guide`: pass [pass]
   - `npm run build` in `crates/workshop/ui`: pass [pass]

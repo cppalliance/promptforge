@@ -14,15 +14,15 @@ use harness_runner::effect_loop::drive_run;
 use harness_runner::files::{InputFileError, read_output};
 use harness_runner::prepare::{PrepareError, Prepared, prepare};
 use harness_runner::recorder::{MemoryRecorder, RunOutcome};
-use promptforge::cancel::CancelHandle;
-use promptforge::event::Event;
-use promptforge::vfs::{MemoryBackend, Mode, ModePolicy, Origin, VfsError, VfsRef};
+use runvil::cancel::CancelHandle;
+use runvil::event::Event;
+use runvil::vfs::{MemoryBackend, Mode, ModePolicy, Origin, VfsError, VfsRef};
 
 use super::{PLAIN, bare, completed, recorded_parse_events, recorder, services};
 
 /// A prompt declaring `paper.md` as its input and `report.md` as its
 /// output, whose one section writes the output from the input.
-const FILES: &str = "---\nname: files\ndescription: d\npromptforge: 0\n\
+const FILES: &str = "---\nname: files\ndescription: d\nrunvil: 0\n\
     input:\n  path: paper.md\n  description: The paper\n\
     output:\n  path: report.md\n  description: The report\n---\n\n\
     # Title\n\n## Only\n\n```lua\n\

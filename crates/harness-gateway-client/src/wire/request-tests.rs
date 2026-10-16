@@ -9,13 +9,13 @@ use std::fmt::Write as _;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use promptforge::effect::{Effect, EffectAnswer};
-use promptforge::model::{
+use runvil::effect::{Effect, EffectAnswer};
+use runvil::model::{
     Completion, CompletionResult, ModelDescriptor, ModelId, ThinkingMode, ToolCall,
 };
-use promptforge::timestamp::Timestamp;
-use promptforge::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
-use promptforge::{Prompt, Run, RunContext, RunResult, RunSeed, Step};
+use runvil::timestamp::Timestamp;
+use runvil::tools::{ToolCatalog, ToolDescriptor, ToolId, ToolOutput};
+use runvil::{Prompt, Run, RunContext, RunResult, RunSeed, Step};
 use serde_json::json;
 
 use super::*;
@@ -45,7 +45,7 @@ fn tool_round(offered: &[Offered]) -> Round {
         writeln!(offers, "tools.offer('example/test/{name}')").expect("a String takes every write");
     }
     let source = format!(
-        "---\nname: round\ndescription: One tool round.\npromptforge: 0\n\
+        "---\nname: round\ndescription: One tool round.\nrunvil: 0\n\
          models:\n  writer: {{}}\n---\n\n# Round\n\n## Ask\n\n\
          ```lua\nmodels.use('writer')\n{offers}local msgs = messages.new()\n\
          msgs:user('echo once')\nmodels.loop(msgs)\nreturn msgs[#msgs].content\n```\n"

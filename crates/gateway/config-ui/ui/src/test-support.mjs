@@ -93,7 +93,7 @@ export function modelsFixture() {
   return {
     "config-version": 0,
     server: { bind: "127.0.0.1:8081", api_key: "***" },
-    local: { cache_dir: "~/.promptforge" },
+    local: { cache_dir: "~/.runvil" },
     dominion: [
       {
         id: "gpu0",

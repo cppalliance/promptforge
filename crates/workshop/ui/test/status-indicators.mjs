@@ -51,7 +51,7 @@ globalThis.HTMLElement = window.HTMLElement;
 globalThis.Node = window.Node;
 globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-status-indicators-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-status-indicators-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { StatusBar, STATUS_INDICATORS, registerService, TOAST_STACK } = await import(pathToFileURL(bundlePath).href);
 

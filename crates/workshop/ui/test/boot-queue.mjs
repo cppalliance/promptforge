@@ -31,7 +31,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-boot-queue-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-boot-queue-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, WorkshopSocket, BOOT_QUEUE_CAP } = await import(
   pathToFileURL(bundlePath).href

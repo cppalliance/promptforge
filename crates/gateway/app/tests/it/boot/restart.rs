@@ -23,7 +23,7 @@ fn a_started_gateway_removes_the_rollback_copies() {
 
     let mut gateway = GatewayProcess::spawn(&config_path, temp.path());
     wait_for_connection(
-        &temp.path().join(".promptforge").join("run"),
+        &temp.path().join(".runvil").join("run"),
         Duration::from_secs(30),
     );
 
@@ -46,7 +46,7 @@ async fn a_supervised_gateway_exits_with_restart_requested() {
 
     // stdin is a held-open pipe, as the supervisor gives it; a closed stdin
     // would trip the watchdog and end the gateway with a stop instead.
-    let mut child = Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&config_path)
         .arg("--profile")
@@ -63,7 +63,7 @@ async fn a_supervised_gateway_exits_with_restart_requested() {
         .expect("the supervised gateway should spawn");
 
     let connection = wait_for_connection(
-        &temp.path().join(".promptforge").join("run"),
+        &temp.path().join(".runvil").join("run"),
         Duration::from_secs(30),
     );
 

@@ -2610,8 +2610,8 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "harness-runner",
- "promptforge",
- "promptforge-plugin",
+ "runvil",
+ "runvil-plugin",
  "serde_json",
  "tokio",
 ]
@@ -2625,8 +2625,8 @@ dependencies = [
  "bytes",
  "harness",
  "plugin-web",
- "promptforge",
  "reqwest",
+ "runvil",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -2640,9 +2640,9 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
- "promptforge",
- "promptforge-plugin",
  "rand 0.9.5",
+ "runvil",
+ "runvil-plugin",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.19",
@@ -4538,9 +4538,9 @@ name = "plugin-mcp"
 version = "0.3.0"
 dependencies = [
  "axum",
- "promptforge-plugin",
  "reqwest",
  "rmcp",
+ "runvil-plugin",
  "serde_json",
  "tokio",
  "tracing",
@@ -4551,7 +4551,7 @@ name = "plugin-user-input"
 version = "0.3.0"
 dependencies = [
  "async-trait",
- "promptforge-plugin",
+ "runvil-plugin",
  "serde_json",
 ]
 
@@ -4567,9 +4567,9 @@ dependencies = [
  "htmd",
  "ipnet",
  "mime",
- "promptforge-plugin",
  "readabilityrs",
  "reqwest",
+ "runvil-plugin",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -4748,103 +4748,6 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "promptforge"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "promptforge-engine",
- "promptforge-lua",
- "promptforge-model-client",
- "promptforge-parser",
- "promptforge-types",
- "promptforge-vfs",
- "serde_json",
-]
-
-[[package]]
-name = "promptforge-engine"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "criterion",
- "mlua",
- "promptforge-lua",
- "promptforge-model-client",
- "promptforge-parser",
- "promptforge-types",
- "promptforge-vfs",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tracing",
-]
-
-[[package]]
-name = "promptforge-lua"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "criterion",
- "mlua",
- "promptforge-model-client",
- "promptforge-types",
- "promptforge-vfs",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "promptforge-model-client"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "promptforge-types",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "promptforge-parser"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "mlua",
- "promptforge-lua",
- "promptforge-types",
- "pulldown-cmark",
- "serde",
- "serde_yaml_ng",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "promptforge-plugin"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "promptforge-types",
- "promptforge-vfs",
- "serde_json",
-]
-
-[[package]]
-name = "promptforge-types"
-version = "0.3.0"
-dependencies = [
- "build-ceiling",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "time",
-]
-
-[[package]]
-name = "promptforge-vfs"
-version = "0.3.0"
 
 [[package]]
 name = "prost"
@@ -5302,6 +5205,103 @@ dependencies = [
  "bytemuck",
  "byteorder",
 ]
+
+[[package]]
+name = "runvil"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "runvil-engine",
+ "runvil-lua",
+ "runvil-model-client",
+ "runvil-parser",
+ "runvil-types",
+ "runvil-vfs",
+ "serde_json",
+]
+
+[[package]]
+name = "runvil-engine"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "criterion",
+ "mlua",
+ "runvil-lua",
+ "runvil-model-client",
+ "runvil-parser",
+ "runvil-types",
+ "runvil-vfs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "runvil-lua"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "criterion",
+ "mlua",
+ "runvil-model-client",
+ "runvil-types",
+ "runvil-vfs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "runvil-model-client"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "runvil-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "runvil-parser"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "mlua",
+ "pulldown-cmark",
+ "runvil-lua",
+ "runvil-types",
+ "serde",
+ "serde_yaml_ng",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "runvil-plugin"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "runvil-types",
+ "runvil-vfs",
+ "serde_json",
+]
+
+[[package]]
+name = "runvil-types"
+version = "0.3.0"
+dependencies = [
+ "build-ceiling",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "time",
+]
+
+[[package]]
+name = "runvil-vfs"
+version = "0.3.0"
 
 [[package]]
 name = "rust-embed"
@@ -8493,8 +8493,8 @@ dependencies = [
  "build-ceiling",
  "harness",
  "plugin-user-input",
- "promptforge",
  "rand 0.9.5",
+ "runvil",
  "serde",
  "serde_json",
  "tempfile",
@@ -8569,7 +8569,7 @@ version = "0.0.0"
 dependencies = [
  "build-ceiling",
  "harness",
- "promptforge",
+ "runvil",
  "serde_json",
  "shared-error-source",
  "tempfile",
@@ -8593,9 +8593,9 @@ dependencies = [
  "plugin-mcp",
  "plugin-user-input",
  "plugin-web",
- "promptforge",
- "promptforge-plugin",
  "reqwest",
+ "runvil",
+ "runvil-plugin",
  "rust-embed",
  "serde",
  "serde_json",

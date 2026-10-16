@@ -1,9 +1,9 @@
 ---
 name: Debt removal api firewall
-overview: "Remove the four debts the promptforge API firewall commits (75245481..9eac5f3b) introduced or worsened: stale Lua chunk names, a surface listing blind to compatibility-breaking edits, the facade's test-only feature and module, and the doctest dev-dependency cycle that six crate notes deny."
+overview: "Remove the four debts the runvil API firewall commits (75245481..9eac5f3b) introduced or worsened: stale Lua chunk names, a surface listing blind to compatibility-breaking edits, the facade's test-only feature and module, and the doctest dev-dependency cycle that six crate notes deny."
 todos:
   - id: step-1
-    content: "Step 1 (chunk-names): repoint TASKS/FANOUT/MESSAGES chunk names to crates/promptforge-internal/lua/src/; content-match tests in coro-tests.rs and messages-tests.rs"
+    content: "Step 1 (chunk-names): repoint TASKS/FANOUT/MESSAGES chunk names to crates/runvil-internal/lua/src/; content-match tests in coro-tests.rs and messages-tests.rs"
     status: completed
   - id: step-2
     content: "Step 2 (test-support): harness-plugins suite on a store-only Run::step/resume loop; Engine drive_tokio example on Engine paths; delete facade test-support feature, module, and page; single-build xtask api; remove facade_shape cfg allowance; sweep ci.yml and AGENTS.md"
@@ -17,7 +17,7 @@ todos:
 isProject: false
 ---
 
-# Debt removal: promptforge API firewall
+# Debt removal: runvil API firewall
 
 <product-contract>
 
@@ -26,49 +26,49 @@ isProject: false
 The API firewall commits (`75245481..9eac5f3b`) left four debts that are still in the tree. They are stale Lua chunk names, a surface listing that misses compatibility-breaking edits, a test-only feature and module on the public facade, and doctest dev-dependencies that contradict the repository's dependency rule and six crate notes. The people affected are contributors and agents reading the code, reviewers of the facade surface, and the Harness test suites; no outside Host exists yet. When the plan is done, the facade has no test surface, the listing records what dependents rely on, and the documentation matches the dependency graph.
 
 - Problem and users:
-  - Scope: the promptforge repository on branch `master`.
+  - Scope: the runvil repository on branch `master`.
     - Baseline `75245481`, which was `origin/master` when the debt analysis ran. Endpoint `9eac5f3b`, with a clean worktree; it has since been pushed, so `origin/master` is now `9eac5f3b`.
-    - Target: the 14 commits of `vibe/2026-09-23-1-promptforge-api-firewall.md`, namely `cd2128cd`, `2ac1b540`, `e0c3b575`, `57f4cf6d`, `c6b38a04`, `49c858eb`, `871fd054`, `bc8df325`, `9963c477`, `799a1bbc`, `bf9d8859`, `a0d4c65d`, `2cee387a`, and `9eac5f3b`.
+    - Target: the 14 commits of `vibe/2026-09-23-1-runvil-api-firewall.md`, namely `cd2128cd`, `2ac1b540`, `e0c3b575`, `57f4cf6d`, `c6b38a04`, `49c858eb`, `871fd054`, `bc8df325`, `9963c477`, `799a1bbc`, `bf9d8859`, `a0d4c65d`, `2cee387a`, and `9eac5f3b`.
     - Every line number in this plan refers to `9eac5f3b`.
   - `chunk-names` (made worse by `cd2128cd`):
-    - Three chunk-name constants point at a directory that no longer exists: `crates/promptforge-internal/lua/src/coro.rs` lines 31 and 39 (`TASKS_CHUNK_NAME`, `FANOUT_CHUNK_NAME`) and `crates/promptforge-internal/lua/src/messages.rs` line 28 (`MESSAGES_CHUNK_NAME`). Each reads `@crates/promptforge/lua/src/__impl_*.lua`, but `crates/promptforge/` is now the facade.
-    - The sources they label are embedded by `include_str!` (coro.rs lines 36 and 45, messages.rs line 31) from `crates/promptforge-internal/lua/src/`. The constants' docs (coro.rs line 24, messages.rs line 26) promise a clickable `file:line` reference.
+    - Three chunk-name constants point at a directory that no longer exists: `crates/runvil-internal/lua/src/coro.rs` lines 31 and 39 (`TASKS_CHUNK_NAME`, `FANOUT_CHUNK_NAME`) and `crates/runvil-internal/lua/src/messages.rs` line 28 (`MESSAGES_CHUNK_NAME`). Each reads `@crates/runvil/lua/src/__impl_*.lua`, but `crates/runvil/` is now the facade.
+    - The sources they label are embedded by `include_str!` (coro.rs lines 36 and 45, messages.rs line 31) from `crates/runvil-internal/lua/src/`. The constants' docs (coro.rs line 24, messages.rs line 26) promise a clickable `file:line` reference.
     - `cd2128cd` moved the files unchanged, and `2cee387a` repaired only `SHIM_CHUNK_NAME` (coro.rs line 25).
     - These literals were hand-edited in `a9a6c66c`, `7546bd9c`, `126e3b20`, and `2cee387a`, across four plans. Two of those edits set another wrong path.
     - Impact: developer tracebacks through the tasks, fanout, and messages chunks cite a file that does not exist.
   - `listing-fidelity` (introduced by `871fd054` and `bf9d8859`):
     - The renderer builds struct, union, enum, and variant lines from keyword, path, generics, where clause, and discriminant only. See `Renderer::line` around lines 62-76 and `Renderer::data` around lines 177-181 in `crates/build-xtask/src/api/render.rs`.
     - The renderer builds each line without reading `Item::attrs`, `has_stripped_fields`, or struct and variant kind, although `rustdoc-types` 0.61.0 provides all three. `crates/build-xtask/src/api/walk.rs` lines 16, 143-151, and 204-213 read the kinds, but only to enumerate fields.
-    - As a result, `crates/promptforge/public-api.txt` renders `Op` (line 369, exhaustive) and `VfsError` (line 376, non-exhaustive) the same way. It also renders `AllowAll` (line 1466, a unit struct) and `ExecId` (line 1468, a private tuple field) the same way.
+    - As a result, `crates/runvil/public-api.txt` renders `Op` (line 369, exhaustive) and `VfsError` (line 376, non-exhaustive) the same way. It also renders `AllowAll` (line 1466, a unit struct) and `ExecId` (line 1468, a private tuple field) the same way.
     - These edits all break dependents while `cargo xtask api --check` passes with no listing change:
       - adding `#[non_exhaustive]` or a private field to `AllowAll`
       - turning `Mode::Agent` into `Agent {}`
       - adding `#[non_exhaustive]` to `Op`
     - That contradicts `bf9d8859`'s stated purpose: every change to what dependents can reach should show up as a change to the listing.
   - `test-support` (made worse by `2ac1b540`, `e0c3b575`, and `57f4cf6d`):
-    - `crates/promptforge/Cargo.toml` line 27 declares `test-support = ["promptforge-engine/test-support"]`. `crates/promptforge/src/lib.rs` lines 210-218 export a `test_support` module (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), documented in `crates/promptforge/src/test_support.md`.
+    - `crates/runvil/Cargo.toml` line 27 declares `test-support = ["runvil-engine/test-support"]`. `crates/runvil/src/lib.rs` lines 210-218 export a `test_support` module (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), documented in `crates/runvil/src/test_support.md`.
     - The facade uses none of it, yet line 35 of its manifest gates its own test suite on the feature.
     - Consumers:
       - `crates/harness/capabilities/Cargo.toml` line 27, used from `crates/harness/capabilities/tests/it/support.rs` lines 15 and 78.
-      - The Engine's `drive_tokio` doc example (`crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`, around line 84), reached through `crates/promptforge-internal/engine/Cargo.toml` line 53.
+      - The Engine's `drive_tokio` doc example (`crates/runvil-internal/engine/src/test_support/tokio_driver.rs`, around line 84), reached through `crates/runvil-internal/engine/Cargo.toml` line 53.
     - Because the feature exists, the surface check builds rustdoc twice: `report` in `crates/build-xtask/src/api.rs` (from line 166) iterates the `Build` enum in `crates/build-xtask/src/api/load.rs` (lines 42-71). It also makes `crates/build-xtask/src/facade_shape.rs` lines 31, 187, and 247-253 admit a cfg attribute on the facade.
-    - The firewall plan deferred removal until after it landed (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 373), and it has now landed.
+    - The firewall plan deferred removal until after it landed (`vibe/2026-09-23-1-runvil-api-firewall.md` line 373), and it has now landed.
   - `doctest-cycle` (introduced by `799a1bbc`; notes restated by `2cee387a`):
-    - The facade `promptforge` depends on every internal crate, and five of them list it back as a dev-dependency:
-      - `crates/promptforge-internal/types/Cargo.toml` line 24
-      - `crates/promptforge-internal/model-client/Cargo.toml` line 28
-      - `crates/promptforge-internal/parser/Cargo.toml` line 28
-      - `crates/promptforge-internal/store/Cargo.toml` line 23
-      - `crates/promptforge-internal/engine/Cargo.toml` line 53
-    - The only purpose is letting doc examples compile against facade paths: 77 `promptforge::` lines in doc comments across 21 `.rs` files under `crates/promptforge-internal/`, not counting the manifest comments, with no code import.
+    - The facade `runvil` depends on every internal crate, and five of them list it back as a dev-dependency:
+      - `crates/runvil-internal/types/Cargo.toml` line 24
+      - `crates/runvil-internal/model-client/Cargo.toml` line 28
+      - `crates/runvil-internal/parser/Cargo.toml` line 28
+      - `crates/runvil-internal/store/Cargo.toml` line 23
+      - `crates/runvil-internal/engine/Cargo.toml` line 53
+    - The only purpose is letting doc examples compile against facade paths: 77 `runvil::` lines in doc comments across 21 `.rs` files under `crates/runvil-internal/`, not counting the manifest comments, with no code import.
     - `AGENTS.md` line 35 says the dependency rules bind dev dependencies too. Six statements deny these edges:
-      - `crates/promptforge-internal/engine/AGENTS.md` line 8
-      - `crates/promptforge-internal/model-client/AGENTS.md` line 10
-      - `crates/promptforge-internal/parser/AGENTS.md` line 6
-      - `crates/promptforge-internal/store/AGENTS.md` line 5
-      - `crates/promptforge-internal/types/AGENTS.md` line 7
-      - `crates/promptforge-internal/README.md` line 11
-    - The firewall plan logged the cycle as a medium risk (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 349) but never recorded an exception.
+      - `crates/runvil-internal/engine/AGENTS.md` line 8
+      - `crates/runvil-internal/model-client/AGENTS.md` line 10
+      - `crates/runvil-internal/parser/AGENTS.md` line 6
+      - `crates/runvil-internal/store/AGENTS.md` line 5
+      - `crates/runvil-internal/types/AGENTS.md` line 7
+      - `crates/runvil-internal/README.md` line 11
+    - The firewall plan logged the cycle as a medium risk (`vibe/2026-09-23-1-runvil-api-firewall.md` line 349) but never recorded an exception.
     - Impact: readers get a false picture of the dependency graph. Focused test builds of the leaf crates also compile the Engine plus vendored Lua (inferred from the dependency graph, not measured).
 - Goals:
   - `chunk-names`: every Lua chunk name renders the path of the source it embeds, and a test fails when one drifts.
@@ -79,17 +79,17 @@ The API firewall commits (`75245481..9eac5f3b`) left four debts that are still i
   - Moving internal doc examples into facade pages.
   - A structural check that the facade dev-dependency stays doctest-only.
   - Relocating the activation suite into `harness-sessions`.
-  - Editing `vibe/2026-09-23-1-promptforge-api-firewall.md` or `vibe/archdoc.md`.
+  - Editing `vibe/2026-09-23-1-runvil-api-firewall.md` or `vibe/archdoc.md`.
 - Success criteria:
-  - `rg -n "@crates/promptforge/lua" crates` returns nothing, and the chunk-name tests pass.
-  - The re-blessed `crates/promptforge/public-api.txt` marks `VfsError` and every other non-exhaustive surface type and variant, and does not mark `Op` or `Verdict`. `AllowAll` renders as a unit struct, and `ExecId` renders with private fields. The set of listed items is unchanged.
-  - `rg -n "test-support|test_support" crates/promptforge` returns nothing, no manifest enables `promptforge/test-support`, `cargo xtask api` performs one rustdoc build, and the harness-plugins activation suite passes with its test count unchanged.
+  - `rg -n "@crates/runvil/lua" crates` returns nothing, and the chunk-name tests pass.
+  - The re-blessed `crates/runvil/public-api.txt` marks `VfsError` and every other non-exhaustive surface type and variant, and does not mark `Op` or `Verdict`. `AllowAll` renders as a unit struct, and `ExecId` renders with private fields. The set of listed items is unchanged.
+  - `rg -n "test-support|test_support" crates/runvil` returns nothing, no manifest enables `runvil/test-support`, `cargo xtask api` performs one rustdoc build, and the harness-plugins activation suite passes with its test count unchanged.
   - `AGENTS.md` states the doctest-only exception, and none of the six statements listed under `doctest-cycle` contradicts the manifests.
   - Every exit criterion in Testing Plan passes.
 - Constraints:
   - No persisted, wire, or trust-boundary change.
-  - No new structural check (source parser, snapshot, allowlist, count, ceiling, or topology check). The listing change refines the surface snapshot the user already approved (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 319).
-  - The facade is `publish = false` (`crates/promptforge/Cargo.toml` line 7), so removing its feature affects only workspace crates.
+  - No new structural check (source parser, snapshot, allowlist, count, ceiling, or topology check). The listing change refines the surface snapshot the user already approved (`vibe/2026-09-23-1-runvil-api-firewall.md` line 319).
+  - The facade is `publish = false` (`crates/runvil/Cargo.toml` line 7), so removing its feature affects only workspace crates.
   - Surface commands need the pinned toolchain `nightly-2026-09-05`, which pairs with `rustdoc-types` 0.61.0 (`crates/build-xtask/src/api/toolchain.rs` lines 16-19). On any other toolchain, `cargo xtask api` refuses to run.
 - Open questions: None
 
@@ -99,16 +99,16 @@ Behavior changes only where the debts touch observable output. That means traceb
 
 - Actors and workflows:
   - Engine developers read Lua tracebacks. A frame from the tasks, fanout, or messages chunk names a file that exists and holds that chunk's source.
-  - Reviewers read `crates/promptforge/public-api.txt` diffs. A change to a facade type's exhaustiveness, hidden fields, or kind appears there.
+  - Reviewers read `crates/runvil/public-api.txt` diffs. A change to a facade type's exhaustiveness, hidden fields, or kind appears there.
   - Contributors and agents read crate notes and `AGENTS.md` before adding dependencies. What they read matches the manifests.
   - The harness-plugins activation suite drives runs through a loop built only from items the facade exports for every dependent.
 - Inputs and outputs:
-  - In tracebacks, chunk names render as `@crates/promptforge-internal/lua/src/__impl_coro.lua` (shim), `__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua` under that same directory.
+  - In tracebacks, chunk names render as `@crates/runvil-internal/lua/src/__impl_coro.lua` (shim), `__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua` under that same directory.
   - `cargo +nightly-2026-09-05 xtask api --check` and `--bless` read one rustdoc JSON build of the facade with default features. They write or compare listing lines in this notation:
     - `#[non_exhaustive] ` prefixes a struct, union, enum, or variant line when the item carries the attribute.
     - Kind suffixes, placed after any generics and where clause: a unit struct ends in `;`, a unit variant has no suffix, a tuple kind ends in `(..)`, and a braced kind ends in ` { .. }`. A variant's ` = <discriminant>` stays as it is.
     - `..` means every field has its own listed line. `/* private fields */` replaces `..` when any field is hidden.
-    - Examples: `#[non_exhaustive] pub enum promptforge::vfs::VfsError`, `pub struct promptforge::vfs::AllowAll;`, `pub struct promptforge::vfs::ExecId(/* private fields */)`.
+    - Examples: `#[non_exhaustive] pub enum runvil::vfs::VfsError`, `pub struct runvil::vfs::AllowAll;`, `pub struct runvil::vfs::ExecId(/* private fields */)`.
 - States and validation:
   - `--check` fails on any listing difference, including a difference in the new annotations (the prefix and the kind or private-field suffix).
   - `--bless` still refuses while any violation remains.
@@ -116,37 +116,37 @@ Behavior changes only where the debts touch observable output. That means traceb
 - Errors and recovery:
   - The activation suite's run loop panics, naming the effect, when a run issues anything but a store effect.
   - A chunk-name test failure names the constant whose path does not resolve, or whose file differs from the embedded source.
-  - Cargo rejects any manifest that enables `promptforge/test-support`, because the feature no longer exists.
+  - Cargo rejects any manifest that enables `runvil/test-support`, because the feature no longer exists.
 - Security and privacy behavior: No change. No trust boundary, credential, or persisted data is touched.
 - Acceptance criteria:
-  - A traceback through the tasks, fanout, or messages chunk cites a real file under `crates/promptforge-internal/lua/src/`.
+  - A traceback through the tasks, fanout, or messages chunk cites a real file under `crates/runvil-internal/lua/src/`.
   - Each of these edits to a blessed facade type makes `--check` fail: adding `#[non_exhaustive]`, adding a private field, or changing its struct or variant kind.
   - The facade builds, documents, and tests with no features, and has no feature named `test-support`.
-  - The six crate statements and `AGENTS.md` line 35 agree with `cargo tree --workspace -e dev -i promptforge --locked --depth 1`.
+  - The six crate statements and `AGENTS.md` line 35 agree with `cargo tree --workspace -e dev -i runvil --locked --depth 1`.
 
 </product-contract>
 <implementation-contract>
 
 ## Technical Design
 
-The four fixes are independent and touch different components. They overlap in only four shared files: `AGENTS.md`, `crates/promptforge-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. The facade's public interface shrinks: one Cargo feature and one feature-gated module go away, and nothing is added. `build-xtask`'s surface check drops to one build and renders three more facts per type line. The dependency graph keeps its doctest-only upward dev edges, which repository policy now names as an exception.
+The four fixes are independent and touch different components. They overlap in only four shared files: `AGENTS.md`, `crates/runvil-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. The facade's public interface shrinks: one Cargo feature and one feature-gated module go away, and nothing is added. `build-xtask`'s surface check drops to one build and renders three more facts per type line. The dependency graph keeps its doctest-only upward dev edges, which repository policy now names as an exception.
 
 - Architecture:
-  - Graph: the five internal crates keep their `promptforge` dev-dependency for doctests only, but the Engine's entry no longer enables `test-support`. `harness-plugins` loses its facade dev-dependency; its normal `promptforge` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
-  - The Engine keeps its own `test_support` module, gated by `#[cfg(any(test, feature = "test-support"))]` (`crates/promptforge-internal/engine/src/lib.rs` line 13). The `models_loop` bench keeps its own `required-features = ["test-support"]`.
+  - Graph: the five internal crates keep their `runvil` dev-dependency for doctests only, but the Engine's entry no longer enables `test-support`. `harness-plugins` loses its facade dev-dependency; its normal `runvil` dependency on `crates/harness/capabilities/Cargo.toml` line 19 stays.
+  - The Engine keeps its own `test_support` module, gated by `#[cfg(any(test, feature = "test-support"))]` (`crates/runvil-internal/engine/src/lib.rs` line 13). The `models_loop` bench keeps its own `required-features = ["test-support"]`.
 - Modules and interfaces:
-  - `promptforge` (the facade) exports exactly the items in its re-blessed listing, all of them reachable with default features. Its `[features]` table disappears if it ends up empty.
-  - `harness-plugins` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
+  - `runvil` (the facade) exports exactly the items in its re-blessed listing, all of them reachable with default features. Its `[features]` table disappears if it ends up empty.
+  - `harness-plugins` activation suite: runs are driven through `Run::step`, `Run::resume`, `Step::Pending`, `Step::Done`, `Effect::Store`, `EffectAnswer::Store`, and `vfs::perform_store_op`, all already exported. `crates/runvil/src/lib.md` lines 44-73 show the same loop.
   - `build-xtask` `api` module: one rustdoc build with default features, so findings carry no per-build label. The listing notation is the one in Functional Specification, documented in the module docs of `crates/build-xtask/src/api.rs`.
   - `build-xtask` facade shape check: facade items may carry only doc attributes, alongside the existing rules on modules and single-item `pub use`.
-  - Repository policy: `AGENTS.md` line 35 gains this exception text: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules." The six statements listed under `doctest-cycle` each name that exception and keep their meaning for every other dependency.
+  - Repository policy: `AGENTS.md` line 35 gains this exception text: "One exception: a crate under crates/runvil-internal/ may list `runvil` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules." The six statements listed under `doctest-cycle` each name that exception and keep their meaning for every other dependency.
 - File and public API changes:
-  - Removed from the facade's public API: the Cargo feature `test-support`, the module `promptforge::test_support` (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), and `crates/promptforge/src/test_support.md`. None of these appear in the committed listing today, because the listing covers only the default build.
-  - `crates/promptforge/public-api.txt` is re-blessed. Only the new annotations change and the set of listed items stays the same, but the diff is large. Nearly every struct, union, and variant line gains a kind suffix, and non-exhaustive lines move into one block at the top of the file.
-  - The chunk-name strings in `crates/promptforge-internal/lua/src/coro.rs` lines 31 and 39 and `crates/promptforge-internal/lua/src/messages.rs` line 28 become `@crates/promptforge-internal/lua/src/__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua`.
+  - Removed from the facade's public API: the Cargo feature `test-support`, the module `runvil::test_support` (`BoxFuture`, `Performer`, `Performers`, `drive_tokio`), and `crates/runvil/src/test_support.md`. None of these appear in the committed listing today, because the listing covers only the default build.
+  - `crates/runvil/public-api.txt` is re-blessed. Only the new annotations change and the set of listed items stays the same, but the diff is large. Nearly every struct, union, and variant line gains a kind suffix, and non-exhaustive lines move into one block at the top of the file.
+  - The chunk-name strings in `crates/runvil-internal/lua/src/coro.rs` lines 31 and 39 and `crates/runvil-internal/lua/src/messages.rs` line 28 become `@crates/runvil-internal/lua/src/__impl_tasks.lua`, `__impl_fanout.lua`, and `__impl_messages.lua`.
 - Data, persistence, failure, security, and privacy constraints:
   - No persisted, wire, or trust-boundary change.
-  - Traceback text changes for three chunks. No recorded run logs exist (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 308), and no test matches the old strings.
+  - Traceback text changes for three chunks. No recorded run logs exist (`vibe/2026-09-23-1-runvil-api-firewall.md` line 308), and no test matches the old strings.
 
 </implementation-contract>
 <verification-contract>
@@ -157,9 +157,9 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 
 - Unit:
   - `chunk-names`:
-    - A test in promptforge-lua covers each of the four chunk-name constants (shim, tasks, fanout, messages). It strips the leading `@`, resolves the path against the workspace root (`env!("CARGO_MANIFEST_DIR")` joined with `../../..`), and asserts that the file's contents equal the embedded source.
+    - A test in runvil-lua covers each of the four chunk-name constants (shim, tasks, fanout, messages). It strips the leading `@`, resolves the path against the workspace root (`env!("CARGO_MANIFEST_DIR")` joined with `../../..`), and asserts that the file's contents equal the embedded source.
     - Temporarily pointing one constant at a wrong directory makes its test fail. Revert after checking.
-    - Command: `cargo nextest run --locked -p promptforge-lua`.
+    - Command: `cargo nextest run --locked -p runvil-lua`.
   - `test-support`: a `crates/build-xtask/src/facade_shape-tests.rs` case asserts that a `#[cfg(feature = "test-support")]` facade item is now a violation. Command: `cargo test -p build-xtask`.
   - `listing-fidelity`:
     - New fixtures marked `#[ignore = "needs the pinned nightly"]` go in `crates/build-xtask/src/api/listing-tests.rs`. They assert the exact lines for:
@@ -170,16 +170,16 @@ Each debt gets a check that fails while the debt exists and passes once it is go
       - unit, tuple, and struct variants, one of them non-exhaustive
     - Command: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
 - Integration and end-to-end:
-  - `test-support`: `cargo nextest run --locked -p harness-plugins` passes with the same test count as before the change. `cargo test -p promptforge` with default features builds and runs the facade suite. `cargo test -p promptforge-engine --all-features --doc` passes the `drive_tokio` example.
+  - `test-support`: `cargo nextest run --locked -p harness-plugins` passes with the same test count as before the change. `cargo test -p runvil` with default features builds and runs the facade suite. `cargo test -p runvil-engine --all-features --doc` passes the `drive_tokio` example.
   - `listing-fidelity`: `cargo +nightly-2026-09-05 xtask api --bless`, then `cargo +nightly-2026-09-05 xtask api --check`, passes with one build. In the listing diff, only the new annotations change and the set of listed items is unchanged.
-  - `doctest-cycle`: `cargo tree --workspace -e dev -i promptforge --locked --depth 1` lists the facade's direct dev-dependents.
-    - Among them, the crates under `crates/promptforge-internal/` are exactly types, model-client, parser, store, and engine.
+  - `doctest-cycle`: `cargo tree --workspace -e dev -i runvil --locked --depth 1` lists the facade's direct dev-dependents.
+    - Among them, the crates under `crates/runvil-internal/` are exactly types, model-client, parser, store, and engine.
     - The Harness crates it also lists are outside this check: `harness-log` stays, and `harness-plugins` disappears once the test-support change removes its edge.
     - Each of the six statements, and `AGENTS.md` line 35, agrees with that output.
 - Regression, security, and performance:
   - `listing-fidelity`: a check-mode fixture blesses a fixture facade, adds `#[non_exhaustive]` to a unit struct in it, and asserts that `--check` reports a difference.
-  - `chunk-names`: `rg -n "@crates/promptforge/lua" crates` returns nothing.
-  - `test-support`: `rg -n "test-support|test_support" crates/promptforge` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose.
+  - `chunk-names`: `rg -n "@crates/runvil/lua" crates` returns nothing.
+  - `test-support`: `rg -n "test-support|test_support" crates/runvil` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose.
   - No security or performance criterion. Build time is not measured.
 - Exit criteria:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
@@ -191,7 +191,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `cargo fmt --all --check`
   - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`
   - `mdbook build guide`
-  - `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`
+  - `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps`
   - `cargo +nightly-2026-09-05 xtask api --check`
   - `cargo test -p build-xtask`
 
@@ -208,16 +208,16 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `test-support`:
     - The call: remove the facade feature and module now, and drive the activation suite with a test-local effect loop.
     - Rationale: removing the feature leaves zero test surface on the facade, whether the tests use a local loop or move crates. The local loop changes one function, keeps the tests in their crate, and only has to answer store effects.
-    - The user's words: "for the second one which choice minimizes the public API surface of the promptforge facade?"
-    - Earlier user words recorded in `vibe/2026-09-23-1-promptforge-api-firewall.md`: "I want ZERO public API surface growth just for tests." (line 303), and the deferral "no. we will deal with it later." (line 373). That deferral's revisit condition, "after this plan lands", has been met.
+    - The user's words: "for the second one which choice minimizes the public API surface of the runvil facade?"
+    - Earlier user words recorded in `vibe/2026-09-23-1-runvil-api-firewall.md`: "I want ZERO public API surface growth just for tests." (line 303), and the deferral "no. we will deal with it later." (line 373). That deferral's revisit condition, "after this plan lands", has been met.
   - `chunk-names`:
-    - The call: treat chunk names as file paths, overriding the firewall plan's "labels, not file paths" instruction (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 818).
+    - The call: treat chunk names as file paths, overriding the firewall plan's "labels, not file paths" instruction (`vibe/2026-09-23-1-runvil-api-firewall.md` line 818).
     - Rationale: the constants' own docs call them file paths, `2cee387a` already fixed the shim as a path, and no test or recorded log depends on the old text. The content-match test checks the documented diagnostic promise, not implementation shape.
     - The user's words: none. This is a reversible call made during debt analysis.
   - `listing-fidelity`:
     - The call: mark types with a `#[non_exhaustive]` prefix, plus the kind and private-field suffixes defined in Functional Specification.
     - Rationale: this matches the rustdoc and `cargo-public-api` syntax reviewers already read, and it refines the approved snapshot instead of adding a check.
-    - The user's words approving the snapshot (`vibe/2026-09-23-1-promptforge-api-firewall.md` line 319): "everything you recommend, based on the constrains and direcetion I want to go implied in our chat".
+    - The user's words approving the snapshot (`vibe/2026-09-23-1-runvil-api-firewall.md` line 319): "everything you recommend, based on the constrains and direcetion I want to go implied in our chat".
   - Commit granularity:
     - The call: one commit per debt, so four steps. The test-support consumers, the facade removal, and the single-build surface check land together.
     - Rationale: every step carries a fixed cost in coding, review, fix, verify, and commit-message rounds, so fewer steps finish sooner. The test-support parts can't land separately in any useful way, because the feature can't go before its consumers.
@@ -253,9 +253,9 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - Revisit: if the surface listing is retired.
   - A structural guard that the facade dev-dependency stays doctest-only.
     - Reason: the user accepted the exception without a check, and structural checks need explicit approval.
-    - Revisit: if a non-doctest import of `promptforge` appears in a crate under `crates/promptforge-internal/`.
+    - Revisit: if a non-doctest import of `runvil` appears in a crate under `crates/runvil-internal/`.
 - Assumptions, risks, and notes:
-  - Line numbers refer to `9eac5f3b`, and each step's are exact when that step starts. The exception is a later step citing a file an earlier step already edited. The shared files are `AGENTS.md` (Step 2 edits lines 55-56, and Step 3 edits line 35 above them, so line 35 holds), `crates/promptforge-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. In those files, locate the named text or symbol instead of trusting the line number.
+  - Line numbers refer to `9eac5f3b`, and each step's are exact when that step starts. The exception is a later step citing a file an earlier step already edited. The shared files are `AGENTS.md` (Step 2 edits lines 55-56, and Step 3 edits line 35 above them, so line 35 holds), `crates/runvil-internal/engine/Cargo.toml`, `crates/build-xtask/src/api.rs`, and `crates/build-xtask/src/api/listing-tests.rs`. In those files, locate the named text or symbol instead of trusting the line number.
   - `nightly-2026-09-05` is installed on the development machine, and `rustdoc-types` 0.61.0 is the newest release on crates.io (published 2026-07-29). The pinned pair is therefore current, and bumping it is out of scope.
   - The activation suite only raises store effects.
     - Three of the four `run_activated` calls return a refusal before the run is driven: `crates/harness/capabilities/tests/it/activation.rs` around line 194, and `crates/harness/capabilities/tests/it/assembly.rs` around lines 149 and 341.
@@ -264,7 +264,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - A future fixture that needs more adds a branch to the test loop, never a facade export.
   - The pinned nightly's rustdoc JSON is assumed to populate `Attribute::NonExhaustive` and `has_stripped_fields` as `rustdoc-types` 0.61.0 declares them. The new fixtures prove this before the re-bless.
   - Accepted consequences of the doctest exception: leaf-crate test builds still compile the Engine and vendored Lua. No check catches a future upward dev dependency or a non-doctest use of the facade inside the container.
-  - The Engine's `drive_tokio` example ends up mixing `promptforge::` imports with `promptforge_engine::test_support` imports. They name the same types, because the facade re-exports Engine items.
+  - The Engine's `drive_tokio` example ends up mixing `runvil::` imports with `runvil_engine::test_support` imports. They name the same types, because the facade re-exports Engine items.
   - The debt analysis behind this plan was static; no builds or tests were run. It rejected 60 candidates:
     - 23 residual but acceptable: user-approved plan choices, private `build-xtask` constants, test-only fixture duplication, and stale comments.
     - 16 weak or speculative: no demonstrated consequence.
@@ -278,7 +278,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Out of scope:
   - `Prompt::strip_h1_prose`, which has been public with no caller since before the baseline.
   - The stale `RUSTDOC_FLAGS` comment in `crates/build-xtask/src/api/load.rs` lines 27-29.
-  - The stale "hidden seams" sentence in `crates/promptforge-internal/store/AGENTS.md` line 6.
+  - The stale "hidden seams" sentence in `crates/runvil-internal/store/AGENTS.md` line 6.
   - Switching `crates/build-xtask/src/api/load.rs` from `engine_guards::collect_crates` to `product::workspace_crates`.
 
 </decision-record>
@@ -288,16 +288,16 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 
 - Status: complete
 - Build command: `cargo build --locked -p gateway` (the workspace default member; plain `cargo build` builds only the gateway). Desktop app: `cargo build --locked -p workshop`, after staging the gateway sidecar with `node tools/stage-gateway-sidecar.mjs stage --target <triple> --source <gateway exe>`; the full desktop release flow is the `cargo workshop` alias. The workshop-server and gateway-config-ui build scripts bundle their `ui/` with esbuild, so run `npm ci --prefix crates/workshop/ui` and `npm ci --prefix crates/gateway/config-ui/ui` before any cargo build.
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. Integration tests are one binary per crate, so add `--test it` (the `promptforge` facade uses `--test suite`). One crate's doctests: `cargo test --locked -p <crate> --all-features --doc`. Gateway process-race tests: `cargo test --locked -p gateway --no-default-features --features test-fixtures --test it <test-name>`. One UI test file: `node --test <path>` from the UI package directory.
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-filter>`; drop `--all-features` for `workshop`, `workshop-server`, and `workshop-server-api`. Integration tests are one binary per crate, so add `--test it` (the `runvil` facade uses `--test suite`). One crate's doctests: `cargo test --locked -p <crate> --all-features --doc`. Gateway process-race tests: `cargo test --locked -p gateway --no-default-features --features test-fixtures --test it <test-name>`. One UI test file: `node --test <path>` from the UI package directory.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` then `cargo test --locked -p <crate> --all-features --doc` (workshop trio without `--all-features`; `workshop-server` also runs `cargo nextest run --locked -p workshop-server --features headless`). Any change touching crate boundaries, manifests, lib.rs markers, or file sizes also runs the structural checks `cargo test -p build-xtask`. UI packages: `npm test --prefix crates/workshop/ui` and `npm test --prefix crates/gateway/config-ui/ui`.
-- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The facade surface gate runs on the pinned nightly named in `crates/build-xtask/src/api/toolchain.rs` (currently `nightly-2026-09-05`): `cargo +nightly-2026-09-05 xtask api --check` and `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`; it compares against the committed `crates/promptforge/public-api.txt`. UI: `npm test` in each UI package.
+- Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `cargo test --doc -p workshop -p workshop-server -p workshop-server-api`. The facade surface gate runs on the pinned nightly named in `crates/build-xtask/src/api/toolchain.rs` (currently `nightly-2026-09-05`): `cargo +nightly-2026-09-05 xtask api --check` and `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`; it compares against the committed `crates/runvil/public-api.txt`. UI: `npm test` in each UI package.
 - Linter command: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`, plus the headless feature gate `cargo check -p gateway --no-default-features` (the only permitted standalone `cargo check`; never run `cargo check --workspace`). UI: `npm run typecheck` in each UI package. Supply chain: `cargo deny check` and `cargo audit`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook). No TypeScript formatter is configured.
-- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"` (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), then facade docs `cargo doc -p promptforge --no-deps` under the same flag and without `--all-features`; user guide: `mdbook build guide`.
-- Test placement and naming conventions: Unit tests mostly live in a sibling file `<module>-tests.rs` wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;` (about 150 such files); small modules use an inline `#[cfg(test)] mod tests { ... }`; directory modules may hold a `tests/` subdirectory (for example `engine/src/execute/tests/`) or `tests-<topic>.rs` splits. Integration tests use one binary per crate at `tests/it/main.rs` pulling in topic files (the `promptforge` facade uses `tests/suite/`), with prompt fixtures under `tests/prompts/`. Test functions are descriptive snake_case sentences (for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`). UI tests are `*.test.mjs` beside source in `src/` or under `test/`, run by `node --test`. `.config/nextest.toml` puts the STT FFI suites in a throttled `heavy` group.
+- Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"` (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), then facade docs `cargo doc -p runvil --no-deps` under the same flag and without `--all-features`; user guide: `mdbook build guide`.
+- Test placement and naming conventions: Unit tests mostly live in a sibling file `<module>-tests.rs` wired as `#[cfg(test)] #[path = "<module>-tests.rs"] mod tests;` (about 150 such files); small modules use an inline `#[cfg(test)] mod tests { ... }`; directory modules may hold a `tests/` subdirectory (for example `engine/src/execute/tests/`) or `tests-<topic>.rs` splits. Integration tests use one binary per crate at `tests/it/main.rs` pulling in topic files (the `runvil` facade uses `tests/suite/`), with prompt fixtures under `tests/prompts/`. Test functions are descriptive snake_case sentences (for example `a_direct_launch_recovers_the_lease_from_a_terminated_owner`). UI tests are `*.test.mjs` beside source in `src/` or under `test/`, run by `node --test`. `.config/nextest.toml` puts the STT FFI suites in a throttled `heavy` group.
 - Directory map:
-  - `crates/` root: the public and shared layer. `promptforge` (Engine facade with committed `public-api.txt`), `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a Rust crate), `workspace-hack` (cargo-hakari), and build tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`.
-  - `crates/promptforge-internal/`: private Engine family (types, engine, lua, parser, store, vfs, model-client).
+  - `crates/` root: the public and shared layer. `runvil` (Engine facade with committed `public-api.txt`), `harness-api`, `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a Rust crate), `workspace-hack` (cargo-hakari), and build tooling `build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`.
+  - `crates/runvil-internal/`: private Engine family (types, engine, lua, parser, store, vfs, model-client).
   - `crates/harness/`: private Harness family (runner, models, capabilities, log, sessions, web, webfetch, web-search).
   - `crates/gateway/`: private gateway family (app, cloud-providers, config, config-ui with its `ui/` SPA, local, logging, progress, protocol, routing, web-search, and the nested `stt/` subsystem: api, engine, backend-whisper, whisper-ffi).
   - `crates/workshop/`: private workshop family (shell, the Tauri app package `workshop`; server, server-api, gateway, menu, protocol, registry, status, support, user-state, workspace; and the `ui/` SPA).
@@ -309,10 +309,10 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `.github/workflows/`: CI, nightly, and release pipelines. `.githooks/`: pre-commit format check; pre-push headless gateway check, clippy, and cargo deny. `.config/`: nextest and hakari. `.cargo/config.toml`: `workshop` and `xtask` aliases and rust-lld with static CRT on Windows.
   - `target/`, `target-msrv/`: build output.
 - Component boundaries:
-  - `promptforge` is the only crate outside the Engine family allowed to depend into `crates/promptforge-internal/`. Inside, the executor is sans-I/O and depends on store, the Lua VM boundary, and shared substrate; store depends on vfs; vfs depends on nothing. promptforge crates never depend on gateway, workshop, or Harness crates.
-  - `harness-api` is the single public entry into `crates/harness/`. Harness crates may depend on `promptforge`, `gateway-api-types`, `gateway-api-discovery`, and shared-* crates, never on workshop crates or private gateway crates.
-  - The gateway family exposes only `gateway-api-types` and `gateway-api-discovery` and depends only on shared-* crates, never on promptforge, Harness, or workshop crates.
-  - Workshop crates may depend on `promptforge`, `harness-api`, the gateway public pair, and shared-* crates. The `workshop` shell depends on `workshop-server-api`, never on `workshop-server`.
+  - `runvil` is the only crate outside the Engine family allowed to depend into `crates/runvil-internal/`. Inside, the executor is sans-I/O and depends on store, the Lua VM boundary, and shared substrate; store depends on vfs; vfs depends on nothing. runvil crates never depend on gateway, workshop, or Harness crates.
+  - `harness-api` is the single public entry into `crates/harness/`. Harness crates may depend on `runvil`, `gateway-api-types`, `gateway-api-discovery`, and shared-* crates, never on workshop crates or private gateway crates.
+  - The gateway family exposes only `gateway-api-types` and `gateway-api-discovery` and depends only on shared-* crates, never on runvil, Harness, or workshop crates.
+  - Workshop crates may depend on `runvil`, `harness-api`, the gateway public pair, and shared-* crates. The `workshop` shell depends on `workshop-server-api`, never on `workshop-server`.
   - shared-* crates depend on no product crate. A crate inside a family container may depend only on `crates/` root crates and its own siblings. Tiers flow one way: shell, features, services, vocabulary. These rules bind normal, dev, build, and target-specific dependencies, and `cargo test -p build-xtask` plus `cargo xtask api --check` enforce them.
 - Conventions summary:
   - Rust 2024 on the stable toolchain, resolver 3, `--locked` in CI. Every member inherits workspace lints and depends on `workspace-hack`.
@@ -338,17 +338,17 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Component placement: first. It depends on nothing and edits no file another component touches, so it lands cleanly on `9eac5f3b` with every line number exact.
 - Piece: chunk-name paths, built jointly. The constants and the content-match tests are one behavior: the tests fail until the constants are repointed, and nothing else checks the constants.
 - Constants:
-  - `crates/promptforge-internal/lua/src/coro.rs` line 31 `TASKS_CHUNK_NAME` becomes `@crates/promptforge-internal/lua/src/__impl_tasks.lua`, and line 39 `FANOUT_CHUNK_NAME` becomes `@crates/promptforge-internal/lua/src/__impl_fanout.lua`.
-  - `crates/promptforge-internal/lua/src/messages.rs` line 28 `MESSAGES_CHUNK_NAME` becomes `@crates/promptforge-internal/lua/src/__impl_messages.lua`.
+  - `crates/runvil-internal/lua/src/coro.rs` line 31 `TASKS_CHUNK_NAME` becomes `@crates/runvil-internal/lua/src/__impl_tasks.lua`, and line 39 `FANOUT_CHUNK_NAME` becomes `@crates/runvil-internal/lua/src/__impl_fanout.lua`.
+  - `crates/runvil-internal/lua/src/messages.rs` line 28 `MESSAGES_CHUNK_NAME` becomes `@crates/runvil-internal/lua/src/__impl_messages.lua`.
   - `SHIM_CHUNK_NAME` (coro.rs line 25) is already correct and only gains a test.
-- Shared helper: a `pub(crate)` function in the crate-level test module `crates/promptforge-internal/lua/src/tests.rs` (declared `#[cfg(test)] mod tests;` in `lib.rs` lines 146-147). It takes the constant's name, the chunk name, and the embedded source. It strips the leading `@`, resolves the rest against `env!("CARGO_MANIFEST_DIR")` joined with `../../..`, and asserts that the file's contents equal the embedded source. Its failure message names the constant, whether the path does not resolve or the file differs.
+- Shared helper: a `pub(crate)` function in the crate-level test module `crates/runvil-internal/lua/src/tests.rs` (declared `#[cfg(test)] mod tests;` in `lib.rs` lines 146-147). It takes the constant's name, the chunk name, and the embedded source. It strips the leading `@`, resolves the rest against `env!("CARGO_MANIFEST_DIR")` joined with `../../..`, and asserts that the file's contents equal the embedded source. Its failure message names the constant, whether the path does not resolve or the file differs.
 - Callers, one test function per pair:
-  - A new `crates/promptforge-internal/lua/src/coro-tests.rs`, wired into `coro.rs` as `#[cfg(test)] #[path = "coro-tests.rs"] mod tests;`, covers `SHIM_CHUNK_NAME` with `SHIM_SOURCE`, `TASKS_CHUNK_NAME` with `TASKS_SOURCE`, and `FANOUT_CHUNK_NAME` with `FANOUT_SOURCE`.
-  - The existing `crates/promptforge-internal/lua/src/messages-tests.rs` (wired at `messages.rs` lines 55-57) covers `MESSAGES_CHUNK_NAME` with `MESSAGES_SOURCE`.
+  - A new `crates/runvil-internal/lua/src/coro-tests.rs`, wired into `coro.rs` as `#[cfg(test)] #[path = "coro-tests.rs"] mod tests;`, covers `SHIM_CHUNK_NAME` with `SHIM_SOURCE`, `TASKS_CHUNK_NAME` with `TASKS_SOURCE`, and `FANOUT_CHUNK_NAME` with `FANOUT_SOURCE`.
+  - The existing `crates/runvil-internal/lua/src/messages-tests.rs` (wired at `messages.rs` lines 55-57) covers `MESSAGES_CHUNK_NAME` with `MESSAGES_SOURCE`.
 - Verification:
-  - `cargo nextest run --locked -p promptforge-lua` passes.
+  - `cargo nextest run --locked -p runvil-lua` passes.
   - Temporarily point one constant at a wrong directory, confirm its test fails and names that constant, then revert.
-  - `rg -n "@crates/promptforge/lua" crates` returns nothing.
+  - `rg -n "@crates/runvil/lua" crates` returns nothing.
 - Commit: the three constants, the helper, `coro-tests.rs` with its `coro.rs` wiring, and the `messages-tests.rs` test.
 
 </step-1>
@@ -362,16 +362,16 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Pieces: two consumer pieces and one removal piece, built in that order within one commit. The removal comes last, because deleting the feature breaks any consumer still using it. The removal's own parts also break each other when split: `cargo xtask api` passes `test-support` to its second rustdoc build, which fails once the feature is gone, and the facade shape check's cfg allowance exists only for the module being deleted.
 - Before editing anything, record the test count from `cargo nextest run --locked -p harness-plugins`.
 - Consumer piece 1, the harness-plugins activation suite. `crates/harness/capabilities/tests/it/support.rs`:
-  - Add a private synchronous store-only loop over `Run::step` and `Run::resume`. On `Step::Pending` holding `Effect::Store`, it answers with `EffectAnswer::Store` from `vfs::perform_store_op`. On `Step::Done` it returns the `RunResult`. On any other effect it panics, naming the effect. `crates/promptforge/src/lib.md` lines 44-73 show the same loop.
+  - Add a private synchronous store-only loop over `Run::step` and `Run::resume`. On `Step::Pending` holding `Effect::Store`, it answers with `EffectAnswer::Store` from `vfs::perform_store_op`. On `Step::Done` it returns the `RunResult`. On any other effect it panics, naming the effect. `crates/runvil/src/lib.md` lines 44-73 show the same loop.
   - Replace the `drive_tokio` call on line 78 with that loop, and make `run_activated` synchronous.
-  - Remove the `promptforge::test_support` import on line 15. Rewrite the doc comment on lines 61-65 to describe the store-only loop and its panic instead of the Engine's tokio driver.
+  - Remove the `runvil::test_support` import on line 15. Rewrite the doc comment on lines 61-65 to describe the store-only loop and its panic instead of the Engine's tokio driver.
 - Call sites: drop `.await` at the four `run_activated` calls, in `crates/harness/capabilities/tests/it/activation.rs` around lines 194 and 220 and in `crates/harness/capabilities/tests/it/assembly.rs` around lines 149 and 341. Keep `#[tokio::test]` only where a test still awaits, and make the rest `#[test]`.
-- `crates/harness/capabilities/Cargo.toml`: remove the facade dev-dependency on line 27, which enables `promptforge/test-support`, plus any dev-dependency that becomes unused. The normal `promptforge` dependency on line 19 stays.
+- `crates/harness/capabilities/Cargo.toml`: remove the facade dev-dependency on line 27, which enables `runvil/test-support`, plus any dev-dependency that becomes unused. The normal `runvil` dependency on line 19 stays.
 - Consumer piece 2, the Engine's `drive_tokio` example. The two consumer pieces touch different crates and can be built in either order.
-- `crates/promptforge-internal/engine/src/test_support/tokio_driver.rs`: the `drive_tokio` doc example (around line 84) imports `Performers` and `drive_tokio` from `promptforge_engine::test_support` instead of the facade. Its other `promptforge::` imports stay; they name the same types because the facade re-exports Engine items.
-- `crates/promptforge-internal/engine/Cargo.toml`: the `promptforge` dev-dependency on line 53 drops `features = ["test-support"]`, leaving `promptforge.workspace = true`. The comment on lines 51-52 drops its last sentence ("`test-support` for the `test_support::drive_tokio` example."), so it gives only the doctest reason.
-- Unchanged: the Engine's own `test_support` module and its `#[cfg(any(test, feature = "test-support"))]` gate (`crates/promptforge-internal/engine/src/lib.rs` line 13), the Engine's `test-support` feature, and the `models_loop` bench's `required-features = ["test-support"]`.
-- Removal piece, built after both consumer pieces. `crates/promptforge/`:
+- `crates/runvil-internal/engine/src/test_support/tokio_driver.rs`: the `drive_tokio` doc example (around line 84) imports `Performers` and `drive_tokio` from `runvil_engine::test_support` instead of the facade. Its other `runvil::` imports stay; they name the same types because the facade re-exports Engine items.
+- `crates/runvil-internal/engine/Cargo.toml`: the `runvil` dev-dependency on line 53 drops `features = ["test-support"]`, leaving `runvil.workspace = true`. The comment on lines 51-52 drops its last sentence ("`test-support` for the `test_support::drive_tokio` example."), so it gives only the doctest reason.
+- Unchanged: the Engine's own `test_support` module and its `#[cfg(any(test, feature = "test-support"))]` gate (`crates/runvil-internal/engine/src/lib.rs` line 13), the Engine's `test-support` feature, and the `models_loop` bench's `required-features = ["test-support"]`.
+- Removal piece, built after both consumer pieces. `crates/runvil/`:
   - `Cargo.toml`: remove the `test-support` feature on line 27 (and the `[features]` table if it ends up empty) and `required-features` on line 35, so the facade suite runs with default features.
   - `src/lib.rs`: remove the `test_support` module on lines 210-218.
   - Delete `src/test_support.md`, and remove the sentence on `src/lib.md` line 34.
@@ -399,7 +399,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - Rename that test from `attributes_other_than_doc_and_the_test_support_cfg_are_rejected` to `attributes_other_than_doc_are_rejected`. Its `cfg(not(feature = "test-support"))` case at line 246 stays a violation.
     - Update any expected text that quotes the old attribute rule.
   - `src/test_support_leak.rs` module docs:
-    - On lines 9 and 20, the examples that name `promptforge` with `test-support` switch to `promptforge-engine`, which still has the feature.
+    - On lines 9 and 20, the examples that name `runvil` with `test-support` switch to `runvil-engine`, which still has the feature.
     - On lines 24-25, the exemption's parenthetical stops presenting the facade's forwarding as current. It names a container crate forwarding a sibling's, and notes that the guard counts the facade as an Engine crate too.
     - The guard and its fixtures stay unchanged. That includes `the_facade_forwarding_the_engine_test_support_feature_passes` (`src/test_support_leak-tests.rs` lines 211-226) and its twin in `src/engine_guards-tests.rs` lines 126-131. Both check a shape the guard still permits, which the reworded docs now describe.
   - Out of scope in `load.rs`: the stale `RUSTDOC_FLAGS` comment on lines 27-29 and the `engine_guards::collect_crates` call.
@@ -407,12 +407,12 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - `AGENTS.md` line 55 now reads "so the facade's docs build with default features", and line 56 drops "with and without `test-support`".
 - Verification:
   - `cargo nextest run --locked -p harness-plugins` passes with the recorded test count.
-  - `cargo test -p promptforge-engine --all-features --doc` passes, including the `drive_tokio` example.
+  - `cargo test -p runvil-engine --all-features --doc` passes, including the `drive_tokio` example.
   - `cargo test -p build-xtask` passes, including the new `facade_shape-tests.rs` violation case.
-  - `cargo test -p promptforge` builds and runs the facade suite with default features.
+  - `cargo test -p runvil` builds and runs the facade suite with default features.
   - `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only` passes. The nightly-only fixtures in `load-tests.rs`, `listing-tests.rs`, and `listing-compact-tests.rs` call the new `report` signature.
   - `cargo +nightly-2026-09-05 xtask api --check` passes with one rustdoc build and no listing change.
-  - `rg -n "test-support|test_support" crates/promptforge` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose. The workspace still resolves, which proves no manifest enables `promptforge/test-support`, because Cargo rejects a missing feature.
+  - `rg -n "test-support|test_support" crates/runvil` returns nothing. The check covers only the facade crate; fixtures under `crates/build-xtask/` keep the string on purpose. The workspace still resolves, which proves no manifest enables `runvil/test-support`, because Cargo rejects a missing feature.
 - Commit: `support.rs`, `activation.rs`, `assembly.rs`, and the harness-plugins manifest; `tokio_driver.rs` and the Engine manifest; the facade files, the build-xtask files, `ci.yml`, and `AGENTS.md`.
 
 </step-2>
@@ -424,18 +424,18 @@ Each debt gets a check that fails while the debt exists and passes once it is go
 - Component: doctest-cycle
 - Component placement: third, after `test-support`. Step 2 gave the graph its end state, so the `cargo tree` review here checks the final graph. It edits `AGENTS.md` line 35, above lines 55-56 that Step 2 changed in place, so line numbers stay exact.
 - Piece: policy and notes, built jointly. The exception text and the six statements must agree with each other and with one `cargo tree` output, so they land together.
-- `AGENTS.md` line 35 gains this text verbatim: "One exception: a crate under crates/promptforge-internal/ may list `promptforge` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules."
+- `AGENTS.md` line 35 gains this text verbatim: "One exception: a crate under crates/runvil-internal/ may list `runvil` in `[dev-dependencies]` only so its doc examples compile against the facade paths other crates see. No unit test, integration test, or bench imports it. This edge is exempt from the one-way flow rule under Structural Rules."
 - Amend each of these statements so it names that exception and keeps its meaning for every other dependency:
-  - `crates/promptforge-internal/engine/AGENTS.md` line 8
-  - `crates/promptforge-internal/model-client/AGENTS.md` line 10
-  - `crates/promptforge-internal/parser/AGENTS.md` line 6
-  - `crates/promptforge-internal/store/AGENTS.md` line 5
-  - `crates/promptforge-internal/types/AGENTS.md` line 7
-  - `crates/promptforge-internal/README.md` line 11
-- Confirm that the `promptforge` dev-dependency in `crates/promptforge-internal/engine/Cargo.toml` (line 53 at `9eac5f3b`, shifted after Step 2 shortened its comment) reads `promptforge.workspace = true` under a comment that gives only the doctest reason.
-- Unchanged: the five `promptforge` dev-dependencies (types line 24, model-client line 28, parser line 28, store line 23, engine line 53) and the per-item doc examples. Do not edit `vibe/2026-09-23-1-promptforge-api-firewall.md`, `vibe/archdoc.md`, or the out-of-scope "hidden seams" sentence on `crates/promptforge-internal/store/AGENTS.md` line 6. Add no structural check that the dev-dependency stays doctest-only.
-- Verification: run `cargo tree --workspace -e dev -i promptforge --locked --depth 1`. The crates under `crates/promptforge-internal/` in its output are exactly types, model-client, parser, store, and engine. It also lists `harness-log`, which is outside this check; `harness-plugins` no longer appears after Step 2. Each of the six statements and `AGENTS.md` line 35 agrees with that output.
-- Commit: `AGENTS.md`, the five crate `AGENTS.md` files, and `crates/promptforge-internal/README.md`.
+  - `crates/runvil-internal/engine/AGENTS.md` line 8
+  - `crates/runvil-internal/model-client/AGENTS.md` line 10
+  - `crates/runvil-internal/parser/AGENTS.md` line 6
+  - `crates/runvil-internal/store/AGENTS.md` line 5
+  - `crates/runvil-internal/types/AGENTS.md` line 7
+  - `crates/runvil-internal/README.md` line 11
+- Confirm that the `runvil` dev-dependency in `crates/runvil-internal/engine/Cargo.toml` (line 53 at `9eac5f3b`, shifted after Step 2 shortened its comment) reads `runvil.workspace = true` under a comment that gives only the doctest reason.
+- Unchanged: the five `runvil` dev-dependencies (types line 24, model-client line 28, parser line 28, store line 23, engine line 53) and the per-item doc examples. Do not edit `vibe/2026-09-23-1-runvil-api-firewall.md`, `vibe/archdoc.md`, or the out-of-scope "hidden seams" sentence on `crates/runvil-internal/store/AGENTS.md` line 6. Add no structural check that the dev-dependency stays doctest-only.
+- Verification: run `cargo tree --workspace -e dev -i runvil --locked --depth 1`. The crates under `crates/runvil-internal/` in its output are exactly types, model-client, parser, store, and engine. It also lists `harness-log`, which is outside this check; `harness-plugins` no longer appears after Step 2. Each of the six statements and `AGENTS.md` line 35 agrees with that output.
+- Commit: `AGENTS.md`, the five crate `AGENTS.md` files, and `crates/runvil-internal/README.md`.
 
 </step-3>
 
@@ -455,12 +455,12 @@ Each debt gets a check that fails while the debt exists and passes once it is go
     - `VariantKind::Struct { fields, has_stripped_fields }`
     - a `None` entry in a tuple kind's `Vec<Option<Id>>`
   - `#[non_exhaustive]` on a variant comes from the variant item's own `attrs` (`visit.item.attrs`), not from its enum's.
-- Document the notation in the module docs of `crates/build-xtask/src/api.rs`, with the examples `#[non_exhaustive] pub enum promptforge::vfs::VfsError`, `pub struct promptforge::vfs::AllowAll;`, and `pub struct promptforge::vfs::ExecId(/* private fields */)`.
+- Document the notation in the module docs of `crates/build-xtask/src/api.rs`, with the examples `#[non_exhaustive] pub enum runvil::vfs::VfsError`, `pub struct runvil::vfs::AllowAll;`, and `pub struct runvil::vfs::ExecId(/* private fields */)`.
 - Fixtures in `crates/build-xtask/src/api/listing-tests.rs`, each marked `#[ignore = "needs the pinned nightly"]`:
   - Line fixtures asserting the exact lines for an exhaustive and a non-exhaustive enum, a unit struct, a tuple struct with a private field, braced structs with and without private fields, and unit, tuple, and struct variants with one of them non-exhaustive.
   - A check-mode fixture that blesses a fixture facade, adds `#[non_exhaustive]` to a unit struct in it, and asserts that `--check` reports a difference.
 - Run the fixtures before re-blessing, with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`. They prove the pinned nightly populates `Attribute::NonExhaustive` and `has_stripped_fields` as `rustdoc-types` 0.61.0 declares.
-- Re-bless with `cargo +nightly-2026-09-05 xtask api --bless`, then confirm `cargo +nightly-2026-09-05 xtask api --check` passes with one build. In the diff of `crates/promptforge/public-api.txt`:
+- Re-bless with `cargo +nightly-2026-09-05 xtask api --bless`, then confirm `cargo +nightly-2026-09-05 xtask api --check` passes with one build. In the diff of `crates/runvil/public-api.txt`:
   - only the new annotations change, and the set of listed items is unchanged. Expect a large diff, since nearly every struct, union, and variant line gains a kind suffix.
   - non-exhaustive lines sort into one block at the top of the file
   - `VfsError` and every other non-exhaustive surface type and variant has the prefix, and `Op` and `Verdict` do not
@@ -475,7 +475,7 @@ Each debt gets a check that fails while the debt exists and passes once it is go
   - `cargo fmt --all --check`
   - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` with `RUSTDOCFLAGS="-D warnings"`
   - `mdbook build guide`
-  - `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps`
+  - `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps`
   - `cargo +nightly-2026-09-05 xtask api --check`
   - `cargo test -p build-xtask`
 - Exit-gate failures are repaired in this step's commit, like any other verification failure, even when an earlier step caused them.

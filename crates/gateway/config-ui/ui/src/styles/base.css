@@ -1,6 +1,6 @@
 /* Foundation stylesheet: cascade layer order, reset, typography, and
    focus defaults. The design tokens come from shared-ui/tokens.css (the
-   Cursor Dark sheet both PromptForge UIs share), imported by main.ts
+   Cursor Dark sheet both Runvil UIs share), imported by main.ts
    ahead of this file so the layer order below is declared before any
    layered component rules. Later selectors stay low-specificity because
    precedence is settled by the layer order declared here. */

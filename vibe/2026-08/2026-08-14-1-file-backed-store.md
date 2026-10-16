@@ -1,6 +1,6 @@
 ---
 name: File-backed store
-overview: Add a FileStore backend to promptforge-core that persists the virtual store as flat files in a caller-provided directory, enabling post-run inspection and cross-run resume via store.exists.
+overview: Add a FileStore backend to runvil-core that persists the virtual store as flat files in a caller-provided directory, enabling post-run inspection and cross-run resume via store.exists.
 todos:
   - id: file-store-impl
     content: Add FileStore struct and Store impl with unit tests
@@ -36,7 +36,7 @@ A `FileStore` that implements the existing `Store` trait, backed by a real direc
 
 ### FileStore
 
-A new struct in `promptforge-core/src/store/`:
+A new struct in `runvil-core/src/store/`:
 
 ```rust
 pub struct FileStore {
@@ -90,7 +90,7 @@ Each caller decides its own policy:
 
 ## Steps
 
-1. Add `FileStore` struct and `Store` impl in `crates/promptforge-core/src/store/file.rs`. Unit tests covering all 8 methods plus confinement rejection.
+1. Add `FileStore` struct and `Store` impl in `crates/runvil-core/src/store/file.rs`. Unit tests covering all 8 methods plus confinement rejection.
 2. Wire dev runner to use `FileStore` instead of memory + post-run dump. Remove or simplify the dump reconcile.
 3. Add `--store <dir>` to CLI. Memory when absent.
 4. Verify: fmt, clippy, all tests.
@@ -104,7 +104,7 @@ Each caller decides its own policy:
 - No new dependencies unless named in this plan (none named - use only std fs).
 - Document every new public item; `# Errors` on public fallible functions.
 - Test in the same commit as the behavior it guards.
-- `cargo fmt --all --check` and `cargo clippy -p promptforge-core --all-targets --all-features -- -D warnings` before every commit.
+- `cargo fmt --all --check` and `cargo clippy -p runvil-core --all-targets --all-features -- -D warnings` before every commit.
 - Take `&Path` / `impl Into<PathBuf>` for path params; return `PathBuf` when owned.
 - Propagate errors with `?`; map `io::Error` through `StoreError` at the boundary.
 

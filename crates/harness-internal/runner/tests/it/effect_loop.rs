@@ -16,8 +16,8 @@ use harness_runner::effect_loop::{DriveError, drive_run};
 use harness_runner::recorder::{
     MemoryRecorder, Record, RecordKind, RunId, RunMeta, RunOutcome, RunRecorder,
 };
-use promptforge::cancel::CancelHandle;
-use promptforge::vfs::{MemoryBackend, Origin, VfsRef};
+use runvil::cancel::CancelHandle;
+use runvil::vfs::{MemoryBackend, Origin, VfsRef};
 use serde_json::json;
 
 use crate::support::{

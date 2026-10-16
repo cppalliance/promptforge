@@ -26,7 +26,7 @@ fn candidates_are_ordered_exe_then_cwd_then_profile() {
         vec![
             PathBuf::from("exe-dir/gateway.toml"),
             PathBuf::from("cwd-dir/gateway.toml"),
-            PathBuf::from("home-dir/.promptforge/gateway.toml"),
+            PathBuf::from("home-dir/.runvil/gateway.toml"),
         ]
     );
 }
@@ -38,10 +38,10 @@ fn the_first_existing_candidate_wins() {
     for dir in [&dirs.exe_dir, &dirs.cwd] {
         std::fs::create_dir_all(dir).expect("create fixture dir");
     }
-    let promptforge = dirs.home.join(".promptforge");
-    std::fs::create_dir_all(&promptforge).expect("create profile dir");
+    let runvil = dirs.home.join(".runvil");
+    std::fs::create_dir_all(&runvil).expect("create profile dir");
     let in_cwd = dirs.cwd.join(CONFIG_FILE_NAME);
-    let in_home = promptforge.join(CONFIG_FILE_NAME);
+    let in_home = runvil.join(CONFIG_FILE_NAME);
     std::fs::write(&in_cwd, "").expect("write fixture");
     std::fs::write(&in_home, "").expect("write fixture");
 
@@ -93,7 +93,7 @@ fn discovery_finds_an_existing_config_without_generating() {
 
     assert_eq!(resolved, in_cwd);
     assert!(
-        !dirs.home.join(".promptforge").exists(),
+        !dirs.home.join(".runvil").exists(),
         "a discovered config means no first-run generation"
     );
 }
@@ -128,7 +128,7 @@ fn the_report_discovery_falls_back_to_the_profile_without_generating() {
 
     assert_eq!(discovered, Some(profile_config_path(&dirs.home)));
     assert!(
-        !dirs.home.join(".promptforge").exists(),
+        !dirs.home.join(".runvil").exists(),
         "the report names the profile location but never writes it"
     );
 }
@@ -217,7 +217,7 @@ fn the_generated_config_writes_the_diagnostics_hint_as_a_comment() {
     let raw = std::fs::read_to_string(&path).expect("read back");
 
     assert!(
-        raw.contains("# Diagnostics: promptforge-gateway diagnostics\n"),
+        raw.contains("# Diagnostics: runvil-gateway diagnostics\n"),
         "the hint is a comment, never a config field: {raw}"
     );
     gateway_config::Config::from_toml_str(&raw)

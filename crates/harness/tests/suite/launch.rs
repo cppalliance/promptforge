@@ -13,7 +13,7 @@ use crate::support::{Clock, Offline};
 
 /// A prompt that reads its declared input and writes its declared output.
 const SHOUTS: &str = concat!(
-    "---\nname: shouts\ndescription: Shouts its input\npromptforge: 0\n",
+    "---\nname: shouts\ndescription: Shouts its input\nrunvil: 0\n",
     "input: { path: line.txt, description: The line to shout }\n",
     "output: { path: shout.txt, description: The shouted line }\n",
     "---\n\n# Shouts\n\n## Only\n\n```lua\n",

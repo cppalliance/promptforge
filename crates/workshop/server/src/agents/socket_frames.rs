@@ -4,8 +4,8 @@
 //! transcript past the per-client cursor.
 
 use axum::extract::ws::WebSocket;
-use promptforge::event::Event;
-use promptforge::tools::ToolId;
+use runvil::event::Event;
+use runvil::tools::ToolId;
 use workshop_agents::{Delta, DeltaKind, SessionEvent, WaitFrame};
 use workshop_protocol::InputFrame;
 

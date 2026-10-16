@@ -2,7 +2,7 @@
 //! output folder, `<out>/<book>/` with `book.toml`, `back-link.js`, and
 //! `src/` holding the book's chapters, its rendered `index.md`, and its
 //! `SUMMARY.md` side by side, plus the book's single-file export
-//! `<out>/promptforge-<book>-guide.md`. Chapters sit at the top of `src/`,
+//! `<out>/runvil-<book>-guide.md`. Chapters sit at the top of `src/`,
 //! so the built book serves them at `<book>/<chapter>.html` and the
 //! overview's relative links still resolve once mdBook copies it to the
 //! book root. The guide and docs trees are only read.
@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Stages every book in `BOOKS` into `out`, which must be absolute, from
-/// the chapters under `src/` in `docs`, the `promptforge-docs` root, and
+/// the chapters under `src/` in `docs`, the `runvil-docs` root, and
 /// the book configs and chrome in `guide`. The SUMMARY link check runs on
 /// each staged book. Files already in `out` are overwritten, never removed.
 pub(crate) fn stage(guide: &Path, docs: Option<&Path>, out: &Path) -> Result<(), AssembleError> {
@@ -52,7 +52,7 @@ pub(crate) fn stage(guide: &Path, docs: Option<&Path>, out: &Path) -> Result<(),
         write_file(&book_src.join("SUMMARY.md"), &summary)?;
         check_links(&summary, &book_src).map_err(|e| AssembleError(format!("{book} book: {e}")))?;
         write_file(
-            &out.join(format!("promptforge-{book}-guide.md")),
+            &out.join(format!("runvil-{book}-guide.md")),
             &render_export(part_title, &chapters, &set_src)?,
         )?;
     }
@@ -60,17 +60,17 @@ pub(crate) fn stage(guide: &Path, docs: Option<&Path>, out: &Path) -> Result<(),
 }
 
 /// The chapter folder `src/` under `docs`, or an error naming
-/// `PROMPTFORGE_DOCS` when the root is unset or names no directory.
+/// `RUNVIL_DOCS` when the root is unset or names no directory.
 fn docs_src(docs: Option<&Path>) -> Result<PathBuf, AssembleError> {
     let Some(docs) = docs else {
         return Err(AssembleError(format!(
-            "{DOCS_VAR} is not set; set it to the root of a promptforge-docs checkout"
+            "{DOCS_VAR} is not set; set it to the root of a runvil-docs checkout"
         )));
     };
     if !docs.is_dir() {
         return Err(AssembleError(format!(
             "{DOCS_VAR} names {}, which is not a directory; set it to the root of a \
-             promptforge-docs checkout",
+             runvil-docs checkout",
             docs.display()
         )));
     }

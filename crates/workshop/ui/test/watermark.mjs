@@ -46,7 +46,7 @@ const { window } = dom;
 for (const name of ["window", "document", "Element", "HTMLElement", "Node", "Event", "CustomEvent", "KeyboardEvent"]) {
   globalThis[name] = window[name];
 }
-const bundlePath = path.join(os.tmpdir(), "promptforge-watermark-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-watermark-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createWatermark,

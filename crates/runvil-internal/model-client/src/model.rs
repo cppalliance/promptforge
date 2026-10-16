@@ -1,0 +1,28 @@
+//! Prompt-local model bindings: catalog, bind/use declarations, and invocation.
+//!
+//! The caller supplies the [`ModelCatalog`]; building it happens outside
+//! this crate. H1 `models.bind` resolves a description
+//! against that catalog under hard constraints, freezes invocation
+//! parameters, and stores the result in the Engine's run-scoped model
+//! bindings. H2 `models.use` selects at most one binding per section; H1
+//! `models.default` supplies the prompt-wide default for sections that omit
+//! `models.use`. Model-facing sections with neither binding fail with a
+//! model-binding failure surfaced through the run error the caller receives.
+
+mod error;
+mod options;
+
+pub use error::{CompletionError, CompletionErrorKind};
+pub use options::{
+    CompletionOptions, ModelBinding, ModelInvocation, ModelSet, ModelSetError, ModelView,
+    Temperature, TemperatureError,
+};
+// The model identity/catalog vocabulary is canonical in
+// `runvil-types` and re-exported here so existing
+// `runvil_model_client::model::` paths keep resolving.
+pub use runvil_types::models::{
+    ModelCatalog, ModelCatalogError, ModelDescriptor, ModelId, ModelIdError, ThinkingMode,
+};
+
+#[cfg(test)]
+mod tests;

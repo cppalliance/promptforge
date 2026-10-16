@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::sync::Arc;
 
-use promptforge_plugin::{
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
     ToolOutput,
 };
@@ -20,7 +20,7 @@ mod tests;
 
 /// The packages a Host can install, by package name.
 ///
-/// Every registry holds the natives, such as `promptforge/subagents`, from
+/// Every registry holds the natives, such as `runvil/subagents`, from
 /// the start. A Host adds the `PACKAGE` constant of each Plugin crate it
 /// links, lists what the registry holds, and builds its
 /// [`HostContext`](crate::HostContext) over it, which installs Plugins by
@@ -35,7 +35,7 @@ pub struct PackageRegistry {
 #[non_exhaustive]
 pub enum PluginKind {
     /// Built into every registry; its behavior will live in the Engine, and
-    /// today's one native, `promptforge/subagents`, has none yet.
+    /// today's one native, `runvil/subagents`, has none yet.
     Native,
     /// Added by the Host with [`PackageRegistry::add`].
     Linked,
@@ -115,7 +115,7 @@ impl PackageRegistry {
 /// like any other Plugin, so a native must never offer tools, carry a
 /// prelude, or need services. Its `call` is unreachable, because the run
 /// snapshot routes a call only to a tool in a Plugin's own list.
-const NATIVE: [Package; 1] = [Package::new("promptforge/subagents", native).description(
+const NATIVE: [Package; 1] = [Package::new("runvil/subagents", native).description(
     "Reserves the subagents name for the Engine's subagent tools, which are not built yet",
 )];
 

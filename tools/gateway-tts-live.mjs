@@ -42,7 +42,7 @@ const VOICES = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"];
 // a real credential, never leaves the loopback listener.
 const GATEWAY_KEY = "tts-live-throwaway-local-key";
 const PROBE_TEXT =
-  "PromptForge gateway live probe: the quick brown fox jumps over the lazy dog.";
+  "Runvil gateway live probe: the quick brown fox jumps over the lazy dog.";
 const EMOTION_TEXT =
   "Angle-bracket emotion tags must reach the provider untouched. <laugh>";
 const READY_TIMEOUT_MS = 90_000;
@@ -86,7 +86,7 @@ models = ["${GATEWAY_MODEL}"]
 
 function gatewayBinaryPath(repo) {
   const name =
-    process.platform === "win32" ? "promptforge-gateway.exe" : "promptforge-gateway";
+    process.platform === "win32" ? "runvil-gateway.exe" : "runvil-gateway";
   return join(repo, "target", "debug", name);
 }
 
@@ -341,7 +341,7 @@ async function runSpeechSurface({
   for (const [field, value] of [
     ["instructions", "Speak with a calm tone."],
     ["sample_rate", 44100],
-    ["promptforge_probe", 1],
+    ["runvil_probe", 1],
   ]) {
     const probe = await call({ model, voice: "tara", input: PROBE_TEXT, [field]: value });
     reporter.check(`field '${field}' tolerated`, probe.ok, describeSpeech(probe));
@@ -383,7 +383,7 @@ export async function runProbe({
       );
     }
     const port = await freePort();
-    scratch = mkdtempSync(join(tmpdir(), "promptforge-tts-live-"));
+    scratch = mkdtempSync(join(tmpdir(), "runvil-tts-live-"));
     const configPath = join(scratch, "gateway.toml");
     writeFileSync(configPath, renderConfig({ port }), "utf8");
     const logPath = join(scratch, "gateway.log");

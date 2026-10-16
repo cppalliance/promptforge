@@ -342,7 +342,7 @@ fn reclaim(hwnd: HWND) -> Box<Tray> {
 /// Creates the hidden message-only window whose loop the main thread
 /// runs.
 fn create_window() -> Result<HWND, TrayError> {
-    let class_name: Vec<u16> = "promptforge-gateway-tray"
+    let class_name: Vec<u16> = "runvil-gateway-tray"
         .encode_utf16()
         .chain(Some(0))
         .collect();

@@ -1,6 +1,6 @@
 //! Run-directory, gateway-discovery-file, and gateway-log paths: the one
-//! place that knows the `<home>/.promptforge/run` and
-//! `<home>/.promptforge/logs` layout.
+//! place that knows the `<home>/.runvil/run` and
+//! `<home>/.runvil/logs` layout.
 
 use std::path::{Path, PathBuf};
 
@@ -16,14 +16,14 @@ pub const LOCK_FILE_NAME: &str = "gateway.json.lock";
 /// The process-lifetime Gateway instance lock's name.
 pub const INSTANCE_LOCK_FILE_NAME: &str = "gateway.instance.lock";
 
-/// The run directory under the state dir: `<home>/.promptforge/run`.
+/// The run directory under the state dir: `<home>/.runvil/run`.
 #[must_use]
 pub fn run_dir(home: &Path) -> PathBuf {
-    home.join(".promptforge").join("run")
+    home.join(".runvil").join("run")
 }
 
 /// This process's default run directory: the user profile's
-/// `.promptforge/run`.
+/// `.runvil/run`.
 ///
 /// Returns `None` when the user profile directory cannot be located.
 #[must_use]
@@ -50,7 +50,7 @@ pub fn instance_lock_file_path(run_dir: &Path) -> PathBuf {
 }
 
 /// The gateway log under `state_dir`, the directory that holds the run
-/// directory: `<home>/.promptforge/logs/gateway.log`. The gateway starts
+/// directory: `<home>/.runvil/logs/gateway.log`. The gateway starts
 /// logging there before it loads its configuration, so a gateway that exits
 /// on its configuration still records why.
 #[must_use]
@@ -63,10 +63,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_run_dir_sits_under_the_profile_promptforge_dir() {
+    fn the_run_dir_sits_under_the_profile_runvil_dir() {
         assert_eq!(
             run_dir(Path::new("home")),
-            Path::new("home").join(".promptforge").join("run")
+            Path::new("home").join(".runvil").join("run")
         );
     }
 
@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(
             gateway_log_path(state_dir),
             Path::new("home")
-                .join(".promptforge")
+                .join(".runvil")
                 .join("logs")
                 .join("gateway.log")
         );

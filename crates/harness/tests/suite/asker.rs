@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use harness::plugin::{HostContext, HostServices, PackageRegistry};
-use promptforge_plugin::{
+use runvil_plugin::{
     Package, Plugin, PluginFuture, PluginId, ServiceId, ServiceKey, ToolContext, ToolDescriptor,
     ToolError, ToolErrorKind, ToolId, ToolOutput,
 };

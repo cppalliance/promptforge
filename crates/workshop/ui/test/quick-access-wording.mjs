@@ -62,7 +62,7 @@ globalThis.HTMLInputElement = window.HTMLInputElement;
 globalThis.Element = window.Element;
 globalThis.Node = window.Node;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-quick-access-wording-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-quick-access-wording-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   QuickInputService,

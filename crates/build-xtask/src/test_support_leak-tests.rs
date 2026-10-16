@@ -1,6 +1,6 @@
 //! Fixture tests for the `test-support` leak guard, plus the live check
 //! over this workspace: no non-dev dependency table anywhere enables a
-//! promptforge or Harness crate's `test-support` feature.
+//! runvil or Harness crate's `test-support` feature.
 
 use std::path::{Path, PathBuf};
 
@@ -36,22 +36,17 @@ fn engine_root() -> tempfile::TempDir {
     let features = "[features]\ntest-support = []\n";
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
+        "runvil-internal/engine",
+        "runvil-engine",
         features,
     );
     write_crate(
         root.path(),
-        "promptforge-internal/types",
-        "promptforge-types",
+        "runvil-internal/types",
+        "runvil-types",
         features,
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        features,
-    );
+    write_crate(root.path(), "runvil-internal/lua", "runvil-lua", features);
     root
 }
 
@@ -86,13 +81,13 @@ fn a_dependencies_table_enabling_an_engine_test_support_feature_is_reported() {
         "harness-internal/plugins",
         "harness-plugins",
         "[dependencies]\n\
-         promptforge-engine = { workspace = true, features = [\"test-support\"] }\n",
+         runvil-engine = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("[dependencies]")
-            && violations[0].contains("promptforge-engine/test-support")
+            && violations[0].contains("runvil-engine/test-support")
             && violations[0].contains("plugins"),
         "the leak names the table, the feature, and the consuming crate: {violations:?}"
     );
@@ -105,11 +100,11 @@ fn a_dev_dependencies_table_enabling_an_engine_test_support_feature_passes() {
         root.path(),
         "harness-internal/plugins",
         "harness-plugins",
-        "[dependencies]\npromptforge-engine = { workspace = true }\n\
+        "[dependencies]\nrunvil-engine = { workspace = true }\n\
          [dev-dependencies]\n\
-         promptforge-engine = { workspace = true, features = [\"test-support\"] }\n\
+         runvil-engine = { workspace = true, features = [\"test-support\"] }\n\
          [target.'cfg(unix)'.dev-dependencies]\n\
-         promptforge-lua = { workspace = true, features = [\"test-support\"] }\n",
+         runvil-lua = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert!(
@@ -126,11 +121,11 @@ fn build_and_target_tables_are_scanned_renames_resolved_and_non_engine_features_
         "harness-internal/runner",
         "harness-runner",
         "[build-dependencies]\n\
-         rt = { package = \"promptforge-engine\", features = [\"test-support\"] }\n\
+         rt = { package = \"runvil-engine\", features = [\"test-support\"] }\n\
          [target.'cfg(windows)'.dependencies]\n\
-         promptforge-lua = { workspace = true, features = [\"serialize\", \"test-support\"] }\n\
+         runvil-lua = { workspace = true, features = [\"serialize\", \"test-support\"] }\n\
          [dependencies]\n\
-         promptforge-types = { workspace = true, features = [\"serde\"] }\n\
+         runvil-types = { workspace = true, features = [\"serde\"] }\n\
          harness-plugins = { workspace = true, features = [\"test-support\"] }\n",
     );
     let violations = test_support_leak_violations(root.path());
@@ -139,13 +134,13 @@ fn build_and_target_tables_are_scanned_renames_resolved_and_non_engine_features_
         violations
             .iter()
             .any(|v| v.contains("[build-dependencies]")
-                && v.contains("promptforge-engine/test-support")),
+                && v.contains("runvil-engine/test-support")),
         "the renamed build-dependency is reported by package name: {violations:?}"
     );
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("cfg(windows)") && v.contains("promptforge-lua/test-support")),
+            .any(|v| v.contains("cfg(windows)") && v.contains("runvil-lua/test-support")),
         "the target-specific entry is reported: {violations:?}"
     );
 }
@@ -156,15 +151,15 @@ fn a_workspace_dependencies_entry_enabling_an_engine_test_support_feature_is_rep
     std::fs::write(
         root.path().join("Cargo.toml"),
         "[workspace]\nmembers = []\n[workspace.dependencies]\n\
-         promptforge-engine = { path = \"crates/promptforge-internal/engine\", features = [\"test-support\"] }\n\
-         promptforge-lua = { path = \"crates/promptforge-internal/lua\" }\n",
+         runvil-engine = { path = \"crates/runvil-internal/engine\", features = [\"test-support\"] }\n\
+         runvil-lua = { path = \"crates/runvil-internal/lua\" }\n",
     )
     .expect("the root manifest writes");
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("[workspace.dependencies]")
-            && violations[0].contains("promptforge-engine/test-support"),
+            && violations[0].contains("runvil-engine/test-support"),
         "the inherited entry is reported against the root manifest: {violations:?}"
     );
 }
@@ -177,28 +172,27 @@ fn a_features_value_enabling_an_engine_test_support_feature_is_reported() {
         "workshop/server",
         "workshop-server",
         "[dependencies]\n\
-         promptforge-engine = { workspace = true }\n\
-         rt-types = { package = \"promptforge-types\", workspace = true, optional = true }\n\
-         promptforge-lua = { workspace = true, optional = true }\n\
+         runvil-engine = { workspace = true }\n\
+         rt-types = { package = \"runvil-types\", workspace = true, optional = true }\n\
+         runvil-lua = { workspace = true, optional = true }\n\
          harness-plugins = { workspace = true }\n\
          [features]\n\
-         default = [\"promptforge-engine/test-support\"]\n\
+         default = [\"runvil-engine/test-support\"]\n\
          types = [\"rt-types?/test-support\"]\n\
-         fixtures = [\"dep:promptforge-lua\", \"harness-plugins/test-support\", \"promptforge-lua/serialize\"]\n",
+         fixtures = [\"dep:runvil-lua\", \"harness-plugins/test-support\", \"runvil-lua/serialize\"]\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 2, "{violations:?}");
     assert!(
         violations.iter().any(|v| v.contains("[features] default")
-            && v.contains("promptforge-engine/test-support")
+            && v.contains("runvil-engine/test-support")
             && v.contains("server")),
         "the plain dependency-feature reference names the feature, the engine crate, and the consuming crate: {violations:?}"
     );
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("[features] types")
-                && v.contains("promptforge-types/test-support")),
+            .any(|v| v.contains("[features] types") && v.contains("runvil-types/test-support")),
         "the weak `?/` reference resolves its `package` rename: {violations:?}"
     );
 }
@@ -208,11 +202,11 @@ fn an_engine_crate_forwarding_its_own_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
-        "[dependencies]\npromptforge-lua = { workspace = true }\n\
-         [features]\ntest-support = [\"promptforge-lua/test-support\"]\n\
-         other = [\"promptforge-lua/serialize\"]\n",
+        "runvil-internal/engine",
+        "runvil-engine",
+        "[dependencies]\nrunvil-lua = { workspace = true }\n\
+         [features]\ntest-support = [\"runvil-lua/test-support\"]\n\
+         other = [\"runvil-lua/serialize\"]\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert!(
@@ -226,10 +220,10 @@ fn the_facade_forwarding_the_engine_test_support_feature_passes() {
     let root = engine_root();
     write_crate(
         root.path(),
-        "promptforge",
-        "promptforge",
-        "[dependencies]\npromptforge-engine = { workspace = true }\n\
-         [features]\ntest-support = [\"promptforge-engine/test-support\"]\n",
+        "runvil",
+        "runvil",
+        "[dependencies]\nrunvil-engine = { workspace = true }\n\
+         [features]\ntest-support = [\"runvil-engine/test-support\"]\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert!(
@@ -243,15 +237,15 @@ fn an_engine_crate_enabling_a_sibling_test_support_feature_outside_dev_is_report
     let root = engine_root();
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
-        "[dependencies]\npromptforge-lua = { workspace = true, features = [\"test-support\"] }\n\
+        "runvil-internal/engine",
+        "runvil-engine",
+        "[dependencies]\nrunvil-lua = { workspace = true, features = [\"test-support\"] }\n\
          [features]\ntest-support = []\n",
     );
     let violations = test_support_leak_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("promptforge-lua/test-support"),
+        violations[0].contains("runvil-lua/test-support"),
         "{violations:?}"
     );
 }
@@ -339,13 +333,13 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
         root.path(),
         "harness-internal/plugins",
         "harness-plugins",
-        "[dependencies]\npromptforge-lua = { workspace = true }\n\
-         [features]\ntest-support = [\"promptforge-lua/test-support\"]\n",
+        "[dependencies]\nrunvil-lua = { workspace = true }\n\
+         [features]\ntest-support = [\"runvil-lua/test-support\"]\n",
     );
     write_crate(
         root.path(),
-        "promptforge-internal/engine",
-        "promptforge-engine",
+        "runvil-internal/engine",
+        "runvil-engine",
         "[dependencies]\nharness-runner = { workspace = true }\n\
          [features]\ntest-support = [\"harness-runner/test-support\"]\n",
     );
@@ -354,13 +348,13 @@ fn a_test_support_feature_forwarding_into_the_other_family_is_reported() {
     assert!(
         violations
             .iter()
-            .any(|v| v.contains("plugins") && v.contains("promptforge-lua/test-support")),
-        "a harness crate forwarding a promptforge crate's test-support is reported: {violations:?}"
+            .any(|v| v.contains("plugins") && v.contains("runvil-lua/test-support")),
+        "a harness crate forwarding a runvil crate's test-support is reported: {violations:?}"
     );
     assert!(
         violations
             .iter()
             .any(|v| v.contains("engine") && v.contains("harness-runner/test-support")),
-        "a promptforge crate forwarding a harness crate's test-support is reported: {violations:?}"
+        "a runvil crate forwarding a harness crate's test-support is reported: {violations:?}"
     );
 }

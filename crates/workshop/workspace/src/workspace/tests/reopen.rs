@@ -41,7 +41,7 @@ async fn grants_on_disk(path: &Path) -> Vec<PathBuf> {
 #[tokio::test]
 async fn reopening_the_current_file_keeps_the_wal_and_later_grants() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let one = tempfile::TempDir::new().expect("tempdir");
     let two = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
@@ -101,7 +101,7 @@ async fn reopening_the_current_file_keeps_the_wal_and_later_grants() {
 #[tokio::test]
 async fn reopening_the_current_file_starts_no_second_actor() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let workspace = Workspace::new();
     workspace
         .save_as(&file_path)
@@ -128,7 +128,7 @@ async fn reopening_the_current_file_starts_no_second_actor() {
 #[tokio::test]
 async fn reopening_the_current_file_reapplies_its_grants() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     workspace

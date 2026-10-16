@@ -1,7 +1,7 @@
 //! Tests for the tool-name rule and the descriptors `catalog` builds.
 
-use promptforge_plugin::PluginId;
 use rmcp::model::Tool;
+use runvil_plugin::PluginId;
 use serde_json::{Value, json};
 
 use super::catalog;

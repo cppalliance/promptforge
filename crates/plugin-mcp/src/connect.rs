@@ -4,12 +4,12 @@
 
 use std::time::Duration;
 
-use promptforge_plugin::PluginId;
 use rmcp::ServiceExt;
 use rmcp::model::{ClientCapabilities, ClientConfig, Implementation};
 use rmcp::service::ClientInitializeError;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use runvil_plugin::PluginId;
 use tokio::sync::watch;
 
 use crate::entry::RemoteEntry;
@@ -26,7 +26,7 @@ pub(crate) const STARTUP_DEADLINE: Duration = Duration::from_mins(2);
 fn client_config() -> ClientConfig {
     ClientConfig::new(
         ClientCapabilities::default(),
-        Implementation::new("PromptForge", env!("CARGO_PKG_VERSION")),
+        Implementation::new("Runvil", env!("CARGO_PKG_VERSION")),
     )
 }
 

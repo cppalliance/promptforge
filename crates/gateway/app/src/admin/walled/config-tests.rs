@@ -156,14 +156,14 @@ async fn adding_a_cloud_provider_validates_against_a_key_staged_only_in_the_env_
 
     std::fs::write(
         shadow_path(&config_path.with_extension("env")),
-        "PF_TEST_STAGED_KEY=sk-staged\n",
+        "RV_TEST_STAGED_KEY=sk-staged\n",
     )
     .expect("write env shadow");
 
     let addr = serve_with_paths(config, paths).await;
 
     let mut body = save_body(addr).await;
-    push_cloud_endpoint(&mut body, "PF_TEST_STAGED_KEY");
+    push_cloud_endpoint(&mut body, "RV_TEST_STAGED_KEY");
 
     let response = put_config(addr, &body).await;
 
@@ -185,7 +185,7 @@ async fn adding_a_cloud_provider_without_its_key_is_rejected_and_stages_nothing(
     let addr = serve_with_paths(config, paths).await;
 
     let mut body = save_body(addr).await;
-    push_cloud_endpoint(&mut body, "PF_TEST_MISSING_KEY");
+    push_cloud_endpoint(&mut body, "RV_TEST_MISSING_KEY");
 
     let response = put_config(addr, &body).await;
 
@@ -198,7 +198,7 @@ async fn adding_a_cloud_provider_without_its_key_is_rejected_and_stages_nothing(
     assert!(
         error["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("PF_TEST_MISSING_KEY")),
+            .is_some_and(|message| message.contains("RV_TEST_MISSING_KEY")),
         "the error message does not name the missing variable: {error}"
     );
 

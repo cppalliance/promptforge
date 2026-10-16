@@ -1,4 +1,4 @@
-//! The PromptForge gateway config UI: the embedded SPA assets and the
+//! The Runvil gateway config UI: the embedded SPA assets and the
 //! shared loopback middleware.
 //!
 //! The gateway pulls this crate as an optional dependency behind its

@@ -15,7 +15,7 @@
    copies from Cursor's installed theme and workbench stylesheet - never
    approximate them, and keep the color-mix() formulas intact (never
    encode premultiplied RGB as straight-alpha hex). --accent stays
-   PromptForge gold for the surfaces that have not moved to Cursor's
+   Runvil gold for the surfaces that have not moved to Cursor's
    accent yet; Cursor's own accent is --cursor-accent.
 
    The :root block is the workshop's original sheet, copied over verbatim.

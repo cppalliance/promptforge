@@ -8,7 +8,7 @@
 //!   `workshop-registry`, `workshop-support`, and the service crates;
 //!   today it names none of them. Outside the family it may name the
 //!   Harness's public API `harness`, the Engine's public API
-//!   `promptforge`, and `shared-*` crates. Never on `workshop-server`, a
+//!   `runvil`, and `shared-*` crates. Never on `workshop-server`, a
 //!   private Harness, Engine, or Gateway crate. `cargo test -p build-xtask`
 //!   enforces the product and container boundaries.
 //! - The Harness holds no database and no storage path: this crate is

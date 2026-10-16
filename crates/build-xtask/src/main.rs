@@ -1,4 +1,4 @@
-//! `build-xtask` - workspace automation for the PromptForge repository.
+//! `build-xtask` - workspace automation for the Runvil repository.
 //!
 //! ## Invariants
 //!

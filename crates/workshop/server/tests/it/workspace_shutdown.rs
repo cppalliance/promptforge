@@ -1,5 +1,5 @@
 //! The workspace file across a graceful shutdown: a quit folds the WAL
-//! into `Name.pfwork` and removes the sidecar, so the folder holds
+//! into `Name.rvwork` and removes the sidecar, so the folder holds
 //! exactly one file at rest, and a relaunch over the same state
 //! directory reopens it with every grant that was persisted before the
 //! quit.
@@ -61,7 +61,7 @@ async fn a_graceful_shutdown_leaves_one_file_that_a_relaunch_reopens() {
     let client = reqwest::Client::new();
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("Name.pfwork");
+    let file = home.path().join("Name.rvwork");
 
     let saved = post_path(&client, &first, "/workspace/file/save-as", &file).await;
     assert_eq!(saved["name"], "Name", "save as switches to the new file");
@@ -73,7 +73,7 @@ async fn a_graceful_shutdown_leaves_one_file_that_a_relaunch_reopens() {
 
     assert_eq!(
         names_in(home.path()),
-        ["Name.pfwork"],
+        ["Name.rvwork"],
         "a graceful quit folds the WAL in and removes the sidecar"
     );
 

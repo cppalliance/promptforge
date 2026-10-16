@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "PromptForge Workshop UI: TypeScript sources bundled by esbuild into dist/ and served by workshop-server.",
+  "description": "Runvil Workshop UI: TypeScript sources bundled by esbuild into dist/ and served by workshop-server.",
   "engines": {
     "node": ">=22"
   },

@@ -56,9 +56,9 @@ Tools today receive only their JSON arguments, so no tool can read or write the 
   - Every verification command in the Execution Instructions passes.
 - Constraints:
   - Breaking the `Tool` trait is acceptable. The owner (Vinnie Falco): "I dont care about breaking the trait."
-  - The Engine performs no I/O and holds no Host trait objects. It forks and joins identities only through the Engine-only VFS functions in `crates/promptforge-internal/vfs/src/detail.rs` (module doc, lines 1-9).
+  - The Engine performs no I/O and holds no Host trait objects. It forks and joins identities only through the Engine-only VFS functions in `crates/runvil-internal/vfs/src/detail.rs` (module doc, lines 1-9).
   - The Harness depends on no particular async runtime, so nothing in the context may depend on tokio.
-  - Run records must not change. `Effect::record` already leaves live handles out (`crates/promptforge-internal/engine/src/execute/run/effect.rs` lines 153-195).
+  - Run records must not change. `Effect::record` already leaves live handles out (`crates/runvil-internal/engine/src/execute/run/effect.rs` lines 153-195).
 - Open questions: None
 
 ## Functional Specification
@@ -72,7 +72,7 @@ A tool call starts when a section's Lua calls `tools.call` or a model round asks
   - `Plugin::create` no longer receives the run's filesystem, so a Plugin can no longer write files before the run starts. No production Plugin does that today: the user-input Plugin and `harness-web` never read `RunServices::vfs`.
 - Inputs and outputs:
   - The tool receives a `ToolContext<'_>` and its JSON arguments. The context's `access()` returns `&Access` and its `origin()` returns `&ToolCallOrigin`. The output is unchanged: `Result<ToolOutput, ToolError>`.
-  - The access is rooted at `/` and reaches the run's whole filesystem, not only the store. In the default handle the store is mounted at `/` (`crates/promptforge-internal/vfs/src/lib.rs` lines 46-55). So a tool that writes `/notes.md` writes the file Lua reads with `store.read("notes.md")`.
+  - The access is rooted at `/` and reaches the run's whole filesystem, not only the store. In the default handle the store is mounted at `/` (`crates/runvil-internal/vfs/src/lib.rs` lines 46-55). So a tool that writes `/notes.md` writes the file Lua reads with `store.read("notes.md")`.
 - States and validation:
   - The call's identity is forked when the effect is built, used only while the call runs, and joined into the chain when the answer is applied, `Dropped` answers included.
   - The tool's borrow ends when `call` returns, or when its future is dropped, as happens on Stop.
@@ -96,7 +96,7 @@ A tool call starts when a section's Lua calls `tools.call` or a model round asks
 
 ## Technical Design
 
-The design uses two mechanisms that do different jobs. The borrowed context makes every tool give the access up when its call ends. The per-call identity, forked and joined the same way a task's identity is, orders each call within its chain and keeps concurrent calls apart. The Engine adds one field to the public `ToolCall` effect, and forks and joins identities in its scheduler. The Harness changes the `Tool` signature, adds `ToolContext`, and passes the access through its internal tool performer; paths in this plan are relative to the `promptforge` repository root unless they name another repository.
+The design uses two mechanisms that do different jobs. The borrowed context makes every tool give the access up when its call ends. The per-call identity, forked and joined the same way a task's identity is, orders each call within its chain and keeps concurrent calls apart. The Engine adds one field to the public `ToolCall` effect, and forks and joins identities in its scheduler. The Harness changes the `Tool` signature, adds `ToolContext`, and passes the access through its internal tool performer; paths in this plan are relative to the `runvil` repository root unless they name another repository.
 
 ```mermaid
 flowchart LR
@@ -111,25 +111,25 @@ flowchart LR
 - Architecture:
   - **The borrow makes the tool give the access up.** `ToolContext<'a>` holds `&'a Access` and `&'a ToolCallOrigin`.
     - The borrow lasts only as long as the call. The compiler rejects storing the access, moving it into `tokio::spawn`, `spawn_blocking`, or a thread, or wrapping it in an `Arc`.
-    - `Access` has no public method that returns an owned `Access` (`crates/promptforge/public-api.txt` lines 644-658), so there is no way around the borrow.
+    - `Access` has no public method that returns an owned `Access` (`crates/runvil/public-api.txt` lines 644-658), so there is no way around the borrow.
     - On Stop, the Harness drops the call's future and the borrow ends with it, so nothing the tool started can still hold the access.
     - A scoped thread can use the borrow, but it must finish before `call` returns.
-  - **The borrow is shared.** Every `Access` operation takes `&self`, and `Access` is `Send` and `Sync` (`crates/promptforge/public-api.txt` line 176). So concurrent calls can each hold a borrow.
-  - **The per-call identity keeps calls ordered.** The VFS treats everything one identity does as a single sequence: the identity's own clock entry advances once per admitted operation (`crates/promptforge-internal/vfs/src/handle/scope.rs` lines 57-60). If two concurrent calls shared one identity, they would race and no conflict would be reported. So for each call, the Engine forks a fresh identity from the chain's access with `access_spawn`, and joins it back with `access_join` (`crates/promptforge-internal/vfs/src/detail.rs` lines 74-101). Tasks use the same pair (`crates/promptforge-internal/engine/src/execute/scheduler/tasks.rs` lines 207-218; `crates/promptforge-internal/engine/src/execute/scheduler/task_end.rs` lines 111-123).
-  - **The fork never conflicts with the chain.** The fork orders everything the chain did before the call ahead of the tool's first operation. The join orders everything the tool did ahead of the chain's next step (`crates/promptforge-internal/vfs/src/handle/scope.rs` lines 186-211 and 226-268). The chain is parked while its call runs, so nothing else uses the chain's identity in between.
-  - **What does conflict.** A fresh scope from `VfsRef::acquire` or `acquire_store` is never ordered with a live chain, so its claims always conflict (`crates/promptforge-internal/vfs/src/handle.rs` lines 13-37). The test `acquire_store_is_a_scope_of_its_own` shows this (`crates/promptforge-internal/vfs/src/detail-tests.rs` lines 459-471). Tools therefore reach the run's files through the context. After `RunServices::vfs` is removed, a Plugin has no `VfsRef` to hand its tools, so they have nothing to open a fresh scope from.
+  - **The borrow is shared.** Every `Access` operation takes `&self`, and `Access` is `Send` and `Sync` (`crates/runvil/public-api.txt` line 176). So concurrent calls can each hold a borrow.
+  - **The per-call identity keeps calls ordered.** The VFS treats everything one identity does as a single sequence: the identity's own clock entry advances once per admitted operation (`crates/runvil-internal/vfs/src/handle/scope.rs` lines 57-60). If two concurrent calls shared one identity, they would race and no conflict would be reported. So for each call, the Engine forks a fresh identity from the chain's access with `access_spawn`, and joins it back with `access_join` (`crates/runvil-internal/vfs/src/detail.rs` lines 74-101). Tasks use the same pair (`crates/runvil-internal/engine/src/execute/scheduler/tasks.rs` lines 207-218; `crates/runvil-internal/engine/src/execute/scheduler/task_end.rs` lines 111-123).
+  - **The fork never conflicts with the chain.** The fork orders everything the chain did before the call ahead of the tool's first operation. The join orders everything the tool did ahead of the chain's next step (`crates/runvil-internal/vfs/src/handle/scope.rs` lines 186-211 and 226-268). The chain is parked while its call runs, so nothing else uses the chain's identity in between.
+  - **What does conflict.** A fresh scope from `VfsRef::acquire` or `acquire_store` is never ordered with a live chain, so its claims always conflict (`crates/runvil-internal/vfs/src/handle.rs` lines 13-37). The test `acquire_store_is_a_scope_of_its_own` shows this (`crates/runvil-internal/vfs/src/detail-tests.rs` lines 459-471). Tools therefore reach the run's files through the context. After `RunServices::vfs` is removed, a Plugin has no `VfsRef` to hand its tools, so they have nothing to open a fresh scope from.
 - Modules and interfaces:
   - `Tool::call` in `crates/harness-internal/plugins/src/tool.rs` becomes `async fn call(&self, cx: ToolContext<'_>, args: serde_json::Value) -> Result<ToolOutput, ToolError>`.
   - `pub struct ToolContext<'a>`, in the same file, has the private fields `access: &'a Access` and `origin: &'a ToolCallOrigin`. It has a constructor `new` and the accessors `access() -> &'a Access` and `origin() -> &'a ToolCallOrigin`.
   - The runner's internal `ToolPerformer::call` becomes `(tool, alias, access: Arc<Access>, origin: ToolCallOrigin, args)` (`crates/harness-internal/runner/src/performers.rs` lines 80-92). The trait is not in the `harness` facade, so no Host breaks.
   - The future of the runner's `ActivatedTools` owns the access and the origin, lends them to the tool, and drops them when it finishes or is dropped (`crates/harness-internal/runner/src/performers-tools.rs` lines 42-65).
-  - The Engine's `ToolCallContinuation` gains the call's `ExecId`, which the join needs (`crates/promptforge-internal/engine/src/execute/scheduler/pending.rs` lines 54-65).
+  - The Engine's `ToolCallContinuation` gains the call's `ExecId`, which the join needs (`crates/runvil-internal/engine/src/execute/scheduler/pending.rs` lines 54-65).
   - `RunServices` keeps only the cancellation flag and the Host services. Its public `vfs` field goes (`crates/harness-internal/plugins/src/plugin.rs` lines 103-106), and its constructors become `RunServices::new(cancel)` and `RunServices::with_host(cancel, host)` (lines 117-130). The runner stops passing the `VfsRef` when it builds them (`crates/harness-internal/runner/src/prepare.rs` line 295). The run's `VfsRef` still reaches the Engine's context as before.
 - File and public API changes:
-  - `Effect::ToolCall` gains `access: Arc<Access>` (`crates/promptforge-internal/engine/src/execute/run/effect.rs` lines 101-115). Its doc states four things: the access is the call's own identity, forked from the calling chain when the call is issued; it is joined when the answer is applied; it is rooted at `/`; and the caller must not use it after answering.
-  - The facade listing `crates/promptforge/public-api.txt` gains `Effect::ToolCall::access`, next to that variant's existing fields (lines 797-801).
+  - `Effect::ToolCall` gains `access: Arc<Access>` (`crates/runvil-internal/engine/src/execute/run/effect.rs` lines 101-115). Its doc states four things: the access is the call's own identity, forked from the calling chain when the call is issued; it is joined when the answer is applied; it is rooted at `/`; and the caller must not use it after answering.
+  - The facade listing `crates/runvil/public-api.txt` gains `Effect::ToolCall::access`, next to that variant's existing fields (lines 797-801).
   - In the effect module doc, "the store access capability" (`effect.rs` lines 13-17) becomes "a filesystem access". The `Vfs` variant's sentence "A tool or the application reading files reaches the VFS by its own route" (lines 121-123) is rewritten, because a tool now uses its `ToolCall` access.
-  - The `vfs::detail` module doc (`crates/promptforge-internal/vfs/src/detail.rs` lines 1-9) adds tool calls to the things the Engine forks and joins.
+  - The `vfs::detail` module doc (`crates/runvil-internal/vfs/src/detail.rs` lines 1-9) adds tool calls to the things the Engine forks and joins.
   - The `Tool` trait's "Compatibility policy" paragraph (`tool.rs` lines 28-33) is deleted.
   - The trait's "must not block while polled" invariant (`tool.rs` lines 49-52) is reworded:
     - Operations through `cx.access()` run inside the call. The VFS is synchronous today, so on real directories they block the poll briefly, as `store.*` does.
@@ -142,9 +142,9 @@ flowchart LR
     - The runner's doc for its prepare input's `vfs` field, which says the `VfsRef` is "handed to the Plugins as the run's services" (`crates/harness-internal/runner/src/prepare.rs` lines 63-66), drops that clause.
 - Data, persistence, failure, security, and privacy constraints:
   - Run records are unchanged, because `Effect::record` leaves the access out.
-  - The join runs on every `ToolCall` answer, `Dropped` included, right after `apply_answer` removes the pending entry (`crates/promptforge-internal/engine/src/execute/scheduler/apply.rs` lines 64-103). It is skipped when the chain no longer has an access, as `join_task` does.
+  - The join runs on every `ToolCall` answer, `Dropped` included, right after `apply_answer` removes the pending entry (`crates/runvil-internal/engine/src/execute/scheduler/apply.rs` lines 64-103). It is skipped when the chain no longer has an access, as `join_task` does.
   - The Harness holds the effect's `Arc<Access>` only inside the call's future. As with the `Vfs` effect's access today, the access must not be used after the answer.
-  - Each call leaves one identity record in the run's scope until the run ends, because the scope keeps records for late joins (`crates/promptforge-internal/vfs/src/handle/scope.rs` lines 39-44).
+  - Each call leaves one identity record in the run's scope until the run ends, because the scope keeps records for late joins (`crates/runvil-internal/vfs/src/handle/scope.rs` lines 39-44).
   - Operations through `cx.access()` are synchronous and briefly block the effect loop on real directories, the same cost `store.*` has today.
 
 </implementation-contract>
@@ -155,11 +155,11 @@ flowchart LR
 New tests cover the Engine's fork and join, and the whole path through the Harness. The compile-time guarantee needs no test of its own, because the function signature is the guarantee. Existing suites are updated to the new signature and must keep passing. The activation tests lose their checks of files written during `create`, because that behavior is removed.
 
 - Unit:
-  - The record test in `crates/promptforge-internal/engine/src/execute/run/tests.rs` (lines 122-141) builds the `ToolCall` effect with an access from `VfsRef::default()`, the way the `Vfs` test below it does, and asserts that the record leaves the access out.
+  - The record test in `crates/runvil-internal/engine/src/execute/run/tests.rs` (lines 122-141) builds the `ToolCall` effect with an access from `VfsRef::default()`, the way the `Vfs` test below it does, and asserts that the record leaves the access out.
   - The Plugin tool tests in `crates/harness-internal/plugins/src/tool-tests.rs` and `crates/harness-internal/plugins/src/user_input-tests.rs` call tools through a test fixture that owns an access and an origin and lends a `ToolContext`.
   - The activation fixture in `crates/harness-internal/plugins/tests/it/support.rs` stops writing and reading `activated.txt` in `create` (lines 134-162) and drops the `marker` field from `Observed` (lines 94-102). It still records the cancellation handle it received.
 - Integration and end-to-end:
-  - Engine tests go in a new file under `crates/promptforge-internal/engine/src/execute/tests/`. Their driver answers `ToolCall` by using the effect's access.
+  - Engine tests go in a new file under `crates/runvil-internal/engine/src/execute/tests/`. Their driver answers `ToolCall` by using the effect's access.
     - A tool reads a file the chain's Lua wrote just before the call, with no conflict. This checks the fork.
     - The chain's Lua reads a file the tool wrote, with no conflict. This checks the join.
     - A tool called inside a spawned task forks from the task's identity, and the owner reads the tool's write after awaiting the task, with no conflict.
@@ -219,18 +219,18 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 - Assumptions, risks, and notes:
   - Removing `RunServices::vfs` removes a tested behavior on purpose: a Plugin writing files during `create`. It is tested only through the activation fixture, and no production Plugin relies on it.
   - A Host still holds its own `VfsRef` and can touch the run's files outside the Engine, as the `harness` suite's simulated desk edit does (`crates/harness/tests/suite/vfs.rs` lines 66-78). That is Host code rather than Plugin code, and this change leaves it alone.
-  - Today the tool calls of one model round are dispatched one at a time (`crates/promptforge-internal/lua/src/__impl_coro.lua` lines 287-292). The per-call identity is ready for when they run concurrently.
+  - Today the tool calls of one model round are dispatched one at a time (`crates/runvil-internal/lua/src/__impl_coro.lua` lines 287-292). The per-call identity is ready for when they run concurrently.
   - The owner raised concurrency as a question, and the per-call identity is the agent's answer. The owner moved on without objecting but did not explicitly approve it. The shared borrow, the private fields, and the facade re-exports are also agent proposals with the same standing. Removing `RunServices::vfs` is an explicit owner decision.
 
 ### Deferred and Out of Scope
 
 - Deferred:
   - **The store as a tool.** Revisit once this change lands.
-    - The store tool needs the store view of `cx.access()`, and today only the Engine can build that view (`crates/promptforge-internal/vfs/src/detail.rs` lines 47-59). Whatever exposes it must return a borrow tied to the access, or a tool could keep the view.
+    - The store tool needs the store view of `cx.access()`, and today only the Engine can build that view (`crates/runvil-internal/vfs/src/detail.rs` lines 47-59). Whatever exposes it must return a borrow tied to the access, or a tool could keep the view.
     - Today a store conflict ends the run. Once the store is a tool, a conflict arrives inside a tool error, so the store tool's design must keep it fatal.
-  - **An async VFS.** Revisit after the store becomes a tool. That change deletes the `Vfs` effect, the inline answer path, and the store calls made while `lua shared` loads (`crates/promptforge-internal/lua/src/engine_globals-store.rs` lines 1-3).
-    - The traits say they are synchronous "because the Lua VM and the single thread that drives a run are both synchronous" (`crates/promptforge-internal/vfs/src/traits.rs` lines 77-78). That stops being true once Lua reaches the store only through effects.
-    - The Engine has one other synchronous VFS call, the store probe in `Run::new` (`crates/promptforge-internal/engine/src/execute/run.rs` line 261). It moves to the Harness.
+  - **An async VFS.** Revisit after the store becomes a tool. That change deletes the `Vfs` effect, the inline answer path, and the store calls made while `lua shared` loads (`crates/runvil-internal/lua/src/engine_globals-store.rs` lines 1-3).
+    - The traits say they are synchronous "because the Lua VM and the single thread that drives a run are both synchronous" (`crates/runvil-internal/vfs/src/traits.rs` lines 77-78). That stops being true once Lua reaches the store only through effects.
+    - The Engine has one other synchronous VFS call, the store probe in `Run::new` (`crates/runvil-internal/engine/src/execute/run.rs` line 261). It moves to the Harness.
     - Backend operations must be safe to cancel: dropping one partway leaves either the old contents or the new, never a half-written file.
   - **A Turso-backed mount of an agent's run database.** Revisit along with the async VFS.
     - The mount must reuse the database's existing connection. Under turso 0.7.2, two handles opened on the same file share one write-ahead log, and closing either one loses the writes that come after (`crates/workshop/workspace/src/workspace/backing.rs` lines 157-164).
@@ -251,25 +251,25 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 ## Project Survey
 
 - Status: complete
-- Build command: `cargo build --locked -p gateway` (the workspace's only default member). The desktop app builds only on request: `cargo build --locked -p workshop`. The headless gateway shape: `cargo check -p gateway --no-default-features`. The crates this plan touches build with `cargo build --locked -p promptforge-engine -p promptforge-vfs -p harness-plugins -p harness-runner -p harness`.
+- Build command: `cargo build --locked -p gateway` (the workspace's only default member). The desktop app builds only on request: `cargo build --locked -p workshop`. The headless gateway shape: `cargo check -p gateway --no-default-features`. The crates this plan touches build with `cargo build --locked -p runvil-engine -p runvil-vfs -p harness-plugins -p harness-runner -p harness`.
 - Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-substring>`, such as `cargo nextest run --locked -p harness-plugins --all-features activation`. For `workshop`, `workshop-server`, and `workshop-server-api`, drop `--all-features`. A UI test file: `node --test <file>.mjs` from its package directory under `crates/workshop/` (`ui`, `look`, or `platform`).
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features` (same `--all-features` exception for the three workshop crates). Structural checks: `cargo test -p build-xtask` (`cargo xtask tidy` prints the same report on demand). A UI package: `npm test --workspace <ui|look|platform>` from `crates/workshop`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`. No doctest run is needed: the `no_doctests` check in `build-xtask` bans compiled code blocks in every doc comment. UI: `npm test --workspaces --if-present` from `crates/workshop`, and `npm test` from `crates/gateway/config-ui/ui`. Nightly-only fixtures: `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
 - Linter command: with `CARGO_BUILD_WARNINGS=deny` set (PowerShell: `$env:CARGO_BUILD_WARNINGS="deny"`), `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`. Never run a standalone `cargo check --workspace` beside them; the one extra check is `cargo check -p gateway --no-default-features`. Also `cargo deny check` (pre-push and CI), and the UI typechecks `npm run typecheck --workspaces --if-present` from `crates/workshop` and `npm run typecheck` from `crates/gateway/config-ui/ui`.
 - Formatter check command: `cargo fmt --all --check` (also the pre-commit hook).
-- Docs command: with `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the default-feature facade docs `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`, then `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check`, and `cargo +nightly-2026-09-05 xtask api --bless` to rewrite `crates/promptforge/public-api.txt` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`; that nightly is installed on this machine). User guide: `cargo xtask site --books-only` with `PROMPTFORGE_DOCS` set to `c:\Users\Vinnie\cursor\promptforge-docs`; this plan changes no guide chapter.
+- Docs command: with `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then the default-feature facade docs `cargo doc -p runvil --no-deps` and `cargo doc -p harness --no-deps`, then `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`. Facade surface: `cargo +nightly-2026-09-05 xtask api --check`, and `cargo +nightly-2026-09-05 xtask api --bless` to rewrite `crates/runvil/public-api.txt` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`; that nightly is installed on this machine). User guide: `cargo xtask site --books-only` with `RUNVIL_DOCS` set to `c:\Users\Vinnie\cursor\runvil-docs`; this plan changes no guide chapter.
 - Test placement and naming conventions:
   - Unit tests sit in an inline `#[cfg(test)] mod tests` (about 395 files contain `#[cfg(test)]`), in a sibling `foo-tests.rs` wired as `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;` (about 170 files, such as `crates/harness-internal/plugins/src/tool-tests.rs`), or in a `src/<module>/tests/` directory once a module has three or more test files.
-  - The Engine's execution tests live in `crates/promptforge-internal/engine/src/execute/tests/`, and each file is declared as `mod <name>;` in `execute/tests.rs`, so a new file there needs its `mod` line. Kebab files in that directory, such as `context-tools.rs`, are wired by `#[path]` from their parent module.
-  - Integration tests are one binary per crate: `tests/it/main.rs` (as in `harness-runner`, `harness-plugins`, `gateway`, and `workshop-server`) or `tests/suite/main.rs` (as in `harness` and `promptforge`), with one module per topic plus a `support.rs`. Each `main.rs` opens with a crate-level `#![expect(clippy::expect_used, clippy::unwrap_used, reason = "...")]`. Prompt fixtures sit under `tests/prompts/` (`valid`, `invalid`, `execution`).
+  - The Engine's execution tests live in `crates/runvil-internal/engine/src/execute/tests/`, and each file is declared as `mod <name>;` in `execute/tests.rs`, so a new file there needs its `mod` line. Kebab files in that directory, such as `context-tools.rs`, are wired by `#[path]` from their parent module.
+  - Integration tests are one binary per crate: `tests/it/main.rs` (as in `harness-runner`, `harness-plugins`, `gateway`, and `workshop-server`) or `tests/suite/main.rs` (as in `harness` and `runvil`), with one module per topic plus a `support.rs`. Each `main.rs` opens with a crate-level `#![expect(clippy::expect_used, clippy::unwrap_used, reason = "...")]`. Prompt fixtures sit under `tests/prompts/` (`valid`, `invalid`, `execution`).
   - Test functions are snake_case behavior sentences, such as `activation_receives_the_runs_own_services` and `the_run_path_activates_over_the_store_the_run_reads`.
   - Harness suites drive runs on tokio, declared only in `[dev-dependencies]`.
   - Each `build-xtask` check has a sibling `*-tests.rs` that builds fixture crates.
   - UI tests are `node --test` `.mjs` files in `crates/workshop/ui/test/` and `src/**/*.test.mjs`, and `src/**/*.test.mjs` in the gateway config UI. `crates/workshop/ui/test/docs-claims.mjs` checks the Engine, Harness, and Host vocabulary in every `AGENTS.md`, `## Invariants` crate doc, and `.cursor/rules` file.
 - Directory map:
-  - `crates/`: every crate. The top level holds the public and shared layer: the `promptforge` facade, the `harness` facade, the Host-side crates `harness-web` and `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, `shared-error-source`, the build tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`, `build-ceiling`), and `workspace-hack` (cargo-hakari).
-  - Manifestless containers under `crates/` hold each family's private crates: `promptforge-internal/` (`types`, `engine`, `lua`, `parser`, `vfs`, `model-client`), `harness-internal/` (`runner`, `plugins`), `gateway/` (`app`, `config`, `config-ui`, `local`, `protocol`, `routing`, `logging`, `progress`, `web-search`, `cloud-providers`, and the speech-to-text crates under `stt/`), and `workshop/` (the Rust crates plus the TypeScript packages `ui`, `look`, and `platform`, with one npm install at `crates/workshop`). `crates/shared-ui` is a TypeScript and CSS package, not a Rust crate.
-  - `guide/`: the docs site's `chrome/`, `landing/`, and one `books/<book>/book.toml` each for `gateway`, `language`, and `workshop`. The chapter text lives in the separate `promptforge-docs` checkout.
+  - `crates/`: every crate. The top level holds the public and shared layer: the `runvil` facade, the `harness` facade, the Host-side crates `harness-web` and `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, `shared-error-source`, the build tooling (`build-xtask`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`, `build-ceiling`), and `workspace-hack` (cargo-hakari).
+  - Manifestless containers under `crates/` hold each family's private crates: `runvil-internal/` (`types`, `engine`, `lua`, `parser`, `vfs`, `model-client`), `harness-internal/` (`runner`, `plugins`), `gateway/` (`app`, `config`, `config-ui`, `local`, `protocol`, `routing`, `logging`, `progress`, `web-search`, `cloud-providers`, and the speech-to-text crates under `stt/`), and `workshop/` (the Rust crates plus the TypeScript packages `ui`, `look`, and `platform`, with one npm install at `crates/workshop`). `crates/shared-ui` is a TypeScript and CSS package, not a Rust crate.
+  - `guide/`: the docs site's `chrome/`, `landing/`, and one `books/<book>/book.toml` each for `gateway`, `language`, and `workshop`. The chapter text lives in the separate `runvil-docs` checkout.
   - `prompts/`: example prompt programs. `local/` (gitignored): machine-local gateway config, profiles, prompts, and speech-to-text fixtures.
   - `tools/`: Node scripts for staging the gateway sidecar and for live TTS, each with a `.test.mjs`.
   - `vibe/`: dated plans, with older months under `2026-07/`, `2026-08/`, and `2026-09/`, and a gitignored `scratch/`. `images/`: README art. `cabinet/`: untracked staging.
@@ -277,14 +277,14 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
   - `.cargo/config.toml`: the `xtask` and `workshop` aliases, and rust-lld with a static CRT on Windows. `.config/`: nextest (a `heavy` test group for the speech-to-text crates) and hakari. `.cursor/rules/`: two Workshop rules.
   - Root config: `Cargo.toml`, `clippy.toml`, `deny.toml`, `rustfmt.toml`, `rust-toolchain.toml` (stable), `dist-workspace.toml` (cargo-dist), and `gateway.local.example.toml`. `target/` and `target-msrv/` are build output.
 - Component boundaries:
-  - The Engine: the `promptforge` facade depends on every `promptforge-internal` crate. Inside, `promptforge-engine` depends on `lua`, `parser`, `model-client`, `types`, and `vfs`; `promptforge-lua` on `model-client`, `types`, and `vfs`; `promptforge-parser` on `lua` and `types`; `promptforge-model-client` on `types`. `promptforge-types` and `promptforge-vfs` depend on nothing. The Engine is sans-I/O, and only Engine crates reach the VFS `detail` module, which forks, joins, and ends identities and derives the store view.
-  - The Harness reaches the Engine only through the `promptforge` facade. `harness-plugins` depends on `promptforge`; `harness-runner` on `harness-plugins` and `promptforge`; the `harness` facade on both plus `promptforge`. The `harness` facade and the `harness-internal` crates may not declare tokio outside `[dev-dependencies]` (the `harness_bans` check).
-  - The Host-side crates at the top level depend on the Harness: `harness-web` on `harness` and `promptforge`, and `harness-gateway-client` on those plus `harness-web`. Both use tokio as a normal dependency.
+  - The Engine: the `runvil` facade depends on every `runvil-internal` crate. Inside, `runvil-engine` depends on `lua`, `parser`, `model-client`, `types`, and `vfs`; `runvil-lua` on `model-client`, `types`, and `vfs`; `runvil-parser` on `lua` and `types`; `runvil-model-client` on `types`. `runvil-types` and `runvil-vfs` depend on nothing. The Engine is sans-I/O, and only Engine crates reach the VFS `detail` module, which forks, joins, and ends identities and derives the store view.
+  - The Harness reaches the Engine only through the `runvil` facade. `harness-plugins` depends on `runvil`; `harness-runner` on `harness-plugins` and `runvil`; the `harness` facade on both plus `runvil`. The `harness` facade and the `harness-internal` crates may not declare tokio outside `[dev-dependencies]` (the `harness_bans` check).
+  - The Host-side crates at the top level depend on the Harness: `harness-web` on `harness` and `runvil`, and `harness-gateway-client` on those plus `harness-web`. Both use tokio as a normal dependency.
   - The gateway family: the `gateway` app depends on its private family crates plus `gateway-api-types`, `gateway-api-discovery`, and `shared-loopback`. Family crates reach outside the family only through `gateway-api-types` and `shared-error-source`.
-  - Workshop, a Host: `workshop` (desktop) depends on `workshop-server-api`, which depends on `workshop-server`. `workshop-server` depends on the Harness crates, `promptforge`, `gateway-api-discovery`, `shared-loopback`, and the lower Workshop tiers. `workshop-agents` and `workshop-run-log` depend on `harness`. No Workshop crate depends on a gateway private crate, and the Workshop tiers form a one-way graph.
+  - Workshop, a Host: `workshop` (desktop) depends on `workshop-server-api`, which depends on `workshop-server`. `workshop-server` depends on the Harness crates, `runvil`, `gateway-api-discovery`, `shared-loopback`, and the lower Workshop tiers. `workshop-agents` and `workshop-run-log` depend on `harness`. No Workshop crate depends on a gateway private crate, and the Workshop tiers form a one-way graph.
   - The build crates, `gateway-api-types`, and the `shared-*` crates depend on no workspace crate.
-  - For this plan: the `Tool` trait and `RunServices` live in `crates/harness-internal/plugins/src/tool.rs` and `plugin.rs`; `ToolPerformer` and `ActivatedTools` in `crates/harness-internal/runner/src/performers.rs` and `performers-tools.rs`; `Effect` in `crates/promptforge-internal/engine/src/execute/run/effect.rs`; the fork and join sites in `crates/promptforge-internal/engine/src/execute/scheduler/`.
-  - `cargo test -p build-xtask` enforces the product and container boundaries, the Workshop tier graph, the Engine manifest guard, the retired-symbol scan, the `test-support` leak guard, both facades' source shape, the `doc(hidden)` ban, the doctest ban, the unsafe allowlist, lint inheritance, the `## Invariants` marker, and the wiring of the 500-line file ceiling. `cargo xtask api --check` keeps the `promptforge` facade surface closed against `crates/promptforge/public-api.txt`.
+  - For this plan: the `Tool` trait and `RunServices` live in `crates/harness-internal/plugins/src/tool.rs` and `plugin.rs`; `ToolPerformer` and `ActivatedTools` in `crates/harness-internal/runner/src/performers.rs` and `performers-tools.rs`; `Effect` in `crates/runvil-internal/engine/src/execute/run/effect.rs`; the fork and join sites in `crates/runvil-internal/engine/src/execute/scheduler/`.
+  - `cargo test -p build-xtask` enforces the product and container boundaries, the Workshop tier graph, the Engine manifest guard, the retired-symbol scan, the `test-support` leak guard, both facades' source shape, the `doc(hidden)` ban, the doctest ban, the unsafe allowlist, lint inheritance, the `## Invariants` marker, and the wiring of the 500-line file ceiling. `cargo xtask api --check` keeps the `runvil` facade surface closed against `crates/runvil/public-api.txt`.
 - Conventions summary:
   - Rust 2024 on stable. Dependencies are centralized in `[workspace.dependencies]`, with a comment justifying each pin, and every crate inherits `workspace-hack` and the workspace lint table.
   - Lints: clippy `all` and `pedantic` deny, `unwrap_used`, `expect_used`, and `allow_attributes` deny (suppressions use `#[expect(..., reason = "...")]`), `unsafe_code` deny outside the unsafe allowlist, `missing_docs` and `unreachable_pub` warn (failures under the `CARGO_BUILD_WARNINGS=deny` gate), and rustdoc broken and private intra-doc links deny.
@@ -306,14 +306,14 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 ### Step 1: Fork and join a per-call identity in the Engine [completed]
 
 - Component: Engine per-call tool identity
-- Placement: first. The Harness tool context in Step 2 reads the new `Effect::ToolCall::access` field, so the Engine must issue it first. This component touches only Engine crates and the `promptforge` facade listing, and it ships on its own: the Harness's effect loop matches `Effect::ToolCall { tool, alias, args, .. }` and every other driver matches `Effect::ToolCall { .. }`, so they compile unchanged and ignore the access until Step 2.
+- Placement: first. The Harness tool context in Step 2 reads the new `Effect::ToolCall::access` field, so the Engine must issue it first. This component touches only Engine crates and the `runvil` facade listing, and it ships on its own: the Harness's effect loop matches `Effect::ToolCall { tool, alias, args, .. }` and every other driver matches `Effect::ToolCall { .. }`, so they compile unchanged and ignore the access until Step 2.
 - Construction: one piece built as one step. The field, the fork, and the join are one behavior the four Engine tests cover together. A field with no fork, or a fork with no join, has no test that passes on its own.
-- Effect (`crates/promptforge-internal/engine/src/execute/run/effect.rs`):
+- Effect (`crates/runvil-internal/engine/src/execute/run/effect.rs`):
   - Add `access: Arc<Access>` to `Effect::ToolCall`. Its doc states four things: the access is the call's own identity, forked from the calling chain when the call is issued; it is joined when the answer is applied; it is rooted at `/`; and the caller must not use it after answering.
   - `Effect::record` (its `Effect::ToolCall` arm near line 180) ignores the new field, so `EffectRecord::ToolCall` and run records stay unchanged.
   - In the module doc (lines 13-17), "the store access capability" becomes "a filesystem access". Rewrite the `Vfs` variant's sentence "A tool or the application reading files reaches the VFS by its own route" (lines 121-123), because a tool now uses its `ToolCall` access.
-- VFS doc: the `vfs::detail` module doc (`crates/promptforge-internal/vfs/src/detail.rs` lines 1-9) adds tool calls to the things the Engine forks and joins.
-- Fork, in `prepare_tool_call` (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`), after `counts.increment(binding.alias())` and before `Effect::ToolCall` is built:
+- VFS doc: the `vfs::detail` module doc (`crates/runvil-internal/vfs/src/detail.rs` lines 1-9) adds tool calls to the things the Engine forks and joins.
+- Fork, in `prepare_tool_call` (`crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`), after `counts.increment(binding.alias())` and before `Effect::ToolCall` is built:
   - Fork the call's identity from the chain's `access()` with `access_spawn`. Label it with `prompt_origin`, using the tool's id as the label and the calling section's blocks as the position, the way a task's spawn in `scheduler/tasks.rs` (lines 206-218) labels its identity.
   - Map a failed fork to `Error::store`, so the call fails at its caller like any other preparation failure and a script's `pcall` can catch it. The counts already taken stay taken.
   - Record the fork's `access_id` before the access moves into the effect.
@@ -321,20 +321,20 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
 - Join, in `apply_answer` (`scheduler/apply.rs`): right after `self.pending.remove(&id)` succeeds and before the answer is matched, when the resume is `Continuation::ToolCall`, join its `exec` into the parked chain's access with `access_join`. This covers every `ToolCall` answer, `Dropped` included. Skip the join when the chain no longer has an access, as `join_task` (`scheduler/task_end.rs` lines 111-123) does. `apply_answer`'s doc says so.
 - Leave unchanged:
   - The orphan path in `abort_effect` (`scheduler/chain.rs` lines 280-288). An aborted chain's in-flight `ToolCall` is orphaned and its answer discarded, so the call is never joined. Its late file work stays unordered with the owner, as an orphaned store effect's does today.
-  - The Engine's `TestTool` helper (`crates/promptforge-internal/engine/src/test_support/tools.rs` line 46) and every driver that matches `Effect::ToolCall { .. }`.
+  - The Engine's `TestTool` helper (`crates/runvil-internal/engine/src/test_support/tools.rs` line 46) and every driver that matches `Effect::ToolCall { .. }`.
 - Tests:
-  - The record test in `crates/promptforge-internal/engine/src/execute/run/tests.rs` (lines 122-141) builds the `ToolCall` effect with an access acquired from `VfsRef::default()`, the way the `Vfs` test below it does, and asserts that the record leaves the access out.
-  - A new file `crates/promptforge-internal/engine/src/execute/tests/tool_call_access.rs`, declared as `mod tool_call_access;` in `execute/tests.rs`. It binds one test tool. Its driver answers `ToolCall` by using the effect's access, and answers store effects with `run_store_op` as `perform_locally` in `serial_driver.rs` does. A conflict ends the run, so "no conflict" means the run succeeds. Its four tests:
+  - The record test in `crates/runvil-internal/engine/src/execute/run/tests.rs` (lines 122-141) builds the `ToolCall` effect with an access acquired from `VfsRef::default()`, the way the `Vfs` test below it does, and asserts that the record leaves the access out.
+  - A new file `crates/runvil-internal/engine/src/execute/tests/tool_call_access.rs`, declared as `mod tool_call_access;` in `execute/tests.rs`. It binds one test tool. Its driver answers `ToolCall` by using the effect's access, and answers store effects with `run_store_op` as `perform_locally` in `serial_driver.rs` does. A conflict ends the run, so "no conflict" means the run succeeds. Its four tests:
     - A tool reads a file the chain's Lua wrote just before the call, with no conflict. This checks the fork.
     - The chain's Lua reads a file the tool wrote, with no conflict. This checks the join.
     - A tool called inside a spawned task forks from the task's identity, and the owner reads the tool's write after awaiting the task, with no conflict.
     - A tool that writes and is then answered `Dropped` is still joined: the chain catches the cancellation with `pcall` and reads the file with no conflict.
-- Facade listing: rewrite `crates/promptforge/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`). The only change is `Effect::ToolCall::access`, next to that variant's existing fields (lines 797-801).
+- Facade listing: rewrite `crates/runvil/public-api.txt` with `cargo +nightly-2026-09-05 xtask api --bless` (the pin lives in `crates/build-xtask/src/api/toolchain.rs`). The only change is `Effect::ToolCall::access`, next to that variant's existing fields (lines 797-801).
 - Verification, all passing:
-  - `cargo nextest run --locked -p promptforge-engine -p promptforge-vfs -p promptforge -p harness-runner -p harness-gateway-client --all-features`
-  - `cargo clippy -p promptforge-engine -p promptforge-vfs -p promptforge --all-targets --all-features` with `CARGO_BUILD_WARNINGS=deny`
+  - `cargo nextest run --locked -p runvil-engine -p runvil-vfs -p runvil -p harness-runner -p harness-gateway-client --all-features`
+  - `cargo clippy -p runvil-engine -p runvil-vfs -p runvil --all-targets --all-features` with `CARGO_BUILD_WARNINGS=deny`
   - `cargo fmt --all --check`
-  - With `RUSTDOCFLAGS="-D warnings"`: `cargo doc -p promptforge --no-deps` and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`
+  - With `RUSTDOCFLAGS="-D warnings"`: `cargo doc -p runvil --no-deps` and `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`
   - `cargo +nightly-2026-09-05 xtask api --check`
 - Commit: one commit holding the Engine change, the doc updates, the facade listing, and the tests.
 
@@ -352,7 +352,7 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
   - `Tool::call` becomes `async fn call(&self, cx: ToolContext<'_>, args: serde_json::Value) -> Result<ToolOutput, ToolError>`, still under `#[async_trait::async_trait]`. Its doc describes `cx`: the access is the calling chain's, rooted at `/`, and the borrow ends when `call` returns or its future is dropped.
   - Delete the "Compatibility policy" paragraph (lines 28-33). Reword the "must not block while polled" invariant (lines 49-52): operations through `cx.access()` run inside the call and, on real directories, block the poll briefly as `store.*` does; other blocking or CPU-heavy work still goes to the Host's runtime, without the access.
   - Export `ToolContext` from `crates/harness-internal/plugins/src/lib.rs`, beside `Tool`.
-- Facade (`crates/harness/src/lib.rs`): the `plugin` module re-exports `ToolContext`, `promptforge::effect::ToolCallOrigin`, and `promptforge::effect::ToolCaller`. The `vfs` module re-exports `promptforge::vfs::Access`, and its module doc mentions the access a tool call receives.
+- Facade (`crates/harness/src/lib.rs`): the `plugin` module re-exports `ToolContext`, `runvil::effect::ToolCallOrigin`, and `runvil::effect::ToolCaller`. The `vfs` module re-exports `runvil::vfs::Access`, and its module doc mentions the access a tool call receives.
 - Runner:
   - `ToolPerformer::call` (`crates/harness-internal/runner/src/performers.rs` lines 80-92) becomes `(tool, alias, access: Arc<Access>, origin: ToolCallOrigin, args)`, and its doc says the future owns both until it finishes.
   - `ActivatedTools` (`performers-tools.rs`): its boxed future owns the access and the origin, passes `ToolContext::new(&access, &origin)` to `implementation.call`, and drops both when it finishes or is dropped.
@@ -374,7 +374,7 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
   - `cargo clippy -p harness-plugins -p harness-runner -p harness -p harness-web -p harness-gateway-client --all-targets --all-features` with `CARGO_BUILD_WARNINGS=deny`
   - `cargo fmt --all --check`
   - `cargo doc -p harness --no-deps` with `RUSTDOCFLAGS="-D warnings"`
-  - `cargo +nightly-2026-09-05 xtask api --check`, unchanged from Step 1, because the listing covers only the `promptforge` facade.
+  - `cargo +nightly-2026-09-05 xtask api --check`, unchanged from Step 1, because the listing covers only the `runvil` facade.
 - Commit: one commit holding the trait, the runner, the facade re-exports, every updated implementation and caller, and the new test.
 
 </step-2>
@@ -402,7 +402,7 @@ New tests cover the Engine's fork and join, and the whole path through the Harne
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - With `CARGO_BUILD_WARNINGS=deny`: `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features` and `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`
   - `cargo fmt --all --check`
-  - With `RUSTDOCFLAGS="-D warnings"`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p promptforge --no-deps`, and `cargo doc -p harness --no-deps`
+  - With `RUSTDOCFLAGS="-D warnings"`: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p runvil --no-deps`, and `cargo doc -p harness --no-deps`
   - `cargo +nightly-2026-09-05 xtask api --check`, with only `Effect::ToolCall::access` added since the start of the plan
   - `cargo test -p build-xtask`
 - Commit: one commit holding the `RunServices` change, the reworded docs, and the updated fixture and tests.

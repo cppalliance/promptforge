@@ -14,7 +14,7 @@ use gateway_api_discovery::{
     lock_file_path, resolve, wait_for_health,
 };
 
-const LEASE_CHILD_RUN_DIR: &str = "PROMPTFORGE_LEASE_CHILD_RUN_DIR";
+const LEASE_CHILD_RUN_DIR: &str = "RUNVIL_LEASE_CHILD_RUN_DIR";
 
 struct BoundedChild(std::process::Child);
 

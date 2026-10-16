@@ -321,7 +321,7 @@ fn serve_thread(
     result
 }
 
-/// The sheet download URL: the `PROMPTFORGE_MODELS_SHEET_URL` override
+/// The sheet download URL: the `RUNVIL_MODELS_SHEET_URL` override
 /// when set and non-empty, else the published release artifact.
 fn cloud_models_sheet_url() -> String {
     std::env::var(crate::boot::SHEET_URL_ENV)

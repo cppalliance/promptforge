@@ -1,0 +1,254 @@
+//! The serial sans-IO driver over `Run`, and the properties it makes
+//! testable without a runtime or a gateway: a literal prompt that issues no
+//! effect, a three-arm fanout whose answers arrive in reverse order,
+//! determinism (two runs under the same context and answers produce
+//! identical effects, events, provenances, and `sys.id`s), the
+//! batching-pairing property (answers delivered one per step, all at once,
+//! and shuffled within a batch produce identical per-task effects and
+//! events), and a model task whose owner ends first reporting `abandoned`
+//! in both its event and its notice.
+
+use runvil_types::event::Event;
+use runvil_types::ids::{AbandonReason, TaskId};
+
+use super::context::{parse, test_context};
+use super::model_tasks::model_task_scenario;
+use super::scheduler::scheduler_scenario;
+use super::*;
+use crate::execute::run::{Effect, Run, Step};
+use crate::test_support::scenario::{
+    Batching, EXECUTION, chat_answer, drive_batched, echo_chat, infer_prompt, text_of,
+};
+use crate::test_support::{drive, perform_locally};
+
+/// A run over `md` with the `writer` model pre-bound, as the scheduler
+/// suites build one.
+fn model_run(md: &str) -> Run {
+    scheduler_scenario(md).into_run()
+}
+
+/// The three-arm fanout every property here runs: the parent names its
+/// own `sys.id` and each arm's result, each arm names its own `sys.id`
+/// and its one model round.
+const FANOUT: &str = "---\nname: t\ndescription: d\nrunvil: 0\n---\n\n\
+    # Fanout\n\n\
+    ## Parent\n\n\
+    ```lua\n\
+    store.write('seed.txt', 'planted')\n\
+    local r = tasks.fanout('### Worker', {'a', 'b', 'c'})\n\
+    return sys.id .. '|' .. r[1].text .. '|' .. r[2].text .. '|' .. r[3].text\n\
+    ```\n\n\
+    ### Worker\n\n\
+    ```lua\n\
+    return sys.id .. '=' .. models.infer(item)\n\
+    ```\n";
+
+/// The task ids of every `TaskSucceeded` in `events`, in order.
+fn succeeded(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::TaskSucceeded { task, .. } => Some(task.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_driver_runs_a_literal_prompt_with_no_effect() {
+    // A literal return issues nothing, so the performer never runs, and the
+    // events open and close with the run's boundaries.
+    let md = "---\nname: t\ndescription: d\nrunvil: 0\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'hello'\n```\n";
+    let run = Run::new(Arc::new(parse(md)), "", test_context(EXECUTION));
+    let (result, events) = drive(run, |_, effect| panic!("no effect is issued: {effect:?}"));
+    assert_eq!(text_of(result), "hello");
+    assert!(
+        matches!(events.first(), Some(Event::RunStarted { .. })),
+        "the events open with the run's start: {events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(Event::RunSucceeded { .. })),
+        "the events close with the run's success: {events:?}"
+    );
+}
+
+#[test]
+fn the_driver_performs_store_and_model_effects_and_keeps_the_events_in_order() {
+    let md = "---\nname: t\ndescription: d\nrunvil: 0\n---\n\n\
+        # Title\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        store.write('notes.md', 'kept')\n\
+        return store.read('notes.md') .. '/' .. models.infer('ask')\n\
+        ```\n";
+    let (result, events) = drive(model_run(md), |_, effect| {
+        perform_locally(effect, &mut echo_chat)
+    });
+    assert_eq!(text_of(result), "kept/r(ask)");
+    let order: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::VfsWriteSucceeded { .. } => Some("write"),
+            Event::VfsReadSucceeded { .. } => Some("read"),
+            Event::ModelTurnCompleted { .. } => Some("turn"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["write", "read", "turn"]);
+}
+
+#[test]
+fn a_three_arm_fanout_fed_its_answers_in_reverse_order_packs_results_in_collection_order() {
+    // One step issues all three arms' rounds; the answers land c, b, a.
+    // The arms finish in that order (their terminals say so), yet the
+    // parent's results follow the collection, and every id is the
+    // hierarchical one the arms would have under any order.
+    let mut run = model_run(FANOUT);
+    let mut effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the fanout parks on its arms' rounds: {other:?}"),
+    };
+    assert!(
+        matches!(&effects[0].2, Effect::Vfs { .. }),
+        "the parent's store write is issued first: {effects:?}"
+    );
+    let (id, _, store) = effects.remove(0);
+    run.resume(id, perform_locally(&store, &mut echo_chat));
+    let effects = match run.step() {
+        Step::Pending { effects, .. } => effects,
+        other @ Step::Done { .. } => panic!("the fanout parks on its arms' rounds: {other:?}"),
+    };
+    let prompts: Vec<String> = effects
+        .iter()
+        .map(|(_, _, effect)| infer_prompt(effect))
+        .collect();
+    assert_eq!(prompts, ["a", "b", "c"], "all three arms issue in one step");
+    for (id, _, effect) in effects.into_iter().rev() {
+        run.resume(id, echo_chat(&effect));
+    }
+    let (result, events) = match run.step() {
+        Step::Done { result, events } => (result, events),
+        other @ Step::Pending { .. } => {
+            panic!("every arm is answered, so the fanout completes: {other:?}")
+        }
+    };
+    assert_eq!(text_of(result), "0.1|0.0.0=r(a)|0.1.0=r(b)|0.2.0=r(c)");
+    assert_eq!(
+        succeeded(&events),
+        ["0.2", "0.1", "0.0"],
+        "the arms end in answer order, not collection order"
+    );
+}
+
+#[test]
+fn two_runs_under_the_same_context_and_answers_are_identical() {
+    // The determinism property: the same prompt, context, and answers
+    // produce the same text (the `sys.id`s in it), the same events in the
+    // same order with the same provenances, and the same effects.
+    let first = drive_batched(model_run(FANOUT), Batching::AllAtOnce);
+    let second = drive_batched(model_run(FANOUT), Batching::AllAtOnce);
+    assert_eq!(first.text(), "0.1|0.0.0=r(a)|0.1.0=r(b)|0.2.0=r(c)");
+    assert_eq!(first.text(), second.text());
+    assert_eq!(
+        first.events, second.events,
+        "identical events and provenances"
+    );
+    assert_eq!(first.effects, second.effects, "identical effects");
+    assert!(
+        first.effects.len() >= 4,
+        "the store write and three rounds are effects: {:?}",
+        first.effects
+    );
+}
+
+#[test]
+fn answers_one_per_step_all_at_once_and_reversed_produce_the_same_per_task_record() {
+    // The batching-pairing property: however the caller paces and orders
+    // its answers, each task's effects and events - and the text with its
+    // `sys.id`s - are the same. Only the interleaving across tasks may
+    // differ, so the comparison is per task.
+    let one = drive_batched(model_run(FANOUT), Batching::OnePerStep);
+    let all = drive_batched(model_run(FANOUT), Batching::AllAtOnce);
+    let reversed = drive_batched(model_run(FANOUT), Batching::Reversed);
+    for (batching, other) in [(Batching::AllAtOnce, &all), (Batching::Reversed, &reversed)] {
+        assert_eq!(one.text(), other.text(), "under {batching:?}");
+        assert_eq!(
+            one.events_by_task(),
+            other.events_by_task(),
+            "under {batching:?}"
+        );
+        assert_eq!(
+            one.effects_by_provenance(),
+            other.effects_by_provenance(),
+            "under {batching:?}"
+        );
+    }
+    assert_ne!(
+        succeeded(&all.events),
+        succeeded(&reversed.events),
+        "the strategies differ in arrival order, so the property is not vacuous"
+    );
+    assert_eq!(one.events_by_task().len(), 4, "the parent and three arms");
+}
+
+#[test]
+fn a_model_task_whose_owner_ends_first_reports_abandoned_in_its_event_and_its_notice() {
+    // Round 1 starts the task; round 2 ends the loop and the section
+    // returns while the child is still live. The child's terminal is
+    // `TaskAbandoned` (not cancelled: it lost its owner rather than being
+    // stopped on purpose), and the notice queued for the model says so.
+    let md = "---\nname: mt\ndescription: d\nrunvil: 0\n---\n\n\
+        # ModelTasks\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        tools.allow_tasks({ '## Child' })\n\
+        local msgs = messages.new()\n\
+        msgs:user('go')\n\
+        models.loop(msgs)\n\
+        return 'owner done'\n\
+        ```\n\n\
+        ## Child\n\n\
+        ```lua\n\
+        return models.infer('child work')\n\
+        ```\n";
+    let mut rounds = 0;
+    let (result, events) = drive(model_task_scenario(md).into_run(), |_, effect| {
+        perform_locally(effect, &mut |effect| {
+            if infer_prompt(effect) == "child work" {
+                return chat_answer(&text("child result"));
+            }
+            rounds += 1;
+            match rounds {
+                1 => chat_answer(&calls(&[("call_1", "task", "{\"target\":\"## Child\"}")])),
+                _ => chat_answer(&text("bye")),
+            }
+        })
+    });
+    assert_eq!(text_of(result), "owner done");
+    let child: TaskId = "0.0".parse().expect("a task id parses");
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            Event::TaskAbandoned { task, reason: AbandonReason::OwnerReturned, .. } if *task == child
+        )),
+        "the child's terminal is abandoned with the owner's return as the reason: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            Event::TaskCancelled { task, .. } | Event::TaskSucceeded { task, .. } if *task == child
+        )),
+        "abandoned is the child's only terminal: {events:?}"
+    );
+    let notice = events
+        .iter()
+        .find_map(|event| match event {
+            Event::TaskNotice { task, text, .. } if *task == child => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the abandonment queues a notice for the model");
+    assert!(
+        notice.starts_with("Task id=0.0 (## Child) was abandoned: "),
+        "the notice names the task and says abandoned: {notice}"
+    );
+}

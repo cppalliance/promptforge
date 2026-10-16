@@ -20,10 +20,10 @@ use harness_runner::effect_loop::drive_run;
 use harness_runner::prepare::{PrepareError, Prepared, Services, prepare};
 use harness_runner::recorder::{MemoryRecorder, RecordKind, RunId, RunOutcome};
 use harness_runner::{HostContext, display_chain};
-use promptforge::RunErrorKind;
-use promptforge::cancel::CancelHandle;
-use promptforge::event::Event;
-use promptforge_plugin::{
+use runvil::RunErrorKind;
+use runvil::cancel::CancelHandle;
+use runvil::event::Event;
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ToolContext, ToolDescriptor, ToolError,
     ToolErrorKind, ToolId, ToolOutput,
 };
@@ -44,18 +44,18 @@ mod ready;
 
 /// A prompt declaring `web` as a required Plugin that no
 /// Host here installs.
-const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\npromptforge: 0\n\
+const NEEDS_WEB: &str = "---\nname: needs-web\ndescription: d\nrunvil: 0\n\
     plugins:\n  - web\n---\n\n# Title\n\n## Only\n\nDone.\n";
 
 /// A prompt with unclosed frontmatter, so it does not parse.
-const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\npromptforge: 0\n\n# Title\n";
+const UNCLOSED: &str = "---\nname: unclosed\ndescription: d\nrunvil: 0\n\n# Title\n";
 
 /// A Plugin-free prompt whose one section returns a constant.
-const PLAIN: &str = "---\nname: plain\ndescription: d\npromptforge: 0\n---\n\n\
+const PLAIN: &str = "---\nname: plain\ndescription: d\nrunvil: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn 'plain'\n```\n";
 
 /// A prompt declaring the fixture Plugin and calling its tool once by id.
-const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\npromptforge: 0\n\
+const CALLS_ECHO: &str = "---\nname: calls-echo\ndescription: d\nrunvil: 0\n\
     plugins:\n  - tools\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn tools.call('tools/echo', { value = 'hi' })\n```\n";
 
@@ -104,7 +104,7 @@ pub(crate) fn services(recorder: &Arc<MemoryRecorder>, host: HostContext) -> Ser
     Services {
         host: Arc::new(host),
         services: HostServices::new(),
-        vfs: promptforge::vfs::VfsRef::default(),
+        vfs: runvil::vfs::VfsRef::default(),
         input_text: None,
         cancel: CancelHandle::new(),
         recorder: recorder.clone(),
@@ -360,7 +360,7 @@ async fn the_tool_performer_sends_the_effect_to_the_plugin_its_id_names() {
 
 #[tokio::test]
 async fn a_script_reaches_an_undeclared_plugins_tool_by_full_id_without_its_prelude() {
-    let undeclared = "---\nname: undeclared\ndescription: d\npromptforge: 0\n---\n\n\
+    let undeclared = "---\nname: undeclared\ndescription: d\nrunvil: 0\n---\n\n\
         # Title\n\n## Only\n\n```lua\n\
         return tools.call('extra/echo', { value = 'hi' }) .. '|' .. type(extra)\n```\n";
     let extra = echo_package("tests/extra", Some("extra = {}\n"));
@@ -373,7 +373,7 @@ async fn a_script_reaches_an_undeclared_plugins_tool_by_full_id_without_its_prel
 
 #[tokio::test]
 async fn the_lists_split_the_offering_by_declared_plugin_and_a_script_calls_a_tool_object() {
-    let offering = "---\nname: offering\ndescription: d\npromptforge: 0\n\
+    let offering = "---\nname: offering\ndescription: d\nrunvil: 0\n\
         plugins:\n  - tools\n---\n\n# Title\n\n## Only\n\n```lua\n\
         local required, extras = tools.required(), tools.extras()\n\
         local extra = extras[1]\n\

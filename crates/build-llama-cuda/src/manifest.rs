@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn sha256_hex_is_64_lowercase_hex_chars() {
-        let hex = sha256_hex(b"promptforge");
+        let hex = sha256_hex(b"runvil");
         assert_eq!(hex.len(), 64);
         assert!(
             hex.chars()

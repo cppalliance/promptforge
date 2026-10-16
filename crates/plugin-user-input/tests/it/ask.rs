@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use plugin_user_input::{ASK, INPUT_BROKER, InputBroker, PACKAGE};
-use promptforge_plugin::testing::TestCall;
-use promptforge_plugin::{
+use runvil_plugin::testing::TestCall;
+use runvil_plugin::{
     HostServices, OutputTrust, Plugin, PluginId, ToolError, ToolErrorKind, ToolId,
 };
 use serde_json::{Value, json};
@@ -74,17 +74,17 @@ fn with_broker(broker: impl InputBroker + 'static) -> HostServices {
 
 /// Asks once through the Plugin installed as `user-input`, with `services`
 /// as the run's services.
-fn ask(services: HostServices) -> Result<promptforge_plugin::ToolOutput, ToolError> {
+fn ask(services: HostServices) -> Result<runvil_plugin::ToolOutput, ToolError> {
     let plugin = installed("user-input");
     let call = TestCall::new(plugin.tools()[0].id.clone()).with_services(services);
     block_on(plugin.call(call.context(), json!({})))
 }
 
 #[test]
-fn the_package_is_promptforge_user_input_and_needs_the_input_broker() {
-    assert_eq!(PACKAGE.name, "promptforge/user-input");
+fn the_package_is_runvil_user_input_and_needs_the_input_broker() {
+    assert_eq!(PACKAGE.name, "runvil/user-input");
     assert_eq!(PACKAGE.needs, [INPUT_BROKER.id()]);
-    assert_eq!(PACKAGE.needs[0].to_string(), "promptforge/input-broker");
+    assert_eq!(PACKAGE.needs[0].to_string(), "runvil/input-broker");
     assert_eq!(ASK, "ask");
 }
 

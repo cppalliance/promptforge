@@ -293,10 +293,10 @@ async fn post_notification(bus: &zbus::Connection, settings_url: &str) -> Result
         Some(logic::linux::NOTIFICATIONS_NAME),
         "Notify",
         &(
-            "PromptForge Gateway",
+            "Runvil Gateway",
             0u32,
             "",
-            "PromptForge Gateway",
+            "Runvil Gateway",
             logic::linux::notification_body(settings_url),
             Vec::<String>::new(),
             hints,

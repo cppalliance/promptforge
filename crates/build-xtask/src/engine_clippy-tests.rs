@@ -20,9 +20,9 @@ fn clean_root() -> tempfile::TempDir {
     let root = tempfile::TempDir::new().expect("tempdir");
     test_support::write_engine_clippy_tomls(root.path());
     for (dir, package) in [
-        ("promptforge", "promptforge"),
-        ("promptforge-plugin", "promptforge-plugin"),
-        ("promptforge-internal/engine", "promptforge-engine"),
+        ("runvil", "runvil"),
+        ("runvil-plugin", "runvil-plugin"),
+        ("runvil-internal/engine", "runvil-engine"),
     ] {
         test_support::write_crate(root.path(), dir, package, "");
         write(
@@ -57,51 +57,41 @@ fn assert_findings(root: &Path, found: &[String], expected: &[(&str, &[&str])]) 
 #[test]
 fn an_engine_crate_resolving_to_another_clippy_toml_is_reported() {
     let root = clean_root();
-    test_support::write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        "",
-    );
+    test_support::write_crate(root.path(), "runvil-internal/lua", "runvil-lua", "");
     write(
         root.path(),
-        "crates/promptforge-internal/lua/clippy.toml",
+        "crates/runvil-internal/lua/clippy.toml",
         &test_support::engine_clippy_toml(None),
     );
     // Clippy reads `.clippy.toml` before `clippy.toml` in one directory.
-    test_support::write_crate(
-        root.path(),
-        "promptforge-internal/vfs",
-        "promptforge-vfs",
-        "",
-    );
+    test_support::write_crate(root.path(), "runvil-internal/vfs", "runvil-vfs", "");
     write(
         root.path(),
-        "crates/promptforge-internal/vfs/.clippy.toml",
+        "crates/runvil-internal/vfs/.clippy.toml",
         &test_support::engine_clippy_toml(None),
     );
     write(
         root.path(),
-        "crates/promptforge-internal/vfs/clippy.toml",
+        "crates/runvil-internal/vfs/clippy.toml",
         &test_support::engine_clippy_toml(None),
     );
     let found = engine_clippy_violations(root.path());
-    let lua_toml = at(root.path(), "crates/promptforge-internal/lua/clippy.toml");
-    let vfs_toml = at(root.path(), "crates/promptforge-internal/vfs/.clippy.toml");
+    let lua_toml = at(root.path(), "crates/runvil-internal/lua/clippy.toml");
+    let vfs_toml = at(root.path(), "crates/runvil-internal/vfs/.clippy.toml");
     assert_findings(
         root.path(),
         &found,
         &[
             (
-                "crates/promptforge-internal/lua/Cargo.toml",
+                "crates/runvil-internal/lua/Cargo.toml",
                 &[
                     "required: the nearest clippy.toml is one of",
-                    "crates/promptforge-internal/clippy.toml",
+                    "crates/runvil-internal/clippy.toml",
                     &format!("found: {}", lua_toml.display()),
                 ],
             ),
             (
-                "crates/promptforge-internal/vfs/Cargo.toml",
+                "crates/runvil-internal/vfs/Cargo.toml",
                 &[&format!("found: {}", vfs_toml.display())],
             ),
         ],
@@ -109,12 +99,12 @@ fn an_engine_crate_resolving_to_another_clippy_toml_is_reported() {
 
     let bare = clean_root();
     std::fs::remove_file(at(bare.path(), "clippy.toml")).expect("the root clippy.toml removes");
-    std::fs::remove_file(at(bare.path(), "crates/promptforge-plugin/clippy.toml"))
+    std::fs::remove_file(at(bare.path(), "crates/runvil-plugin/clippy.toml"))
         .expect("the plugin clippy.toml removes");
     let found = engine_clippy_violations(bare.path());
     assert!(
         found.iter().any(|f| f.starts_with(
-            &at(bare.path(), "crates/promptforge-plugin/Cargo.toml")
+            &at(bare.path(), "crates/runvil-plugin/Cargo.toml")
                 .display()
                 .to_string()
         ) && f.contains("found: no clippy.toml")),
@@ -127,17 +117,17 @@ fn a_clippy_toml_missing_a_root_entry_is_reported() {
     let root = clean_root();
     write(
         root.path(),
-        "crates/promptforge-internal/clippy.toml",
+        "crates/runvil-internal/clippy.toml",
         &test_support::engine_clippy_toml(Some("std::panic::set_hook")),
     );
     write(
         root.path(),
-        "crates/promptforge-plugin/clippy.toml",
+        "crates/runvil-plugin/clippy.toml",
         &test_support::engine_clippy_toml(Some("allow-unwrap-in-tests")),
     );
     write(
         root.path(),
-        "crates/promptforge/clippy.toml",
+        "crates/runvil/clippy.toml",
         &test_support::engine_clippy_toml(None)
             .replace(
                 "allow-unwrap-in-tests = true",
@@ -151,7 +141,7 @@ fn a_clippy_toml_missing_a_root_entry_is_reported() {
         &found,
         &[
             (
-                "crates/promptforge-internal/clippy.toml",
+                "crates/runvil-internal/clippy.toml",
                 &[
                     "required: the root clippy.toml's disallowed-methods entry",
                     "std::panic::set_hook",
@@ -159,18 +149,18 @@ fn a_clippy_toml_missing_a_root_entry_is_reported() {
                 ],
             ),
             (
-                "crates/promptforge/clippy.toml",
+                "crates/runvil/clippy.toml",
                 &[
                     "required: the root clippy.toml's setting `allow-unwrap-in-tests = true`",
                     "found: `allow-unwrap-in-tests = false`",
                 ],
             ),
             (
-                "crates/promptforge/clippy.toml",
+                "crates/runvil/clippy.toml",
                 &["std::panic::set_hook", "found:", "return an error"],
             ),
             (
-                "crates/promptforge-plugin/clippy.toml",
+                "crates/runvil-plugin/clippy.toml",
                 &[
                     "required: the root clippy.toml's setting `allow-unwrap-in-tests = true`",
                     "found: no `allow-unwrap-in-tests`",
@@ -195,12 +185,12 @@ fn a_clippy_toml_missing_a_determinism_ban_is_reported() {
     let root = clean_root();
     write(
         root.path(),
-        "crates/promptforge/clippy.toml",
+        "crates/runvil/clippy.toml",
         &test_support::engine_clippy_toml(Some("\"std::thread::park_timeout\"")),
     );
     write(
         root.path(),
-        "crates/promptforge-plugin/clippy.toml",
+        "crates/runvil-plugin/clippy.toml",
         &test_support::engine_clippy_toml(None).replace(
             "{ path = \"std::thread::sleep\", reason = \"use the deterministic form instead\" }",
             "\"std::thread::sleep\"",
@@ -212,27 +202,24 @@ fn a_clippy_toml_missing_a_determinism_ban_is_reported() {
         &found,
         &[
             (
-                "crates/promptforge/clippy.toml",
+                "crates/runvil/clippy.toml",
                 &[
                     "required: the determinism ban `std::thread::park_timeout` with a reason",
                     "found: no entry",
                 ],
             ),
             (
-                "crates/promptforge-plugin/clippy.toml",
+                "crates/runvil-plugin/clippy.toml",
                 &["`std::thread::sleep`", "found: an entry with no reason"],
             ),
         ],
     );
 
     let missing = clean_root();
-    std::fs::remove_file(at(
-        missing.path(),
-        "crates/promptforge-internal/clippy.toml",
-    ))
-    .expect("the internal clippy.toml removes");
+    std::fs::remove_file(at(missing.path(), "crates/runvil-internal/clippy.toml"))
+        .expect("the internal clippy.toml removes");
     let found = engine_clippy_violations(missing.path());
-    let internal = at(missing.path(), "crates/promptforge-internal/clippy.toml");
+    let internal = at(missing.path(), "crates/runvil-internal/clippy.toml");
     assert!(
         found
             .iter()
@@ -244,7 +231,7 @@ fn a_clippy_toml_missing_a_determinism_ban_is_reported() {
 #[test]
 fn an_engine_source_suppressing_disallowed_methods_is_reported() {
     let root = clean_root();
-    let engine = "crates/promptforge-internal/engine";
+    let engine = "crates/runvil-internal/engine";
     write(
         root.path(),
         &format!("{engine}/src/lib.rs"),

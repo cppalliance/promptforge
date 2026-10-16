@@ -1,7 +1,7 @@
 //! The surface listing: one sorted line per surface item, including the
 //! methods, fields, variants, and trait impls of every re-exported type,
 //! built from the default build only because that is the surface dependents
-//! get. It is committed as `crates/promptforge/public-api.txt`, so every
+//! get. It is committed as `crates/runvil/public-api.txt`, so every
 //! change to the surface shows up in review as a change to that file.
 //!
 //! Trait impls are listed compactly. Impls of `StructuralPartialEq`,

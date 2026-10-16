@@ -12,7 +12,7 @@ use workshop_registry::{Registration, Registry};
 
 use crate::agents::state::routes;
 
-const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
+const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"runvil"}]}"#;
 const UPSTREAM_ERROR: &str =
     r#"{"error":{"message":"model unloaded","code":"upstream_unavailable"}}"#;
 

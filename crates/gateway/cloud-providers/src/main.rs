@@ -4,13 +4,13 @@
 //!
 //! Reads each provider's API key from the environment variable named by
 //! its descriptor (after loading operator secrets from
-//! `~/.promptforge/cloud-provider-secrets.env` when present), downloads the previous release's `models.json` when
+//! `~/.runvil/cloud-provider-secrets.env` when present), downloads the previous release's `models.json` when
 //! `MODELS_SHEET_PREVIOUS_URL` is set (an unset URL or an HTTP 404 means
 //! first run: the build proceeds with no previous sheet; any other
 //! download failure is fatal, since silently losing history would demote
 //! every slice to `unavailable`), and writes the merged sheet as
 //! pretty-printed JSON to the output path named by the first argument,
-//! defaulting to `~/.promptforge/cloud-provider-models.json`.
+//! defaulting to `~/.runvil/cloud-provider-models.json`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -51,7 +51,7 @@ fn home_dir() -> Option<PathBuf> {
     home.filter(|home| !home.is_empty()).map(PathBuf::from)
 }
 
-/// Loads operator secrets from `<home>/.promptforge/cloud-provider-secrets.env`,
+/// Loads operator secrets from `<home>/.runvil/cloud-provider-secrets.env`,
 /// overriding the process environment so local runs read keys from the file.
 ///
 /// A missing file or unresolvable home produces a stderr note and a
@@ -64,7 +64,7 @@ fn load_secrets() {
         );
         return;
     };
-    let path = home.join(".promptforge").join("cloud-provider-secrets.env");
+    let path = home.join(".runvil").join("cloud-provider-secrets.env");
     match dotenvy::from_path_override(&path) {
         Ok(()) => {}
         Err(dotenvy::Error::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -83,7 +83,7 @@ fn load_secrets() {
 }
 
 /// The default output path: `cloud-provider-models.json` in the profile
-/// directory `<home>/.promptforge`, created when absent. An unresolvable
+/// directory `<home>/.runvil`, created when absent. An unresolvable
 /// home or an uncreatable profile directory falls back to the current
 /// directory with a stderr note.
 fn default_output() -> String {
@@ -93,7 +93,7 @@ fn default_output() -> String {
         );
         return DEFAULT_OUTPUT_NAME.to_owned();
     };
-    let dir = home.join(".promptforge");
+    let dir = home.join(".runvil");
     if let Err(err) = std::fs::create_dir_all(&dir) {
         eprintln!(
             "shared-cloud-providers: warning: profile directory {} not created: {err}; writing ./{DEFAULT_OUTPUT_NAME}",

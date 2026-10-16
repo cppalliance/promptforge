@@ -1,11 +1,11 @@
 [book]
-title = "PromptForge Workshop Guide"
+title = "Runvil Workshop Guide"
 description = "The desktop app for writing and running prompts"
 authors = ["Vinnie Falco"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/cppalliance/promptforge-docs"
-site-url = "/promptforge/workshop/"
+git-repository-url = "https://github.com/cppalliance/runvil-docs"
+site-url = "/runvil/workshop/"
 additional-js = ["back-link.js"]

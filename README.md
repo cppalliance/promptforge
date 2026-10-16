@@ -1,13 +1,13 @@
-[![CI](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml/badge.svg)](https://github.com/cppalliance/promptforge/actions/workflows/ci.yml)
+[![CI](https://github.com/cppalliance/runvil/actions/workflows/ci.yml/badge.svg)](https://github.com/cppalliance/runvil/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-# PromptForge
+# Runvil
 
-PromptForge runs AI prompt pipelines defined in a single Markdown file. The Markdown is the program, and the model is the CPU.
+Runvil runs AI prompt pipelines defined in a single Markdown file. The Markdown is the program, and the model is the CPU.
 
 ![Gloves and sparks](images/banner-04.png)
 
-Workshop is the desktop app for writing prompts, running them against local or remote models, and reviewing every run it records. Installers for Windows, macOS, and Linux are on the [latest release](https://github.com/cppalliance/promptforge/releases/tag/workshop-latest).
+Workshop is the desktop app for writing prompts, running them against local or remote models, and reviewing every run it records. Installers for Windows, macOS, and Linux are on the [latest release](https://github.com/cppalliance/runvil/releases/tag/workshop-latest).
 
 ![Android heads](images/banner-02.png)
 
@@ -19,12 +19,12 @@ A prompt combines frontmatter, Lua code, and prose sections. The Engine runs it 
 
 ![Robot internals](images/banner-05.png)
 
-The [documentation](https://cppalliance.org/promptforge/) covers the prompt language, Workshop, the gateway, and the library references.
+The [documentation](https://cppalliance.org/runvil/) covers the prompt language, Workshop, the gateway, and the library references.
 
 ![Filing cabinets](images/banner-06.png)
 
 Pull requests are welcome, and every change must pass the formatting, lint, and test checks that CI runs.
 
-![Creator](images/promptforge-portrait.png)
+![Creator](images/runvil-portrait.png)
 
-PromptForge is distributed under the [Boost Software License](LICENSE).
+Runvil is distributed under the [Boost Software License](LICENSE).

@@ -27,7 +27,7 @@ async fn a_reconnect_pushes_the_refreshed_catalog() {
         .expect("the catalog bus is open");
     assert_eq!(
         push.models,
-        serde_json::json!([{"id": "test-model", "object": "model", "owned_by": "promptforge"}])
+        serde_json::json!([{"id": "test-model", "object": "model", "owned_by": "runvil"}])
             .as_array()
             .expect("the fixture is an array")
             .clone(),

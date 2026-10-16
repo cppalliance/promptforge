@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use promptforge_plugin::testing::TestCall;
-use promptforge_plugin::{
+use runvil_plugin::testing::TestCall;
+use runvil_plugin::{
     HostServices, Plugin, PluginId, ServiceKey, TOKIO_RUNTIME, ToolError, ToolErrorKind, ToolId,
 };
 use serde_json::{Value, json};
@@ -60,8 +60,8 @@ fn construct(installed: &str, config: Value) -> Result<Arc<dyn Plugin>, ToolErro
 }
 
 #[test]
-fn the_package_is_promptforge_web_with_no_prelude_and_no_per_run_needs() {
-    assert_eq!(PACKAGE.name, "promptforge/web");
+fn the_package_is_runvil_web_with_no_prelude_and_no_per_run_needs() {
+    assert_eq!(PACKAGE.name, "runvil/web");
     assert!(PACKAGE.prelude.is_none());
     assert!(PACKAGE.needs.is_empty());
 }
@@ -98,11 +98,11 @@ async fn construct_fails_naming_whichever_host_wide_service_is_missing() {
     };
     assert_eq!(
         missing(false, true),
-        "web needs promptforge/search-provider, and this host provides none"
+        "web needs runvil/search-provider, and this host provides none"
     );
     assert_eq!(
         missing(true, false),
-        "web needs promptforge/tokio-runtime, and this host provides none"
+        "web needs runvil/tokio-runtime, and this host provides none"
     );
 }
 

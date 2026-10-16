@@ -14,7 +14,7 @@ pub(crate) fn fixture_dir() -> PathBuf {
 }
 
 pub(crate) fn jfk_samples() -> Vec<f32> {
-    let path = require_fixture("PROMPTFORGE_WHISPER_AUDIO", &fixture_dir(), "jfk.wav");
+    let path = require_fixture("RUNVIL_WHISPER_AUDIO", &fixture_dir(), "jfk.wav");
     let mut reader = hound::WavReader::open(path).expect("JFK fixture opens");
     let spec = reader.spec();
     assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");

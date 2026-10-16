@@ -181,7 +181,7 @@ pub trait Upstream: Send + Sync {
     /// and disables respawn, so an explicit teardown deterministically frees the
     /// resource even while the routing table still holds an `Arc<dyn Upstream>`
     /// clone - dropping the runtime alone cannot guarantee this because it is not
-    /// the sole owner (PFGL-MOD-001, PF-GW-SERVER-004).
+    /// the sole owner (RVGL-MOD-001, RV-GW-SERVER-004).
     ///
     /// # Errors
     /// Returns a [`ShutdownError`] when a child kill/reap or capture-reader

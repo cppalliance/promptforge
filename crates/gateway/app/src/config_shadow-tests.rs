@@ -14,7 +14,7 @@ fn when_reading_the_pending_env_the_shadow_wins_over_the_real_env_file() {
     let (_temp, config_path) = config_path();
     let env_path = config_path.with_extension("env");
 
-    let var_name = "PF_TEST_KEY";
+    let var_name = "RV_TEST_KEY";
     let value = "sk-A";
     let shadow_value = "sk-B";
 
@@ -43,7 +43,7 @@ fn no_shadow_env_file_is_an_empty_pending_env() {
 
     assert!(pending.data.is_empty());
     assert_eq!(
-        pending.resolve_var("PF_TEST_UNSET_EVERYWHERE"),
+        pending.resolve_var("RV_TEST_UNSET_EVERYWHERE"),
         Err(VarError::NotPresent)
     );
 }

@@ -19,7 +19,7 @@ test("the bundled stylesheet defines the design tokens and layer order", async (
   const css = await readFile(path.join(distDir, "app.css"), "utf8");
   // \s* tolerates minified output; /i tolerates hex case changes.
   assert.match(css, /--cursor-base:\s*#F0F0F0/i, "the Cursor Dark primitive is defined");
-  assert.match(css, /--accent:\s*#e4b570/i, "the PromptForge gold accent token is defined");
+  assert.match(css, /--accent:\s*#e4b570/i, "the Runvil gold accent token is defined");
   assert.match(
     css,
     /--bg-primary:\s*var\(--cursor-editor\)/,

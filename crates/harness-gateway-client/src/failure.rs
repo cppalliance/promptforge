@@ -8,7 +8,7 @@
 
 use std::fmt::Display;
 
-use promptforge::model::{CompletionError, CompletionErrorKind};
+use runvil::model::{CompletionError, CompletionErrorKind};
 
 /// A send or read that failed: `Timeout` when `error` was a timeout and
 /// `Transport` otherwise, with `error` kept as the source.
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn a_decoded_parts_refusal_is_a_retryable_malformed_reply_with_its_specific() {
-        use promptforge::model::ToolCall;
+        use runvil::model::ToolCall;
         let refusal = ToolCall::from_parts(" ", "fetch", serde_json::json!({}))
             .expect_err("a blank id is refused");
         assert_eq!(refusal.kind(), CompletionErrorKind::InvalidParts);

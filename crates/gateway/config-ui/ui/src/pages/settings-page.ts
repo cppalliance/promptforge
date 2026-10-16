@@ -1091,7 +1091,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
         help: "Where downloaded artifacts live.",
         type: "input",
         fallback: null,
-        placeholder: "~/.promptforge",
+        placeholder: "~/.runvil",
       }),
     );
     if (system?.disk) {
@@ -1633,7 +1633,7 @@ export function createSettingsPage(deps: SettingsPageDeps): SettingsPage {
     medallion.className = "about-medallion";
     const name = document.createElement("p");
     name.className = "about-name";
-    name.textContent = "PromptForge Gateway";
+    name.textContent = "Runvil Gateway";
     const version = document.createElement("p");
     version.className = "about-version metric-value";
     version.textContent = `Version ${APP_VERSION}`;

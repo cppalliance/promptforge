@@ -107,7 +107,7 @@ console.error = (...args) => {
   consoleErrors.push(args.join(" "));
 };
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-editor-settings-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-editor-settings-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   CodeMirrorSurface,

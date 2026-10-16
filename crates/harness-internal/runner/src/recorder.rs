@@ -19,7 +19,7 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
-use promptforge::RunSeed;
+use runvil::RunSeed;
 
 #[path = "recorder-memory.rs"]
 mod memory;

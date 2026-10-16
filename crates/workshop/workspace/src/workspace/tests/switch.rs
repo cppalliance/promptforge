@@ -63,8 +63,8 @@ async fn grants_on_disk(path: &Path) -> Vec<PathBuf> {
 #[tokio::test]
 async fn concurrent_opens_of_one_new_file_share_one_handle_and_keep_the_wal() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     file_with_grants(&b, &[]).await;
     let workspace = Workspace::new();
@@ -105,8 +105,8 @@ async fn concurrent_opens_of_one_new_file_share_one_handle_and_keep_the_wal() {
 #[tokio::test]
 async fn reloading_the_current_file_cannot_outlive_a_switch_to_another() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
     let in_a = tempfile::TempDir::new().expect("tempdir");
     let in_b = tempfile::TempDir::new().expect("tempdir");
     file_with_grants(&a, &[in_a.path()]).await;
@@ -152,8 +152,8 @@ async fn reloading_the_current_file_cannot_outlive_a_switch_to_another() {
 #[tokio::test]
 async fn a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_the_grant() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     file_with_grants(&b, &[]).await;
     let workspace = Workspace::new();
@@ -215,8 +215,8 @@ async fn a_grant_racing_a_workspace_open_never_answers_success_and_then_loses_th
 #[tokio::test]
 async fn a_revoke_racing_a_workspace_open_leaves_memory_and_the_open_file_agreeing() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     file_with_grants(&b, &[dir.path()]).await;
     let workspace = Workspace::new();
@@ -279,7 +279,7 @@ async fn a_revoke_racing_a_workspace_open_leaves_memory_and_the_open_file_agreei
 #[tokio::test]
 async fn a_revoke_after_close_backing_is_refused_and_keeps_the_root_granted() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
+    let a = home.path().join("a.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     workspace.save_as(&a).await.expect("save as creates");
@@ -310,7 +310,7 @@ async fn a_revoke_after_close_backing_is_refused_and_keeps_the_root_granted() {
 #[tokio::test]
 async fn a_grant_after_close_backing_is_refused_and_leaves_the_root_ungranted() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
+    let a = home.path().join("a.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     workspace.save_as(&a).await.expect("save as creates");
@@ -366,10 +366,10 @@ async fn a_revoke_by_the_stored_key_lands_after_the_folder_becomes_a_link_elsewh
 #[tokio::test]
 async fn a_switch_after_close_backing_is_refused_and_opens_nothing() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
-    let c = home.path().join("c.pfwork");
-    let d = home.path().join("d.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
+    let c = home.path().join("c.rvwork");
+    let d = home.path().join("d.rvwork");
     file_with_grants(&b, &[]).await;
     let workspace = Workspace::new();
     workspace.save_as(&a).await.expect("save as creates");
@@ -402,8 +402,8 @@ async fn a_switch_after_close_backing_is_refused_and_opens_nothing() {
 #[tokio::test]
 async fn close_backing_waits_for_an_in_flight_open() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let a = home.path().join("a.pfwork");
-    let b = home.path().join("b.pfwork");
+    let a = home.path().join("a.rvwork");
+    let b = home.path().join("b.rvwork");
     file_with_grants(&a, &[]).await;
     file_with_grants(&b, &[]).await;
 

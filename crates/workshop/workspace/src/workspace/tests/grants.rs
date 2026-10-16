@@ -95,8 +95,8 @@ fn z_and_a() -> (tempfile::TempDir, tempfile::TempDir, tempfile::TempDir) {
 #[tokio::test]
 async fn save_as_from_a_file_backed_workspace_keeps_grant_order_and_times() {
     let files = tempfile::TempDir::new().expect("tempdir");
-    let first_path = files.path().join("first.pfwork");
-    let second_path = files.path().join("second.pfwork");
+    let first_path = files.path().join("first.rvwork");
+    let second_path = files.path().join("second.rvwork");
     let (_home, z, a) = z_and_a();
     let workspace = ticking_workspace();
     workspace
@@ -121,7 +121,7 @@ async fn save_as_from_a_file_backed_workspace_keeps_grant_order_and_times() {
 #[tokio::test]
 async fn save_as_from_an_ephemeral_workspace_keeps_grant_order_and_times() {
     let files = tempfile::TempDir::new().expect("tempdir");
-    let path = files.path().join("fresh.pfwork");
+    let path = files.path().join("fresh.rvwork");
     let (_home, z, a) = z_and_a();
     let workspace = ticking_workspace();
 
@@ -139,8 +139,8 @@ async fn save_as_from_an_ephemeral_workspace_keeps_grant_order_and_times() {
 #[tokio::test]
 async fn replace_all_preserves_stored_positions_through_save_as() {
     let files = tempfile::TempDir::new().expect("tempdir");
-    let source_path = files.path().join("source.pfwork");
-    let copy_path = files.path().join("copy.pfwork");
+    let source_path = files.path().join("source.rvwork");
+    let copy_path = files.path().join("copy.rvwork");
     let a = tempfile::TempDir::new().expect("tempdir a");
     let b = tempfile::TempDir::new().expect("tempdir b");
     let a_root = simplified(a.path());
@@ -190,8 +190,8 @@ async fn replace_all_preserves_stored_positions_through_save_as() {
 #[tokio::test]
 async fn grants_revokes_and_switches_each_signal_a_roots_change() {
     let files = tempfile::TempDir::new().expect("tempdir");
-    let current = files.path().join("current.pfwork");
-    let other = files.path().join("other.pfwork");
+    let current = files.path().join("current.rvwork");
+    let other = files.path().join("other.rvwork");
     let writer = Workspace::new();
     writer
         .save_as(&other)

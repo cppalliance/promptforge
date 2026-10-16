@@ -34,7 +34,7 @@ isProject: false
 
 # Gateway Route Decentralization
 
-Source: the field study "PromptForge Gateway: How to Structure an axum Server" (2026-09-20, five axum references dived at pinned commits). Three of five references (Windmill, Svix, llm-gateway-rs) decentralize route registration and name the tier in the constructor or path; the subject's `AuthedCaller`, single `GatewayError`, loopback wall, and lint set already beat every reference and are do-not-touch. This continues `2026-09-17-3-gateway-app-decomp`, which split handlers out of `lib.rs` but deliberately kept the route table whole; the study found that every reference at this scale moves the mounts out too.
+Source: the field study "Runvil Gateway: How to Structure an axum Server" (2026-09-20, five axum references dived at pinned commits). Three of five references (Windmill, Svix, llm-gateway-rs) decentralize route registration and name the tier in the constructor or path; the subject's `AuthedCaller`, single `GatewayError`, loopback wall, and lint set already beat every reference and are do-not-touch. This continues `2026-09-17-3-gateway-app-decomp`, which split handlers out of `lib.rs` but deliberately kept the route table whole; the study found that every reference at this scale moves the mounts out too.
 
 ## Target shape
 

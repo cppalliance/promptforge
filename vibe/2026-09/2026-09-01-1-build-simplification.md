@@ -1,5 +1,5 @@
 ---
-name: PromptForge Build Simplification
+name: Runvil Build Simplification
 overview: Move the web UI build out of git and into a shared build helper. Build the Blackwell CUDA llama-server on GitHub and download it at run time. Publish a Linux gateway installer and Windows/macOS/Linux workshop installers as GitHub Releases with checksums and post-build tests.
 todos:
   - id: a-ui-build-crate
@@ -15,7 +15,7 @@ todos:
     content: Extend .gitattributes and renormalize in a dedicated commit
     status: completed
   - id: b1-cli
-    content: Convert promptforge-gateway-build into the crates/llama-cuda-build command-line tool with --source, --arch, --out, --no-smoke; put the CUDA runtime DLLs in the output zip
+    content: Convert runvil-gateway-build into the crates/llama-cuda-build command-line tool with --source, --arch, --out, --no-smoke; put the CUDA runtime DLLs in the output zip
     status: completed
   - id: b2-workflow
     content: Add .github/workflows/llama-cuda-blackwell.yml (hosted build, self-hosted smoke test, publish release with checksums); retire cuda.yml
@@ -50,17 +50,17 @@ todos:
 isProject: false
 ---
 
-# PromptForge Build Simplification
+# Runvil Build Simplification
 
 ## Context for a fresh session
 
 If you are picking this up with no prior context, here is what you need to know.
 
-- **Repository**: `c:\Users\Vinnie\cursor\promptforge`, a Rust workspace of about 30 crates under `crates/*`. The two products are `promptforge-gateway` (a headless HTTP server) and `promptforge-workshop` (a Tauri desktop app that embeds the gateway). Both serve web UIs built with esbuild.
+- **Repository**: `c:\Users\Vinnie\cursor\runvil`, a Rust workspace of about 30 crates under `crates/*`. The two products are `runvil-gateway` (a headless HTTP server) and `runvil-workshop` (a Tauri desktop app that embeds the gateway). Both serve web UIs built with esbuild.
 - **Current branch**: `master`. The head commit is `becb112`, a cherry-pick of upstream PR 10 ("Accept fractional `vram_gb` for local models"). That commit is already verified and stays. All work in this plan goes on top of it as interim `wip:` commits, then squashes to one commit at the end. See "Commits and squash" at the bottom.
 - **The problem**: today `cargo build` rewrites six git-tracked files under two `ui/dist/` folders (a 76,000-line diff), the CUDA llama-server build requires the CUDA toolkit and a GPU on the developer's machine, and a fresh `cargo build` fails on macOS and Linux because it tries to build the Tauri workshop with its default `cuda` feature.
 - **Decisions already made by the user**: crates.io is not a target. Delivery is prebuilt installers from GitHub Releases. Node.js 22 is a required build tool. The Blackwell CUDA llama-server is a separate GitHub-built release artifact, Windows x64 only. The gateway installer is Linux only, via cargo-dist. The workshop installer covers Windows, macOS (ARM and Intel), and Linux, via tauri-action. whisper-rs stays linked in (do not split it into a sidecar). Work happens directly on `master`, interim commits, squash to one at the end after verification.
-- **Reference material**: a comparison report against Zed and Unsloth is at `cabinet/_output/report-build-comparison-zed-unsloth-promptforge.md` in the parent workspace. It is background, not required reading; this plan is self-contained.
+- **Reference material**: a comparison report against Zed and Unsloth is at `cabinet/_output/report-build-comparison-zed-unsloth-runvil.md` in the parent workspace. It is background, not required reading; this plan is self-contained.
 - **Verification**: each part ends with a numbered test section. Run all of them before the squash. The final gate is `git status --porcelain` printing nothing after a full build.
 
 ## How to read this plan
@@ -75,7 +75,7 @@ Words used in this plan:
 - **build-dependency**: a crate that the build script uses, not the program itself.
 - **OUT_DIR**: a folder Cargo gives each crate for build output. It lives under `target/`. Git never tracks it.
 - **rust-embed**: a Rust library. It puts files into the program at compile time. In debug builds it can also read files from disk when a request comes in.
-- **llama-server**: the program that runs GGUF models. PromptForge starts it as a child process.
+- **llama-server**: the program that runs GGUF models. Runvil starts it as a child process.
 - **CUDA**: NVIDIA's GPU software. A CUDA build of llama-server is faster than the Vulkan build on NVIDIA GPUs.
 - **Blackwell**: the newest NVIDIA GPU generation. Its compute capability number is 12.0, written as `120a-real` in build files.
 - **nvidia-smi**: a program that comes with the NVIDIA driver. It tells us which GPUs the computer has.
@@ -97,7 +97,7 @@ Today, building the CUDA version of llama-server happens inside `cargo build`. I
 
 **Do the Unsloth-style release checks work on GitHub Actions?** Yes. Each release workflow gets a test job at the end. The job installs the artifact on a clean computer, runs the program, and checks that the web page is served and that `app.js` is the small minified version. If a check fails, the release does not publish.
 
-**Does the standalone gateway use Tauri?** No. `promptforge-gateway` is a plain HTTP server program. It has no window. It serves the web pages to any browser. Only `promptforge-workshop` uses Tauri. This is why the two products use different packaging tools.
+**Does the standalone gateway use Tauri?** No. `runvil-gateway` is a plain HTTP server program. It has no window. It serves the web pages to any browser. Only `runvil-workshop` uses Tauri. This is why the two products use different packaging tools.
 
 ## Part A: Move the UI build out of git
 
@@ -105,7 +105,7 @@ Goal: no build step ever writes into a folder that git tracks.
 
 ### A1. Make a new crate named `ui-build`
 
-Location: `crates/ui-build/`. It is a library. Both UI crates use it as a build-dependency. This mirrors how `promptforge-gateway-build` is used today.
+Location: `crates/ui-build/`. It is a library. Both UI crates use it as a build-dependency. This mirrors how `runvil-gateway-build` is used today.
 
 The crate has one public function:
 
@@ -132,7 +132,7 @@ There is no manifest file. There is no hash. Cargo's change detection does the j
 
 ### A2. Change both UI crates to use the helper
 
-In `crates/promptforge-workshop-server/build.rs`, replace the whole file with:
+In `crates/runvil-workshop-server/build.rs`, replace the whole file with:
 
 ```rust
 fn main() -> std::process::ExitCode {
@@ -155,7 +155,7 @@ Add to each crate's `Cargo.toml` under `[build-dependencies]`: `ui-build = { pat
 
 ### A3. Point rust-embed at the build output
 
-In `crates/promptforge-workshop-server/src/assets.rs` line 14 and `crates/promptforge-gateway-config-ui/src/assets.rs` line 12, change:
+In `crates/runvil-workshop-server/src/assets.rs` line 14 and `crates/runvil-gateway-config-ui/src/assets.rs` line 12, change:
 
 ```rust
 #[folder = "ui/dist/"]
@@ -174,25 +174,25 @@ Add the `interpolate-folder-path` feature to `rust-embed` in the workspace `Carg
 Run:
 
 ```bash
-git rm -r --cached crates/promptforge-workshop-server/ui/dist
-git rm -r --cached crates/promptforge-gateway-config-ui/ui/dist
+git rm -r --cached crates/runvil-workshop-server/ui/dist
+git rm -r --cached crates/runvil-gateway-config-ui/ui/dist
 ```
 
 Add to `.gitignore`:
 
 ```
-/crates/promptforge-workshop-server/ui/dist/
-/crates/promptforge-gateway-config-ui/ui/dist/
+/crates/runvil-workshop-server/ui/dist/
+/crates/runvil-gateway-config-ui/ui/dist/
 ```
 
 ### A5. Delete the old machinery
 
 Delete these files with `git rm`:
 
-- `crates/promptforge-workshop-server/build/manifest.rs`
-- `crates/promptforge-workshop-server/ui/manifest.mjs`
-- `crates/promptforge-gateway-config-ui/build/manifest.rs`
-- `crates/promptforge-gateway-config-ui/ui/manifest.mjs`
+- `crates/runvil-workshop-server/build/manifest.rs`
+- `crates/runvil-workshop-server/ui/manifest.mjs`
+- `crates/runvil-gateway-config-ui/build/manifest.rs`
+- `crates/runvil-gateway-config-ui/ui/manifest.mjs`
 
 In both `ui/build.mjs` files, remove the manifest-writing code and the `--package` flag. After this, `build.mjs` is only the esbuild API call with minify always on, plus the layer-rule plugin in the workshop one. The build scripts no longer call `build.mjs`; the helper calls esbuild directly in both profiles. `build.mjs` remains only so the `npm run build` script in each `package.json` (used by the CI `ui` job and by developers working on the frontend) keeps working.
 
@@ -202,25 +202,25 @@ In the root `README.md` and both UI crate READMEs, state: to build this project 
 
 ### A7. Test Part A
 
-1. `cargo build -p promptforge-workshop-server` succeeds. `git status --porcelain` prints nothing.
-2. `cargo build --release -p promptforge-workshop-server` succeeds. The binary serves the workshop page.
-3. Same two checks for `promptforge-gateway-config-ui`.
-4. `cargo test -p promptforge-workshop-server` passes (the asset tests in `assets.rs` must still pass).
+1. `cargo build -p runvil-workshop-server` succeeds. `git status --porcelain` prints nothing.
+2. `cargo build --release -p runvil-workshop-server` succeeds. The binary serves the workshop page.
+3. Same two checks for `runvil-gateway-config-ui`.
+4. `cargo test -p runvil-workshop-server` passes (the asset tests in `assets.rs` must still pass).
 5. Commit.
 
 ## Part B: Blackwell llama-server as a separate release product
 
-Goal: no developer computer needs the CUDA toolkit, CMake, or a GPU to build PromptForge. The CUDA llama-server is built on GitHub and downloaded at run time, the same way the Vulkan build is downloaded today.
+Goal: no developer computer needs the CUDA toolkit, CMake, or a GPU to build Runvil. The CUDA llama-server is built on GitHub and downloaded at run time, the same way the Vulkan build is downloaded today.
 
 Facts this part relies on:
 
 - The upstream llama.cpp project publishes a Windows CUDA 13 zip for each release. It includes Blackwell support (`120a-real`) since upstream PR 18436. It also publishes a matching `cudart` zip with the CUDA runtime DLLs. It publishes no Linux CUDA binary.
-- Today the CUDA build lives in `crates/promptforge-gateway-build` and runs inside `cargo build` of `promptforge-gateway-local` when the `llama-cuda` feature is on. It detects the GPU with `nvidia-smi`, builds with CMake, walks the DLL dependencies with `dumpbin`, runs a smoke test, and embeds the result into the Rust binary with `include_bytes!`.
-- The download table for the Vulkan/Metal builds is in `crates/promptforge-gateway-local/src/artifacts/assets.rs`. The pinned llama.cpp release tag there is `b10082`.
+- Today the CUDA build lives in `crates/runvil-gateway-build` and runs inside `cargo build` of `runvil-gateway-local` when the `llama-cuda` feature is on. It detects the GPU with `nvidia-smi`, builds with CMake, walks the DLL dependencies with `dumpbin`, runs a smoke test, and embeds the result into the Rust binary with `include_bytes!`.
+- The download table for the Vulkan/Metal builds is in `crates/runvil-gateway-local/src/artifacts/assets.rs`. The pinned llama.cpp release tag there is `b10082`.
 
 ### B1. Turn the CUDA builder into a command-line tool
 
-Move the crate with `git mv crates/promptforge-gateway-build crates/llama-cuda-build`. Update the workspace member list in the root `Cargo.toml` if it names the path (it uses `crates/*`, so no change needed there). Change the crate from a library used as a build-dependency into a program with `[[bin]] name = "llama-cuda-build"`. The only consumer today is `promptforge-gateway-local`'s build-dependency, which Part B3 removes; until B3 lands, keep a thin `src/lib.rs` that re-exports nothing and mark the old build-dependency for removal, or do B1 and B3's feature removal in the same step. Simpler: do B1 and the feature removal together in one commit, since the crate has no other consumer.
+Move the crate with `git mv crates/runvil-gateway-build crates/llama-cuda-build`. Update the workspace member list in the root `Cargo.toml` if it names the path (it uses `crates/*`, so no change needed there). Change the crate from a library used as a build-dependency into a program with `[[bin]] name = "llama-cuda-build"`. The only consumer today is `runvil-gateway-local`'s build-dependency, which Part B3 removes; until B3 lands, keep a thin `src/lib.rs` that re-exports nothing and mark the old build-dependency for removal, or do B1 and B3's feature removal in the same step. Simpler: do B1 and the feature removal together in one commit, since the crate has no other consumer.
 
 Keep these modules as they are: `cmake.rs` (the CMake flag list does not change), `deps.rs` (the dumpbin walk), `manifest.rs` (the manifest format), `toolchain.rs` (the nvcc/cmake version checks).
 
@@ -250,7 +250,7 @@ Three jobs:
 2. **smoke** on `[self-hosted, windows, cuda]` (our own computer, the one `cuda.yml` already uses):
    - Download the artifact. Unzip it.
    - Run `llama-server.exe --list-devices`. The output must contain `CUDA`.
-   - Run the existing live test with `PROMPTFORGE_LIVE_CUDA=1` against this binary.
+   - Run the existing live test with `RUNVIL_LIVE_CUDA=1` against this binary.
 3. **publish** (runs only if smoke passes):
    - Create or update a GitHub Release named `llama-cuda-blackwell-<tag>` on the upstream repository.
    - Upload the zip, the manifest, and a `SHA256SUMS` file.
@@ -259,7 +259,7 @@ Then delete `.github/workflows/cuda.yml`. Its two jobs (compile check and live t
 
 ### B3. Run-time selection of the llama-server build
 
-In `crates/promptforge-gateway-local`:
+In `crates/runvil-gateway-local`:
 
 1. **Asset table** (`src/artifacts/assets.rs`): add two new Windows x64 rows next to the existing Vulkan row.
    - `cuda-blackwell`: the URL and sha256 of the release from B2. One zip.
@@ -269,8 +269,8 @@ In `crates/promptforge-gateway-local`:
    - Any other NVIDIA GPU: use `cuda`.
    - No NVIDIA GPU, or `nvidia-smi` missing or failing: use `vulkan`.
    - Config override in the gateway config file: `[local] llama_backend = "auto" | "cuda-blackwell" | "cuda" | "vulkan"`. Default is `auto`. One new key. No new port.
-3. **Resolution order for the executable** (this is the Zed pattern): first `[local] llama_server_path` from the config, then the `PROMPTFORGE_LLAMA_SERVER` environment variable (today it is used only in tests; promote it to production), then the managed download under `~/.promptforge/llama.cpp/`. If a download fails and an older version is already in the cache, use the cached one and log a warning instead of failing to start.
-4. **Remove the embedded CUDA path**: delete `src/artifacts/cuda_bundle.rs`, the `llama_cuda_embedded` configuration flag, and the `llama-cuda` feature from `promptforge-gateway-local` and `promptforge-gateway`. The `workshop-cuda` feature becomes `["workshop", "promptforge-stt/cuda"]`. The workshop `cuda` default feature now means only the speech-to-text CUDA build. The `CUDA_PATH` discovery code is no longer needed because the runtime DLLs ship inside the archives.
+3. **Resolution order for the executable** (this is the Zed pattern): first `[local] llama_server_path` from the config, then the `RUNVIL_LLAMA_SERVER` environment variable (today it is used only in tests; promote it to production), then the managed download under `~/.runvil/llama.cpp/`. If a download fails and an older version is already in the cache, use the cached one and log a warning instead of failing to start.
+4. **Remove the embedded CUDA path**: delete `src/artifacts/cuda_bundle.rs`, the `llama_cuda_embedded` configuration flag, and the `llama-cuda` feature from `runvil-gateway-local` and `runvil-gateway`. The `workshop-cuda` feature becomes `["workshop", "runvil-stt/cuda"]`. The workshop `cuda` default feature now means only the speech-to-text CUDA build. The `CUDA_PATH` discovery code is no longer needed because the runtime DLLs ship inside the archives.
 5. **Remove the submodule**: `git rm third_party/llama.cpp` and delete `.gitmodules`. The B2 workflow clones llama.cpp by tag, so the submodule has no remaining user. Update the README: `git submodule update --init` is no longer a setup step.
 
 ### B4. Test Part B
@@ -278,18 +278,18 @@ In `crates/promptforge-gateway-local`:
 1. On a Windows computer with a Blackwell GPU: `llama_backend = "auto"` downloads the Blackwell zip and `llama-server --list-devices` shows CUDA.
 2. On a Windows computer with an older NVIDIA GPU: `auto` downloads the upstream CUDA zips.
 3. On a computer with no NVIDIA GPU: `auto` downloads the Vulkan zip.
-4. `PROMPTFORGE_LLAMA_SERVER` pointing at a local build wins over the download.
-5. `cargo build -p promptforge-workshop` succeeds on a computer with no CUDA toolkit.
+4. `RUNVIL_LLAMA_SERVER` pointing at a local build wins over the download.
+5. `cargo build -p runvil-workshop` succeeds on a computer with no CUDA toolkit.
 6. Commit.
 
 ## Part C: Release workflows
 
 ```mermaid
 flowchart LR
-  tagGw["tag promptforge-gateway-v0.2.0"] --> gwBuild["build gateway for Linux Intel and Linux ARM"]
+  tagGw["tag runvil-gateway-v0.2.0"] --> gwBuild["build gateway for Linux Intel and Linux ARM"]
   gwBuild --> gwSmoke["test: install script, version, config page"]
   gwSmoke --> gwRelease["GitHub Release: archives, install.sh, checksums"]
-  tagWs["tag promptforge-workshop-v0.2.0"] --> wsBuild["build workshop for Windows, Mac Intel, Mac ARM, Linux"]
+  tagWs["tag runvil-workshop-v0.2.0"] --> wsBuild["build workshop for Windows, Mac Intel, Mac ARM, Linux"]
   wsBuild --> wsSmoke["test: install, version, web page, minified app.js"]
   wsSmoke --> wsRelease["GitHub Release: five installers, checksums"]
   bwRun["person starts workflow with a llama.cpp tag"] --> bwBuild["build on GitHub Windows computer with CUDA 13"]
@@ -309,8 +309,8 @@ What cargo-dist makes on our machine, one time:
 
 What we put in the config file:
 
-- Build only the `promptforge-gateway` program. Do not build the other crates. Build it with the `workshop` feature on, so the headless Linux gateway can also serve the workshop web page to a browser. The full feature set for the release build is the default features plus `workshop`.
-- Start a release when we push a tag with this name: `promptforge-gateway-v0.2.0`. The number is the version from the root `Cargo.toml`.
+- Build only the `runvil-gateway` program. Do not build the other crates. Build it with the `workshop` feature on, so the headless Linux gateway can also serve the workshop web page to a browser. The full feature set for the release build is the default features plus `workshop`.
+- Start a release when we push a tag with this name: `runvil-gateway-v0.2.0`. The number is the version from the root `Cargo.toml`.
 - Build for two kinds of Linux computer: Intel/AMD 64-bit, and ARM 64-bit. Do not build for Windows. Do not build for macOS. Those users get the gateway inside the workshop installer.
 - Make one `install.sh` script. A user runs this script with one command. The script downloads the correct archive for the computer and puts the program in the user's `bin` folder.
 - Make a file named `SHA256SUMS`. This file has a checksum for each archive. A user can check that the download is correct.
@@ -321,22 +321,22 @@ One extra step before the build:
 
 One extra file in the archive:
 
-- A sample systemd service file, `promptforge-gateway.service`. A Linux server admin can copy this file to start the gateway at boot. If you do not want this, we remove it. It is 15 lines.
+- A sample systemd service file, `runvil-gateway.service`. A Linux server admin can copy this file to start the gateway at boot. If you do not want this, we remove it. It is 15 lines.
 
 A test after the build:
 
 - Start a clean Linux computer on GitHub.
 - Run the `install.sh` script against the archive we built.
-- Run `promptforge-gateway --version`. It must print the version.
+- Run `runvil-gateway --version`. It must print the version.
 - Start the gateway with a small config file.
 - Request `/config/` from the gateway. The response must be the config web page.
 - If any step fails, the release does not publish.
 
 ### C2. Workshop release for Windows, macOS, and Linux
 
-What we use: a GitHub Action named `tauri-action`. It runs `cargo tauri build` and uploads the installers to a GitHub Release. The bundle settings are already in [crates/promptforge-workshop/tauri.conf.json](crates/promptforge-workshop/tauri.conf.json): NSIS for Windows, DMG for macOS, deb and AppImage for Linux.
+What we use: a GitHub Action named `tauri-action`. It runs `cargo tauri build` and uploads the installers to a GitHub Release. The bundle settings are already in [crates/runvil-workshop/tauri.conf.json](crates/runvil-workshop/tauri.conf.json): NSIS for Windows, DMG for macOS, deb and AppImage for Linux.
 
-New file: `.github/workflows/release-workshop.yml`. It runs when we push a tag named `promptforge-workshop-v0.2.0`.
+New file: `.github/workflows/release-workshop.yml`. It runs when we push a tag named `runvil-workshop-v0.2.0`.
 
 Four build jobs:
 
@@ -350,7 +350,7 @@ No code signing yet. Nothing is signed today. The workflow leaves clear places t
 A test after each build:
 
 - Install the produced package on a clean computer of the same kind (NSIS with the `/S` flag, mount the DMG and copy, `dpkg -i` the deb).
-- Run `promptforge-workshop --version`. It must print the version.
+- Run `runvil-workshop --version`. It must print the version.
 - Check that the installed program serves the workshop web page and that `app.js` is the small minified file, not the large debug file. A size check is enough: the minified file is under one fifth the size of the debug file.
 - If any step fails, the release does not publish.
 
@@ -383,8 +383,8 @@ Then run `git add --renormalize .` and commit the result on its own. This is the
 
 This part comes from a build-friction inventory of the repository. The findings, with evidence:
 
-- The root README says to run `cargo build`. Because the workspace members are `crates/*`, that command builds every crate, including `promptforge-workshop`. The workshop's default feature is `cuda`, which turns on the whisper CUDA build. On macOS and Linux this fails without the CUDA toolkit. On Linux it also fails without the webkit2gtk system packages that Tauri needs. CI never runs this path: the Linux jobs exclude the workshop, and the workshop job runs on Windows with `--no-default-features`.
-- The lean path, `cargo build -p promptforge-gateway`, works on macOS and Linux today. Its default features (local, web-search, config-ui) pull in no CUDA, no Tauri, and no whisper. It needs only a C compiler (for the vendored Lua, onig, and ring) and network access for a one-time 130 MB model download.
+- The root README says to run `cargo build`. Because the workspace members are `crates/*`, that command builds every crate, including `runvil-workshop`. The workshop's default feature is `cuda`, which turns on the whisper CUDA build. On macOS and Linux this fails without the CUDA toolkit. On Linux it also fails without the webkit2gtk system packages that Tauri needs. CI never runs this path: the Linux jobs exclude the workshop, and the workshop job runs on Windows with `--no-default-features`.
+- The lean path, `cargo build -p runvil-gateway`, works on macOS and Linux today. Its default features (local, web-search, config-ui) pull in no CUDA, no Tauri, and no whisper. It needs only a C compiler (for the vendored Lua, onig, and ring) and network access for a one-time 130 MB model download.
 - The submodule is needed only for the Windows `llama-cuda` feature. After Part B3 it is gone entirely.
 - The README and `AGENTS.md` disagree about Node. One says the default build needs Node 22; the build scripts say a fresh clone with a good checked-in `dist` needs no Node. After Part A, Node is always required, which settles this.
 - There is no `rust-toolchain.toml`, so a developer with an older Rust gets a confusing error instead of a clear one.
@@ -395,10 +395,10 @@ This part comes from a build-friction inventory of the repository. The findings,
 In the root `Cargo.toml`, add:
 
 ```toml
-default-members = ["crates/promptforge-gateway"]
+default-members = ["crates/runvil-gateway"]
 ```
 
-After this, `cargo build` and `cargo test` with no `-p` flag build only the gateway and its dependencies. This works on a fresh clone on macOS and Linux with no CUDA toolkit, no Tauri system packages, and (after Part B3) no submodule. Building the desktop app becomes an explicit choice: `cargo build -p promptforge-workshop`. Zed does exactly this (`default-members = ["crates/zed"]`).
+After this, `cargo build` and `cargo test` with no `-p` flag build only the gateway and its dependencies. This works on a fresh clone on macOS and Linux with no CUDA toolkit, no Tauri system packages, and (after Part B3) no submodule. Building the desktop app becomes an explicit choice: `cargo build -p runvil-workshop`. Zed does exactly this (`default-members = ["crates/zed"]`).
 
 ### E2. Per-OS setup instructions
 
@@ -408,7 +408,7 @@ Add a "Build from source" section to the root README with three subsections.
 
 ```bash
 sudo apt install build-essential pkg-config cmake clang libclang-dev
-# only for the desktop app (promptforge-workshop):
+# only for the desktop app (runvil-workshop):
 sudo apt install libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
@@ -421,7 +421,7 @@ brew install cmake node
 
 **Windows:** Visual Studio with the C++ workload, CMake, Node.js 22. The CUDA toolkit is needed only for the whisper CUDA feature, which the workshop enables by default on Windows.
 
-Each subsection ends with the two commands: `cargo build` for the gateway, `cargo build -p promptforge-workshop` for the desktop app.
+Each subsection ends with the two commands: `cargo build` for the gateway, `cargo build -p runvil-workshop` for the desktop app.
 
 ### E3. Pin the Rust toolchain
 
@@ -436,7 +436,7 @@ This matches the MSRV in the workspace `Cargo.toml` and the CI pin. A developer 
 
 ### E4. Align the documentation
 
-- Root README: replace the current build section with the E2 section. State that Node 22 and `npm ci` in both `ui/` folders are required (Part A makes this true). State that `cargo build` builds the gateway and `cargo build -p promptforge-workshop` builds the desktop app.
+- Root README: replace the current build section with the E2 section. State that Node 22 and `npm ci` in both `ui/` folders are required (Part A makes this true). State that `cargo build` builds the gateway and `cargo build -p runvil-workshop` builds the desktop app.
 - `AGENTS.md`: same two commands.
 - Gateway README: fix the line that says the default build needs Node 22. After Part A it does, but the sentence should say Node is needed for the UI build, not for Rust itself.
 - Guide: add one line to the README, "build the guide locally with `mdbook build guide`".
@@ -448,15 +448,15 @@ Add one job to `.github/workflows/ci.yml`:
 - Runner `ubuntu-22.04`.
 - Install the Tauri system packages from E2.
 - Install Node 22, run `npm ci` in both `ui/` folders.
-- Run `cargo build -p promptforge-workshop --no-default-features`.
+- Run `cargo build -p runvil-workshop --no-default-features`.
 
 This is the first time CI builds the desktop app on Linux. It catches the class of failure your teammates are hitting. It does not run the app, only compiles it. The release workflow in Part C2 already builds the real installers.
 
 ### E6. Test Part E
 
-1. On a clean Ubuntu 22.04 container with only the E2 packages: `git clone`, `npm ci` in both `ui/` folders, `cargo build` succeeds and produces `promptforge-gateway`.
+1. On a clean Ubuntu 22.04 container with only the E2 packages: `git clone`, `npm ci` in both `ui/` folders, `cargo build` succeeds and produces `runvil-gateway`.
 2. Same on macOS with only CLT, cmake, and node.
-3. `cargo build -p promptforge-workshop --no-default-features` succeeds on Ubuntu with the Tauri packages.
+3. `cargo build -p runvil-workshop --no-default-features` succeeds on Ubuntu with the Tauri packages.
 4. `cargo test` (no flags) runs the gateway tests and passes with no GPU and no models.
 5. Commit.
 
@@ -491,11 +491,11 @@ This is the first time CI builds the desktop app on Linux. It catches the class 
 Run these in order after the last `wip` commit. All must pass before the squash.
 
 1. `git status --porcelain` prints nothing.
-2. `cargo build` (no flags) succeeds and produces `promptforge-gateway`.
-3. `cargo build -p promptforge-workshop --no-default-features` succeeds.
+2. `cargo build` (no flags) succeeds and produces `runvil-gateway`.
+3. `cargo build -p runvil-workshop --no-default-features` succeeds.
 4. `cargo test` (no flags) passes with no GPU and no models.
-5. `cargo build --release -p promptforge-gateway` succeeds and the binary serves `/config/`.
-6. `cargo test -p promptforge-workshop-server` passes (the asset tests in `assets.rs`).
+5. `cargo build --release -p runvil-gateway` succeeds and the binary serves `/config/`.
+6. `cargo test -p runvil-workshop-server` passes (the asset tests in `assets.rs`).
 7. On Windows with a Blackwell GPU, after B2 has published its release: a run of the gateway with default config downloads the Blackwell zip and `llama-server --list-devices` shows CUDA.
 8. The three workflow files parse (`llama-cuda-blackwell.yml`, `release.yml`, `release-workshop.yml`). Full end-to-end release testing happens on GitHub, not locally; local verification covers steps 1 through 6, and step 7 needs the B2 release to exist.
 
@@ -508,11 +508,11 @@ Steps 7 and 8 cannot run fully until the workflows execute on GitHub. The squash
 
 Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Everything below this heading is derived annotation, not part of the original plan.
 
-# Enrichment: PromptForge Build Simplification
+# Enrichment: Runvil Build Simplification
 
 ## Why this plan exists
 
-The trigger was frustration, not a feature request. Mid-chat, while cherry-picking upstream PR 10, the user said: "I am getting fucking sick of this shit with the ui/dist changing and showing dirty on github." That sent the session into a comparative study of Zed and Unsloth builds. The study's headline finding framed the whole plan: PromptForge was the only one of the three that runs a web bundler inside the compiler, the only one that compiles CUDA inside the compiler, and the only one that tracks built UI output in git.
+The trigger was frustration, not a feature request. Mid-chat, while cherry-picking upstream PR 10, the user said: "I am getting fucking sick of this shit with the ui/dist changing and showing dirty on github." That sent the session into a comparative study of Zed and Unsloth builds. The study's headline finding framed the whole plan: Runvil was the only one of the three that runs a web bundler inside the compiler, the only one that compiles CUDA inside the compiler, and the only one that tracks built UI output in git.
 
 Later the user widened the scope beyond the dirty tree: "Its not just about the ui/dist stuff. Its about being able to build easier in general. My teammates on mac and linux report endless headaches." This sentence is the reason Part E (fresh-clone builds on macOS/Linux) exists; without it the plan was only Part A.
 
@@ -523,7 +523,7 @@ These sentences settled the design. They are quoted because they carry intent th
 - "I no longer care about keeping crates on crates.io." - killed the packaging constraints that crates.io imposes (no network at build time, no prebuilt binaries), which is what made prebuilt-installer delivery possible at all.
 - "The primary delivery vehicle will be a prebuilt installer binary for Linux, Mac, or Windows."
 - "I'm okay with the CUDA prebuild, but since I have dual Blackwell home setup I also need a specialized build. Can we move that to its own separate build product and have it built on GitHub with GitHub Actions and published as a release binary with known SHA?" - the origin of Part B.
-- "A shared helper for the app.js build or whatever is fine, but call it ui-build not promptforge-anything." - naming was the user's, and he challenged the premise: "Are you sure that the same helper will always be applicable to both?" The plan's "Answers to earlier questions" section exists to answer that challenge.
+- "A shared helper for the app.js build or whatever is fine, but call it ui-build not runvil-anything." - naming was the user's, and he challenged the premise: "Are you sure that the same helper will always be applicable to both?" The plan's "Answers to earlier questions" section exists to answer that challenge.
 - "Leave whisper-server alone for now, because this introduces yet another port number and config headache" - the explicit rejection of the sidecar alternative (see below).
 - "standalone gateway installer github release should be for Linux" - gateway is Linux-only by user decision, not by technical limitation.
 - "I want each step to be its own interim commit and then I want you to squash everything down to 1 commit at the end once we verify it works" and "use master silly" - the wip-commit-then-squash workflow and the no-feature-branch decision.
@@ -533,10 +533,10 @@ These sentences settled the design. They are quoted because they carry intent th
 
 - **whisper-server as a sidecar child process** (replacing linked-in whisper-rs). The comparison report recommended it at low confidence; the user rejected it outright ("yet another port number and config headache"). Consequence the plan had to absorb: the workshop's default `cuda` feature still compiles whisper.cpp with nvcc, so the CUDA toolkit requirement survives on Windows workshop builds even after llama-server stops needing it.
 - **crates.io as a distribution target.** Dropped by the user; this unlocked runtime downloads of prebuilt binaries.
-- **Upstream's prebuilt CUDA llama-server for Blackwell.** Research found upstream's Windows CUDA 13.x prebuilt already covers sm_120, but the user wanted PromptForge's own specialized build with a known SHA, so Part B builds it instead of trusting upstream's artifact.
+- **Upstream's prebuilt CUDA llama-server for Blackwell.** Research found upstream's Windows CUDA 13.x prebuilt already covers sm_120, but the user wanted Runvil's own specialized build with a known SHA, so Part B builds it instead of trusting upstream's artifact.
 - **Keeping the llama.cpp submodule.** The assistant initially kept it for the Blackwell workflow, then decided a shallow CI clone at a pinned tag is cleaner so developers never need it; the plan removes the submodule entirely.
 - **Zed-style plain archives with install scripts for the gateway.** Considered against cargo-dist's native installers; cargo-dist won because it produces shell/powershell/MSI installers and GitHub Releases from a tag with no custom tooling.
-- **A single shared release tag for both products.** Rejected in favor of per-product tags (`promptforge-gateway-v*`, `promptforge-workshop-v*`) because cargo-dist and tauri-action each want to own release creation and would conflict on one tag.
+- **A single shared release tag for both products.** Rejected in favor of per-product tags (`runvil-gateway-v*`, `runvil-workshop-v*`) because cargo-dist and tauri-action each want to own release creation and would conflict on one tag.
 - **Keeping the self-hosted `cuda.yml` daily build.** Retired; its smoke-test role moves into the new Blackwell workflow.
 
 ## Deviations discovered during the run

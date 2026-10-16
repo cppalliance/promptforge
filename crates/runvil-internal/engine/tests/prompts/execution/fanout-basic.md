@@ -1,0 +1,27 @@
+---
+name: fanout_basic
+description: Two-item fanout with prologue-return arms
+runvil: 0
+---
+
+# Fanout Basic
+
+## Research
+
+```lua
+local replies = tasks.fanout("### Worker", prompt.list("### Topics"))
+return table.concat(replies, "\n")
+```
+
+### Worker
+
+```lua
+return item .. "-" .. sys.index
+```
+
+Do work.
+
+### Topics
+
+- alpha
+- beta

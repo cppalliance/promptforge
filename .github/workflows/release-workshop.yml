@@ -1,7 +1,7 @@
 name: Release Workshop
-run-name: PromptForge Workshop ${{ github.event_name == 'workflow_dispatch' && 'nonpublishing' || github.ref_name }}
+run-name: Runvil Workshop ${{ github.event_name == 'workflow_dispatch' && 'nonpublishing' || github.ref_name }}
 
-# Builds the PromptForge Workshop desktop installers for Windows, macOS
+# Builds the Runvil Workshop desktop installers for Windows, macOS
 # (ARM and Intel), and Linux (x86_64 and ARM64) on a workshop-v* tag,
 # tests each installer on a clean machine of the same kind, and publishes
 # one GitHub Release with all seven installers and a SHA256SUMS file.
@@ -141,7 +141,7 @@ jobs:
       # APPLE_CERTIFICATE/APPLE_SIGNING_IDENTITY to tauri-action's env.
 
       # tauri.conf.json ships the gateway via bundle.externalBin, which
-      # resolves binaries/promptforge-gateway-<target-triple> at bundle
+      # resolves binaries/runvil-gateway-<target-triple> at bundle
       # time; build and stage it before tauri-action runs.
       - name: Build and stage the gateway sidecar
         shell: bash
@@ -157,19 +157,19 @@ jobs:
           case "${{ matrix.args }}" in
             *--target*)
               cargo build --release --locked -p gateway --target "$triple"
-              src="target/$triple/release/promptforge-gateway$ext"
+              src="target/$triple/release/runvil-gateway$ext"
               ;;
             *)
               cargo build --release --locked -p gateway
-              src="target/release/promptforge-gateway$ext"
+              src="target/release/runvil-gateway$ext"
               ;;
           esac
           mkdir -p crates/workshop/desktop/binaries
-          staged="crates/workshop/desktop/binaries/promptforge-gateway-$triple$ext"
+          staged="crates/workshop/desktop/binaries/runvil-gateway-$triple$ext"
           cp "$src" "$staged"
           output=$("$staged" --version)
           version="${{ needs.prepare.outputs.version }}"
-          expected="promptforge-gateway $version"
+          expected="runvil-gateway $version"
           [ "$output" = "$expected" ] || { echo "staged Gateway printed '$output', expected '$expected'"; exit 1; }
 
       - name: Build the signed release app
@@ -225,7 +225,7 @@ jobs:
           fi
           bundle=$(find target -path "*/bundle/macos/*.app.tar.gz" | head -1)
           [ -n "$bundle" ] || { echo "no macOS updater bundle"; exit 1; }
-          renamed="$(dirname "$bundle")/PromptForge_${version}_${arch}.app.tar.gz"
+          renamed="$(dirname "$bundle")/Runvil_${version}_${arch}.app.tar.gz"
           mv "$bundle" "$renamed"
           mv "$bundle.sig" "$renamed.sig"
 
@@ -288,21 +288,21 @@ jobs:
           Start-Process $setup.FullName -ArgumentList "/S" -Wait
           $exe = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
             ForEach-Object { Get-ChildItem $_ -Recurse -Filter *.exe -ErrorAction SilentlyContinue } |
-            Where-Object { $_.Name -in @("promptforge-workshop.exe") } |
+            Where-Object { $_.Name -in @("runvil-workshop.exe") } |
             Select-Object -First 1
-          if (-not $exe) { throw "promptforge-workshop.exe not found after install" }
+          if (-not $exe) { throw "runvil-workshop.exe not found after install" }
           # The gateway ships as an externalBin sidecar; a default (all
           # components checked) silent install must lay it beside the desktop app.
           $gateway = @("$env:LOCALAPPDATA", "$env:ProgramFiles", "${env:ProgramFiles(x86)}") |
-            ForEach-Object { Get-ChildItem $_ -Recurse -Filter promptforge-gateway.exe -ErrorAction SilentlyContinue } |
+            ForEach-Object { Get-ChildItem $_ -Recurse -Filter runvil-gateway.exe -ErrorAction SilentlyContinue } |
             Select-Object -First 1
-          if (-not $gateway) { throw "promptforge-gateway.exe not found after install" }
+          if (-not $gateway) { throw "runvil-gateway.exe not found after install" }
           $output = (& $exe.FullName --version | Out-String).Trim()
           $version = "${{ needs.prepare.outputs.version }}"
-          $expected = "promptforge-workshop $version"
+          $expected = "runvil-workshop $version"
           if ($output -ne $expected) { throw "--version printed '$output', expected '$expected'" }
           $output
-          $configDir = Join-Path $env:USERPROFILE ".promptforge"
+          $configDir = Join-Path $env:USERPROFILE ".runvil"
           New-Item -ItemType Directory -Path $configDir -Force | Out-Null
           # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
@@ -325,7 +325,7 @@ jobs:
             $proc.Refresh()
             if ($proc.HasExited) {
               Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
-              throw "promptforge-workshop exited before serving the page with code $($proc.ExitCode)"
+              throw "runvil-workshop exited before serving the page with code $($proc.ExitCode)"
             }
             $ports = Get-NetTCPConnection -State Listen -OwningProcess $proc.Id -ErrorAction SilentlyContinue |
               Where-Object { $_.LocalAddress -eq "127.0.0.1" } |
@@ -333,7 +333,7 @@ jobs:
             foreach ($candidate in $ports) {
               try {
                 $response = Invoke-WebRequest -Uri "http://127.0.0.1:$candidate/" -UseBasicParsing -TimeoutSec 2
-                if ($response.Content -match "<title>PromptForge</title>") {
+                if ($response.Content -match "<title>Runvil</title>") {
                   $page = $response
                   $port = $candidate
                   break
@@ -357,25 +357,25 @@ jobs:
           dmg=$(find dist -name "*.dmg" | head -1)
           [ -n "$dmg" ] || { echo "no DMG in the artifact"; exit 1; }
           hdiutil attach "$dmg" -nobrowse -quiet
-          cp -R "/Volumes/PromptForge/PromptForge.app" /tmp/PromptForge.app
-          hdiutil detach "/Volumes/PromptForge" -quiet
+          cp -R "/Volumes/Runvil/Runvil.app" /tmp/Runvil.app
+          hdiutil detach "/Volumes/Runvil" -quiet
           # The bundle holds two executables (the gateway ships via
           # externalBin beside the main binary); pick the desktop app by name.
-          bin="/tmp/PromptForge.app/Contents/MacOS/promptforge-workshop"
-          [ -x "$bin" ] || { echo "promptforge-workshop not in the bundle"; exit 1; }
+          bin="/tmp/Runvil.app/Contents/MacOS/runvil-workshop"
+          [ -x "$bin" ] || { echo "runvil-workshop not in the bundle"; exit 1; }
           version="${{ needs.prepare.outputs.version }}"
           output=$("$bin" --version)
-          expected="promptforge-workshop $version"
+          expected="runvil-workshop $version"
           [ "$output" = "$expected" ] || { echo "--version printed '$output', expected '$expected'"; exit 1; }
-          mkdir -p "$HOME/.promptforge"
+          mkdir -p "$HOME/.runvil"
           # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
           # sibling gateway exists.
-          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.promptforge/"
-          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.promptforge/"
-          cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
+          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.runvil/"
+          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.runvil/"
+          cat > "$HOME/.runvil/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
@@ -390,7 +390,7 @@ jobs:
             sleep 1
           done
           [ -n "$port" ] || { echo "the workshop server never listened"; exit 1; }
-          grep -F "<title>PromptForge</title>" /tmp/workshop.html
+          grep -F "<title>Runvil</title>" /tmp/workshop.html
           size=$(curl -sf "http://127.0.0.1:$port/app.js" | wc -c)
           # The current minified workbench is about 2.5 MB.
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
@@ -408,11 +408,11 @@ jobs:
           # The deb holds two executables (the gateway ships via
           # externalBin into /usr/bin beside the main binary); pick the
           # desktop app by name.
-          bin=$(dpkg -L "$package" | grep -E '/usr/bin/promptforge-workshop$' | head -1)
-          [ -n "$bin" ] || { echo "no promptforge-workshop in the deb"; exit 1; }
+          bin=$(dpkg -L "$package" | grep -E '/usr/bin/runvil-workshop$' | head -1)
+          [ -n "$bin" ] || { echo "no runvil-workshop in the deb"; exit 1; }
           version="${{ needs.prepare.outputs.version }}"
           output=$("$bin" --version)
-          expected="promptforge-workshop $version"
+          expected="runvil-workshop $version"
           [ "$output" = "$expected" ] || { echo "--version printed '$output', expected '$expected'"; exit 1; }
           # The AppImage is not installed; check it exists and runs --version.
           appimage=$(find dist -name "*.AppImage" | head -1)
@@ -420,15 +420,15 @@ jobs:
           chmod +x "$appimage"
           output=$("$appimage" --version)
           [ "$output" = "$expected" ] || { echo "AppImage --version printed '$output', expected '$expected'"; exit 1; }
-          mkdir -p "$HOME/.promptforge"
+          mkdir -p "$HOME/.runvil"
           # A default install lays the gateway beside the desktop app, so boot
           # launches it instead of using an explicit endpoint. A minimal
           # gateway.toml keeps that first boot free of STT model downloads;
           # the dummy workshop.toml endpoint remains the fallback when no
           # sibling gateway exists.
-          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.promptforge/"
-          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.promptforge/"
-          cat > "$HOME/.promptforge/workshop.toml" <<'EOF'
+          cp .github/fixtures/workshop-package-smoke/gateway.toml "$HOME/.runvil/"
+          cp .github/fixtures/workshop-package-smoke/gateway.state.toml "$HOME/.runvil/"
+          cat > "$HOME/.runvil/workshop.toml" <<'EOF'
           [gateway]
           base_url = "http://127.0.0.1:1"
           api_key = "release-smoke"
@@ -454,7 +454,7 @@ jobs:
             if [ -n "$app_pid" ] && ! kill -0 "$app_pid" 2>/dev/null; then
               if wait "$xvfb_pid"; then status=0; else status=$?; fi
               cat "$stdout" "$stderr"
-              echo "promptforge-workshop exited before serving the page with code $status"
+              echo "runvil-workshop exited before serving the page with code $status"
               exit 1
             fi
             if [ -n "$app_pid" ]; then
@@ -462,7 +462,7 @@ jobs:
                 sed -n 's/^n127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p' | sort -u)
               for candidate in $ports; do
                 if curl -sf "http://127.0.0.1:$candidate/" -o /tmp/workshop-candidate.html &&
-                   grep -Fq "<title>PromptForge</title>" /tmp/workshop-candidate.html; then
+                   grep -Fq "<title>Runvil</title>" /tmp/workshop-candidate.html; then
                   page_port=$candidate
                   mv /tmp/workshop-candidate.html /tmp/workshop.html
                   break
@@ -473,7 +473,7 @@ jobs:
             sleep 1
           done
           [ -n "$page_port" ] || { echo "the workshop server never answered"; exit 1; }
-          grep -F "<title>PromptForge</title>" /tmp/workshop.html
+          grep -F "<title>Runvil</title>" /tmp/workshop.html
           size=$(curl -sf "http://127.0.0.1:$page_port/app.js" | wc -c)
           # The current minified workbench is about 2.5 MB.
           [ "$size" -lt 3000000 ] || { echo "app.js is unexpectedly large ($size bytes)"; exit 1; }
@@ -546,7 +546,7 @@ jobs:
 
           manifest = {
               "version": version,
-              "notes": f"PromptForge Workshop {version}",
+              "notes": f"Runvil Workshop {version}",
               "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
               "platforms": platforms,
           }
@@ -561,7 +561,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: PromptForge Workshop ${{ github.ref_name }}
+          name: Runvil Workshop ${{ github.ref_name }}
           make_latest: true
           files: |
             dist/**/*.exe
@@ -588,13 +588,13 @@ jobs:
             [ -n "$source" ] || { echo "no installer matches $pattern"; exit 1; }
             cp "$source" "dist/evergreen/$target"
           }
-          copy_one "workshop-windows/*-setup.exe" PromptForge-setup.exe
-          copy_one "workshop-macos-arm/*.dmg" PromptForge-arm64.dmg
-          copy_one "workshop-macos-intel/*.dmg" PromptForge-x64.dmg
-          copy_one "workshop-linux/*.deb" PromptForge.deb
-          copy_one "workshop-linux/*.AppImage" PromptForge.AppImage
-          copy_one "workshop-linux-arm/*.deb" PromptForge-arm64.deb
-          copy_one "workshop-linux-arm/*.AppImage" PromptForge-arm64.AppImage
+          copy_one "workshop-windows/*-setup.exe" Runvil-setup.exe
+          copy_one "workshop-macos-arm/*.dmg" Runvil-arm64.dmg
+          copy_one "workshop-macos-intel/*.dmg" Runvil-x64.dmg
+          copy_one "workshop-linux/*.deb" Runvil.deb
+          copy_one "workshop-linux/*.AppImage" Runvil.AppImage
+          copy_one "workshop-linux-arm/*.deb" Runvil-arm64.deb
+          copy_one "workshop-linux-arm/*.AppImage" Runvil-arm64.AppImage
           ls -l dist/evergreen
 
       - name: Publish the stable updater pointer
@@ -608,7 +608,7 @@ jobs:
           else
             gh release create workshop-latest \
               --target "$GITHUB_SHA" \
-              --title "PromptForge Workshop updater" \
+              --title "Runvil Workshop updater" \
               --notes "Stable updater manifest for the latest tested Workshop release." \
               --latest=false \
               dist/latest.json dist/evergreen/*

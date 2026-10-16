@@ -1,0 +1,17 @@
+//! The coroutine protocol: validated request and answer types for the
+//! yield/resume boundary between section Lua and the scheduler driver.
+//!
+//! A suspending Engine call (`models.infer(prompt)`, `h:infer(prompt)`, `call`,
+//! `tasks.fanout`, `tools.call`) is a Lua-side shim that yields a request table; the driver
+//! validates the yield into a [`Request`], dispatches it, and resumes the
+//! coroutine with the `(ok, result)` envelope rendered from an [`Answer`].
+//!
+//! The implementation is defined in the `runvil-lua` crate (the
+//! vocabulary is produced by the Lua side) and is re-exported here
+//! unchanged, so existing `crate::execute::protocol::*` paths keep working.
+
+pub(crate) use runvil_lua::{
+    Answer, Blocked, ChatOutcome, ChatResult, LocalToolOutcome, MessageContent, MessageRecord,
+    RecordRole, Request, SpawnVia, TaskDelivery, TaskPhase, TaskStatus, ToolCallOutcome,
+    ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
+};

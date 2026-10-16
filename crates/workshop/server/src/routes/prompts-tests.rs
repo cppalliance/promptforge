@@ -32,7 +32,7 @@ async fn post_contract(body: serde_json::Value) -> (StatusCode, serde_json::Valu
 const FULL_PROMPT: &str = r"---
 name: full
 description: does everything
-promptforge: 0
+runvil: 0
 max_tool_iterations: 5
 input:
   path: paper.md
@@ -72,7 +72,7 @@ async fn a_full_frontmatter_prompt_answers_every_contract_section() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["name"], "full");
     assert_eq!(json["description"], "does everything");
-    assert_eq!(json["promptforge"], 0);
+    assert_eq!(json["runvil"], 0);
     assert_eq!(json["max_tool_iterations"], 5);
     assert_eq!(
         json["input"],
@@ -171,5 +171,5 @@ async fn the_dto_serializes_absent_declarations_as_nulls() {
     assert!(json["input"].is_null());
     assert!(json["output"].is_null());
     assert!(json["max_tool_iterations"].is_null());
-    assert!(json["promptforge"].is_null());
+    assert!(json["runvil"].is_null());
 }

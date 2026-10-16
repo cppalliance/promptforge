@@ -18,7 +18,7 @@ pub(crate) const NOTIFICATIONS_NAME: &str = "org.freedesktop.Notifications";
 pub(crate) const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 
 /// The autostart entry's file name inside the XDG autostart directory.
-const AUTOSTART_FILE_NAME: &str = "promptforge-gateway.desktop";
+const AUTOSTART_FILE_NAME: &str = "runvil-gateway.desktop";
 
 /// The autostart entry's path: `$XDG_CONFIG_HOME/autostart/<name>`,
 /// defaulting to `~/.config/autostart/<name>`. An empty or relative
@@ -65,8 +65,8 @@ pub(crate) fn desktop_entry(exec_command: &str) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=PromptForge Gateway\n\
-         Comment=PromptForge inference gateway\n\
+         Name=Runvil Gateway\n\
+         Comment=Runvil inference gateway\n\
          Exec={exec_command}\n\
          Terminal=false\n"
     )
@@ -78,7 +78,7 @@ pub(crate) fn desktop_entry(exec_command: &str) -> String {
 /// directory, because it records user-facing state rather than a
 /// runtime fact.
 pub(crate) fn notification_marker(home: &Path) -> PathBuf {
-    home.join(".promptforge").join("tray-notification-sent")
+    home.join(".runvil").join("tray-notification-sent")
 }
 
 /// The no-watcher notification's body, naming the Settings handoff URL

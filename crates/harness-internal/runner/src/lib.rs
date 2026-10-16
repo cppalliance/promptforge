@@ -28,7 +28,7 @@
 //!   and the Host's stop.
 //! - A Host installs a Plugin only by a package name its
 //!   [`PackageRegistry`] holds. The registry holds the native
-//!   `promptforge/subagents` from the start and refuses a duplicate name,
+//!   `runvil/subagents` from the start and refuses a duplicate name,
 //!   and install refuses the native's local name to every other package,
 //!   so no other Plugin can take `subagents`.
 

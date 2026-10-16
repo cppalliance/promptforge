@@ -13,9 +13,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use harness::{BoxFuture, InferenceBroker};
-use promptforge::RunLimits;
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::RunLimits;
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, Message, ModelBinding, ModelCatalog, ToolSchema,
 };
 
@@ -24,7 +24,7 @@ use crate::config::{GatewayEndpoint, SecretString};
 use crate::transport::GatewayChat;
 use crate::wire::delta::StreamDelta;
 
-/// A model broker that sends the Harness's model rounds to the PromptForge
+/// A model broker that sends the Harness's model rounds to the Runvil
 /// Gateway and lists the Gateway's models.
 ///
 /// A Host passes this broker to the Harness as its [`InferenceBroker`].

@@ -109,7 +109,7 @@ fn output_path(test: &str) -> PathBuf {
 }
 
 /// An empty temp home directory: the binary's secrets loader must never
-/// read the operator's real `~/.promptforge/cloud-provider-secrets.env`
+/// read the operator's real `~/.runvil/cloud-provider-secrets.env`
 /// during a fixture run.
 fn empty_home(test: &str) -> PathBuf {
     let home = std::env::temp_dir().join(format!(
@@ -209,7 +209,7 @@ fn binary_secrets_file_overrides_environment() {
         "shared-cloud-providers-secrets-home-{}",
         std::process::id()
     ));
-    let secrets_dir = home.join(".promptforge");
+    let secrets_dir = home.join(".runvil");
     let Ok(()) = std::fs::create_dir_all(&secrets_dir) else {
         panic!("create the fixture secrets directory");
     };
@@ -337,7 +337,7 @@ fn binary_reports_each_failed_keyed_provider_on_stderr() {
 #[test]
 fn binary_defaults_output_to_the_profile_dir() {
     // No output argument: the sheet must land at
-    // `<home>/.promptforge/cloud-provider-models.json`.
+    // `<home>/.runvil/cloud-provider-models.json`.
     let home = empty_home("default-output");
     let mut command = Command::new(BIN);
     for provider in providers() {
@@ -350,7 +350,7 @@ fn binary_defaults_output_to_the_profile_dir() {
     let Ok(result) = command.output() else {
         panic!("run the sheet-building binary");
     };
-    let output = home.join(".promptforge").join("cloud-provider-models.json");
+    let output = home.join(".runvil").join("cloud-provider-models.json");
     let sheet = read_output(&output, &result);
     let _ = std::fs::remove_dir_all(&home);
 

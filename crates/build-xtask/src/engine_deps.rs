@@ -1,7 +1,7 @@
 //! Engine dependency guard: no Engine crate depends on an async runtime,
 //! an HTTP client, or an OS entropy source, directly or transitively.
 //!
-//! The Engine (the `promptforge` and `promptforge-*` crates) is a
+//! The Engine (the `runvil` and `runvil-*` crates) is a
 //! deterministic state machine: every wait becomes an effect the Harness
 //! performs, and every pseudo-random value comes from a seed. Its crates,
 //! tests included, therefore never depend on `tokio`, `tokio-util`,

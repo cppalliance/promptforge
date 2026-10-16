@@ -48,7 +48,7 @@ fn external_server(value: &str, source: &str) -> Result<ProvisionedServer> {
 
 impl ArtifactStore {
     /// Resolves the `llama-server` executable for this machine: the configured
-    /// `llama_server_path` first, then the `PROMPTFORGE_LLAMA_SERVER`
+    /// `llama_server_path` first, then the `RUNVIL_LLAMA_SERVER`
     /// environment variable, then the managed download of the pinned build
     /// for the selected backend, writing the download, verify, and extract
     /// stages into `activity`'s text, when given.
@@ -75,10 +75,10 @@ impl ArtifactStore {
         if let Some(path) = selection.server_path {
             return external_server(path, "[local] llama_server_path");
         }
-        if let Some(value) = std::env::var_os("PROMPTFORGE_LLAMA_SERVER") {
+        if let Some(value) = std::env::var_os("RUNVIL_LLAMA_SERVER") {
             return external_server(
                 &value.to_string_lossy(),
-                "the PROMPTFORGE_LLAMA_SERVER environment variable",
+                "the RUNVIL_LLAMA_SERVER environment variable",
             );
         }
         // The GPU probe matters only for the Windows x86-64 `auto` pick;

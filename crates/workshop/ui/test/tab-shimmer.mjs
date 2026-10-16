@@ -57,7 +57,7 @@ for (const name of ["window", "document", "Element", "HTMLElement", "Node", "Mou
   globalThis[name] = dom.window[name];
 }
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-tab-shimmer-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-tab-shimmer-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { PanelTab, setTabLoading, calls } = await import(pathToFileURL(bundlePath).href);
 

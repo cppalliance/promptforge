@@ -1,4 +1,4 @@
-//! Builds the PromptForge Gateway, stages it for Tauri, builds Workshop,
+//! Builds the Runvil Gateway, stages it for Tauri, builds Workshop,
 //! and removes the temporary staged sidecar.
 
 use std::ffi::OsString;
@@ -18,7 +18,7 @@ use pipeline::build_workshop;
 use runner::install_interrupt_handler;
 
 const USAGE: &str = "\
-Build PromptForge Gateway and Workshop together.
+Build Runvil Gateway and Workshop together.
 
 USAGE:
     cargo workshop [--release] [--target <triple>]

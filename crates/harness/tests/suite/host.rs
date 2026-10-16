@@ -14,20 +14,20 @@ use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::{MemoryRecorder, RecordKind, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest};
-use promptforge::effect::Round;
-use promptforge::event::ReplyOrigin;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::event::ReplyOrigin;
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
-use promptforge_plugin::ToolError;
+use runvil_plugin::ToolError;
 
 use crate::asker::{AskBroker, asker_host, broker_services};
 use crate::support::{Clock, Offline};
 
 /// Asks the operator once and returns the answer.
 const ASKS: &str = concat!(
-    "---\nname: asks\ndescription: Asks the operator once\npromptforge: 0\n",
+    "---\nname: asks\ndescription: Asks the operator once\nrunvil: 0\n",
     "plugins:\n  - user-input\n",
     "---\n\n# Asks\n\n## Only\n\n```lua\n",
     "return input.ask()\n",
@@ -37,7 +37,7 @@ const ASKS: &str = concat!(
 /// Waits on one model round under a `pcall`, and returns the error kind
 /// when the round fails.
 const PATIENT: &str = concat!(
-    "---\nname: patient\ndescription: Waits on the model\npromptforge: 0\n",
+    "---\nname: patient\ndescription: Waits on the model\nrunvil: 0\n",
     "models: { writer: {} }\n",
     "---\n\n# Patient\n\n## Only\n\n```lua\n",
     "local writer = models.get('writer')\n",
@@ -48,7 +48,7 @@ const PATIENT: &str = concat!(
 
 /// Runs one section round and returns the model's reply.
 const CHATS: &str = concat!(
-    "---\nname: chats\ndescription: Says hello to the model\npromptforge: 0\n",
+    "---\nname: chats\ndescription: Says hello to the model\nrunvil: 0\n",
     "models: { writer: {} }\n",
     "---\n\n# Chats\n\n## Only\n\n```lua\n",
     "local msgs = messages.new()\n",

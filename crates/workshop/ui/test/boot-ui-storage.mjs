@@ -103,7 +103,7 @@ const DEFAULT_EDITOR_SETTINGS = {
 };
 const SEEDED_EDITOR_SETTINGS = USER_DOC.editor_settings;
 
-// The workspace bucket (.pfwork kv rows): a v5 layout envelope as
+// The workspace bucket (.rvwork kv rows): a v5 layout envelope as
 // buildLayoutEnvelope writes it (tree left, agent right) whose group ids
 // are distinctive, so a restore is told from the default layout by the
 // zone map alone; an expanded set; a closed stack.

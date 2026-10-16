@@ -18,7 +18,7 @@
 //! 5. A 400 whose body names a content policy term is `Refused`.
 //! 6. Every other status is `Rejected`.
 
-use promptforge::model::{CompletionError, CompletionErrorKind};
+use runvil::model::{CompletionError, CompletionErrorKind};
 
 /// Body phrases the known backends emit when a request exceeds the model's
 /// context window (OpenAI and compatible gateways, Anthropic, llama.cpp,

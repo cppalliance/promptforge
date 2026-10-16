@@ -140,7 +140,7 @@ await assertNoLeaks(lifecycle, async () => {
     "an available update toasts once as info",
     toasts.shown.length === 1 &&
       toasts.shown[0]?.kind === "info" &&
-      toasts.shown[0]?.message === "PromptForge 0.3.0 is available",
+      toasts.shown[0]?.message === "Runvil 0.3.0 is available",
   );
   const banner = window.document.querySelector(".ws-update-banner");
   check("the banner keeps the actionable available state", banner?.hidden === false);
@@ -316,7 +316,7 @@ await assertNoLeaks(lifecycle, async () => {
   const icon = card?.querySelector(".ws-about-dialog__icon");
   check(
     "the About card shows the decorative product icon",
-    icon?.tagName === "IMG" && icon?.getAttribute("src") === "/icons/promptforge-icon.png" && icon?.getAttribute("alt") === "",
+    icon?.tagName === "IMG" && icon?.getAttribute("src") === "/icons/runvil-icon.png" && icon?.getAttribute("alt") === "",
   );
   const field = (name) => card?.querySelector(`.ws-about-dialog__row[data-field="${name}"]`);
   check("the version row shows the running version", field("version")?.querySelector(".ws-about-dialog__value")?.textContent === "0.2.0");

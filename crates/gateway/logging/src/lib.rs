@@ -1,4 +1,4 @@
-//! Bounded, prioritized file logging for the PromptForge gateway.
+//! Bounded, prioritized file logging for the Runvil gateway.
 //!
 //! [`LogRuntime`] owns one worker thread that drains a bounded priority
 //! queue into a rotated `gateway.log`; [`LogWriter`] adapts the queue to

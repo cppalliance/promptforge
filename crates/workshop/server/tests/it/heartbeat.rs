@@ -17,7 +17,7 @@ use crate::common::{JsonSocket, RECV_TIMEOUT, TestServer, spawn_gateway};
 
 /// The catalog the mock gateway serves from `/v1/models`.
 const CATALOG: &str =
-    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
+    r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"runvil"}]}"#;
 
 /// A mock `/health` whose answer flips under test control.
 async fn flippable_health(State(healthy): State<Arc<AtomicBool>>) -> Response {
@@ -77,7 +77,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog() {
         frame,
         json!({
             "type": "models",
-            "models": [{"id": "test-model", "object": "model", "owned_by": "promptforge"}],
+            "models": [{"id": "test-model", "object": "model", "owned_by": "runvil"}],
         }),
         "the refreshed catalog arrives as one models frame"
     );
@@ -93,7 +93,7 @@ async fn a_gateway_reconnect_pushes_the_refreshed_catalog() {
         resent,
         json!({
             "type": "models",
-            "models": [{"id": "test-model", "object": "model", "owned_by": "promptforge"}],
+            "models": [{"id": "test-model", "object": "model", "owned_by": "runvil"}],
         }),
         "a connection made after the push still receives the catalog"
     );

@@ -84,8 +84,8 @@ fn retries_after_foreign_health_listener_wins_selected_port() {
         [foreign.port, fresh_port]
     );
     assert_eq!(guard.port, fresh_port);
-    assert_eq!(guard.model_alias(), "promptforge-test-model-1");
-    assert_eq!(guard.api_key(), "promptforge-test-key-1");
+    assert_eq!(guard.model_alias(), "runvil-test-model-1");
+    assert_eq!(guard.api_key(), "runvil-test-key-1");
 }
 
 #[test]

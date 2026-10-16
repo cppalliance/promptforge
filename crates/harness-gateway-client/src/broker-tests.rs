@@ -9,10 +9,10 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use harness::InferenceBroker;
-use promptforge::effect::Round;
-use promptforge::event::ReplyOrigin;
-use promptforge::ids::RoundId;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::event::ReplyOrigin;
+use runvil::ids::RoundId;
+use runvil::model::{
     CompletionOptions, CompletionResult, Message, ModelBinding, ModelId, ModelInvocation,
     ThinkingMode,
 };

@@ -81,14 +81,10 @@ fn request(
 async fn packaged_runtime_preserves_native_transcription_contract() {
     let _guard = NATIVE_TEST.lock().await;
     let temp = tempfile::tempdir().expect("temporary packaged-runtime directory");
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
     let model = temp.path().join("ggml-tiny.en.bin");
     std::fs::copy(
-        require_fixture(
-            "PROMPTFORGE_WHISPER_MODEL",
-            &fixture_dir(),
-            "ggml-tiny.en.bin",
-        ),
+        require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin"),
         &model,
     )
     .expect("copy the exact tiny model fixture");
@@ -186,12 +182,8 @@ async fn packaged_runtime_preserves_native_transcription_contract() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn independent_final_jobs_do_not_require_a_reset() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
 
@@ -211,12 +203,8 @@ async fn independent_final_jobs_do_not_require_a_reset() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn one_final_job_cannot_change_another_jobs_history() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
     let prompt_sensitive = samples[6 * 16_000..8 * 16_000].to_vec();
@@ -266,12 +254,8 @@ async fn one_final_job_cannot_change_another_jobs_history() {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn final_decode_is_absent_without_a_final_model() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let engine = engine(library, model, None);
     let error = engine
         .decode(request(DecodeMode::Final, jfk_samples(), Vec::new(), ""))
@@ -290,12 +274,8 @@ async fn final_decode_is_absent_without_a_final_model() {
 #[ignore = "requires packaged whisper and model fixtures"]
 async fn configured_model_branches_write_their_load_text_then_release_the_activity() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let hub = ProgressHub::new();
     let activity = Arc::new(hub.begin("loading-speech"));
 
@@ -323,12 +303,8 @@ async fn configured_model_branches_write_their_load_text_then_release_the_activi
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn interim_word_ends_rise_inside_their_window_one_per_word() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
     let windows = [
@@ -396,12 +372,8 @@ fn whisper_source(error: &TranscribeError) -> Option<&WhisperError> {
 #[ignore = "requires packaged whisper, model, and audio fixtures"]
 async fn a_decode_ends_when_its_cancellation_flag_is_set() {
     let _guard = NATIVE_TEST.lock().await;
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
     let engine = engine(library, model.clone(), Some(model));
     let samples = jfk_samples();
 

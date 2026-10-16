@@ -3,7 +3,7 @@ name: Auto-generate config on first run
 overview: Config generation, gateway cache API, status bar with observer and activity LED, CSS skinning, and gateway resilience - all in one plan touching both the gateway and the workbench.
 todos:
   - id: auto-config
-    content: Auto-generate ~/.promptforge/workbench.toml on first run, remove from_env path
+    content: Auto-generate ~/.runvil/workbench.toml on first run, remove from_env path
     status: completed
   - id: gateway-cache-api
     content: "Gateway: POST/GET/DELETE /v1/cache with SSE download progress"
@@ -28,14 +28,14 @@ isProject: false
 
 # Auto-generate config, gateway cache API, status bar, and skinning
 
-This plan touches both the promptforge-gateway and the promptforge workbench crates. It assumes the stage-1 build is complete (commits through `cb00dee` on master in the promptforge repo at `c:\Users\Vinnie\cursor\promptforge`).
+This plan touches both the runvil-gateway and the runvil workbench crates. It assumes the stage-1 build is complete (commits through `cb00dee` on master in the runvil repo at `c:\Users\Vinnie\cursor\runvil`).
 
 ## Context for a fresh reader
 
-The promptforge workspace (`c:\Users\Vinnie\cursor\promptforge`) contains:
-- `crates/promptforge-gateway` - a local model gateway serving OpenAI-compatible chat completions, with local GGUF provisioning via hf-hub
-- `crates/promptforge-wb-server` - an axum HTTP server: chat proxy to the gateway via WebSocket, append-only tape, push-to-talk voice with whisper-rs transcription, dark Cursor-like UI served as embedded static assets
-- `crates/promptforge-wb` - a desktop shell (wry/tao window) that spawns the server in-process
+The runvil workspace (`c:\Users\Vinnie\cursor\runvil`) contains:
+- `crates/runvil-gateway` - a local model gateway serving OpenAI-compatible chat completions, with local GGUF provisioning via hf-hub
+- `crates/runvil-wb-server` - an axum HTTP server: chat proxy to the gateway via WebSocket, append-only tape, push-to-talk voice with whisper-rs transcription, dark Cursor-like UI served as embedded static assets
+- `crates/runvil-wb` - a desktop shell (wry/tao window) that spawns the server in-process
 
 The workbench currently requires a `workbench.toml` config file (or env vars) to start. Voice requires manually downloading whisper models. The UI has no status feedback, no activity indicator, and an ugly native scrollbar.
 
@@ -46,25 +46,25 @@ The workbench currently requires a `workbench.toml` config file (or env vars) to
 - Follow `tools-public/rulebooks/rust-rulebook.md` for all Rust.
 - Follow `tools-public/rulebooks/html-css-rulebook.md` for all UI work: semantic HTML, BEM-style classes, CSS custom properties, no inline styles, accessible contrast.
 - When a build decision contradicts or extends the design notes, revise the notes in the same commit.
-- Record every design choice in `design/design-promptforge-wb-1.md` (append, choice/evidence/cost format).
+- Record every design choice in `design/design-runvil-wb-1.md` (append, choice/evidence/cost format).
 - Do NOT stop for user confirmation between steps. Fix forward.
 
 ## Step 1: Auto-generate config on first run
 
 **What changes:**
-- `crates/promptforge-wb/src/discover.rs`: when no TOML is found in the three-path search (exe dir, cwd, `~/.promptforge/`), create `~/.promptforge/` if missing, write `~/.promptforge/workbench.toml` with the default content below, log the path, and return it. The app never exits on missing config.
-- `crates/promptforge-wb-server/src/config.rs`: remove the `from_env` / `from_env_lookup` functions added in commit `cb00dee`. The generated TOML uses `${VAR}` interpolation for the gateway fields - the existing interpolation machinery resolves them. If the env var is unset, interpolation resolves to empty string: empty `api_key` means no Authorization header is sent; empty `base_url` falls back to the hard default `http://127.0.0.1:8081`.
+- `crates/runvil-wb/src/discover.rs`: when no TOML is found in the three-path search (exe dir, cwd, `~/.runvil/`), create `~/.runvil/` if missing, write `~/.runvil/workbench.toml` with the default content below, log the path, and return it. The app never exits on missing config.
+- `crates/runvil-wb-server/src/config.rs`: remove the `from_env` / `from_env_lookup` functions added in commit `cb00dee`. The generated TOML uses `${VAR}` interpolation for the gateway fields - the existing interpolation machinery resolves them. If the env var is unset, interpolation resolves to empty string: empty `api_key` means no Authorization header is sent; empty `base_url` falls back to the hard default `http://127.0.0.1:8081`.
 - Update both crate READMEs and `workbench.example.toml` header.
 
-**The generated file (`~/.promptforge/workbench.toml`):**
+**The generated file (`~/.runvil/workbench.toml`):**
 ```toml
-# PromptForge Workbench configuration
+# Runvil Workbench configuration
 # Generated on first run. Edit as needed.
-# See: crates/promptforge-wb-server/README.md
+# See: crates/runvil-wb-server/README.md
 
 [gateway]
-base_url = "${PROMPTFORGE_GATEWAY_URL}"
-api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+base_url = "${RUNVIL_GATEWAY_URL}"
+api_key = "${RUNVIL_GATEWAY_API_KEY}"
 
 [server]
 bind = "127.0.0.1:7910"
@@ -75,9 +75,9 @@ path = "tape.jsonl"
 
 [voice]
 # Download from: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
-interim_model = "~/.promptforge/models/ggml-large-v3-turbo.bin"
+interim_model = "~/.runvil/models/ggml-large-v3-turbo.bin"
 # Download from: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
-final_model = "~/.promptforge/models/ggml-large-v3.bin"
+final_model = "~/.runvil/models/ggml-large-v3.bin"
 window_seconds = 5
 interval_ms = 800
 ```
@@ -90,14 +90,14 @@ interval_ms = 800
 
 ## Step 2: Gateway cache API
 
-Add to `crates/promptforge-gateway`:
+Add to `crates/runvil-gateway`:
 
 **Routes (bearer-authenticated):**
 - `POST /v1/cache` - body: `{"source": "<HF URL>", "sha256": "<optional>"}`. If already cached: returns `{"path": "...", "status": "ready"}`. If not cached: responds with an SSE stream - `data: {"status": "downloading", "bytes": N, "total": N}` events, terminated by `data: {"status": "ready", "path": "..."}`.
 - `GET /v1/cache` - returns `[{"source", "path", "sha256", "size_bytes"}, ...]`.
 - `DELETE /v1/cache/{sha256}` - removes from disk and listing.
 
-**Implementation:** the download logic already exists in the gateway's local-model provisioning (`hf-hub` crate from Hugging Face, progress via `indicatif`, SHA256 verification). Refactor into a reusable internal function, expose through the new routes. Cache directory: the gateway's existing `[local].cache_dir` (default `~/.promptforge`). No new config fields.
+**Implementation:** the download logic already exists in the gateway's local-model provisioning (`hf-hub` crate from Hugging Face, progress via `indicatif`, SHA256 verification). Refactor into a reusable internal function, expose through the new routes. Cache directory: the gateway's existing `[local].cache_dir` (default `~/.runvil`). No new config fields.
 
 **Commit decomposition:**
 1. Refactor the gateway's existing download logic (from `local_runtime.rs` or equivalent) into a standalone `cache` module with `download_to_cache(source, sha256, cache_dir, progress_tx) -> Result<PathBuf>`. Test: unit test with a mock HTTP server serving a small file; assert download, SHA verify, and path.
@@ -136,10 +136,10 @@ ui/src/*.ts → esbuild --bundle → ui/dist/app.js → rust-embed serves from d
 **build.rs** in the server crate: calls `npx esbuild ui/src/main.ts --bundle --outdir=ui/dist` with `rerun-if-changed=ui/src`. This means a plain `cargo build` always produces fresh JS - you never have to run npm manually. But for fast UI iteration, run esbuild in watch mode in a separate terminal and skip Rust rebuilds entirely.
 
 **Two dev workflows (documented in the crate README):**
-1. **Simple (just cargo):** `cargo run -p promptforge-wb` - build.rs runs esbuild, rust-embed reads the output from disk. Edit TS, `cargo build` again. Works with no npm knowledge.
+1. **Simple (just cargo):** `cargo run -p runvil-wb` - build.rs runs esbuild, rust-embed reads the output from disk. Edit TS, `cargo build` again. Works with no npm knowledge.
 2. **Fast (esbuild watch):** `npx esbuild --watch ui/src/main.ts --bundle --outdir=ui/dist` in one terminal, `cargo run` in another. Edit TS, save, refresh browser. No Rust recompile for UI changes.
 
-**package.json** at `crates/promptforge-wb-server/ui/`: `dockview`, `esbuild` (dev), and `typescript` (dev, for type checking only - esbuild handles emit).
+**package.json** at `crates/runvil-wb-server/ui/`: `dockview`, `esbuild` (dev), and `typescript` (dev, for type checking only - esbuild handles emit).
 
 ## Step 3: Migrate chat from SSE to WebSocket, add observer and status
 
@@ -219,7 +219,7 @@ Server to client:
 
 ### Observer integration (details above, executed in commits 7-8)
 
-Add to `crates/promptforge-wb-server`:
+Add to `crates/runvil-wb-server`:
 
 **The observer.** A tokio broadcast channel of `StatusBarUpdate` held in `AppState`:
 ```rust
@@ -257,7 +257,7 @@ Internal debug-level hooks (~170 points across the codebase) also call the obser
 
 ## Step 4: Status bar UI
 
-In `crates/promptforge-wb-server/ui/`:
+In `crates/runvil-wb-server/ui/`:
 
 - A permanent status bar docked at the bottom of the window (below the composer)
 - Left: text string from the observer
@@ -287,7 +287,7 @@ Consolidate all visuals in `style.css`:
 
 ## Step 6: Gateway resilience
 
-In `crates/promptforge-wb-server`:
+In `crates/runvil-wb-server`:
 - A background task polls `GET /health` on the gateway every 5 seconds (interval configurable later).
 - On failure: observer emits "Gateway unreachable" (Info, Activity::Gateway). Subsystems that depend on the gateway (chat, model catalog, cache) return user-visible errors in the UI but never crash.
 - On reconnection: observer emits "Connected to gateway". The model catalog is refreshed automatically.
@@ -313,12 +313,12 @@ At startup, after the gateway heartbeat reports connected:
 
 ## Key paths
 
-- Workspace root: `c:\Users\Vinnie\cursor\promptforge`
-- Gateway crate: `crates/promptforge-gateway/`
-- Workbench server: `crates/promptforge-wb-server/`
-- Workbench shell: `crates/promptforge-wb/`
-- UI assets: `crates/promptforge-wb-server/ui/`
-- Decision log: `design/design-promptforge-wb-1.md`
+- Workspace root: `c:\Users\Vinnie\cursor\runvil`
+- Gateway crate: `crates/runvil-gateway/`
+- Workbench server: `crates/runvil-wb-server/`
+- Workbench shell: `crates/runvil-wb/`
+- UI assets: `crates/runvil-wb-server/ui/`
+- Decision log: `design/design-runvil-wb-1.md`
 - Rulebooks: `c:\Users\Vinnie\cursor\tools-public\rulebooks/` (vibe-rulebook.md, rust-rulebook.md, html-css-rulebook.md)
 
 
@@ -332,7 +332,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Why this plan exists
 
-This is the PromptForge workbench stage-2 plan, created 2026-08-24 in the creator chat right after stage 1 (window + mic, commits through cb00dee) first ran on the user's machine. Three frustrations from that first live session drove it:
+This is the Runvil workbench stage-2 plan, created 2026-08-24 in the creator chat right after stage 1 (window + mic, commits through cb00dee) first ran on the user's machine. Three frustrations from that first live session drove it:
 
 1. **Config friction.** Stage 1 required env vars or a hand-written TOML. The user: "no way there are too many environment variables. there should not be any. the gateway I guess is a necessary evil but that's it... the tool should create the .toml file for the user, in their user directory... and it should have defaults for everything". And the decisive analogy: "can you imagine if you install Photoshop.exe and you have to set some env vars first in order to run it? no way." This reversed an earlier stage-1 decision - the user had said "the toml should not be needed if the env vars are set", which produced the `from_env` functions in cb00dee that this plan deletes.
 
@@ -342,7 +342,7 @@ This is the PromptForge workbench stage-2 plan, created 2026-08-24 in the creato
 
 ## Design decisions and their origins
 
-- **Generated config path and shape.** The user first said "the file should be promptforge-wb.toml and we might as well just put the {$PROMPTFORGE_GATEWAY_URL} interpolation in the config file", then "if we are going with a .promptforge directory then the config can be workbench.toml". Env interpolation inside the generated TOML replaced the from_env path - one mechanism instead of two. "include the defaults for the voice models, huggingface pins".
+- **Generated config path and shape.** The user first said "the file should be runvil-wb.toml and we might as well just put the {$RUNVIL_GATEWAY_URL} interpolation in the config file", then "if we are going with a .runvil directory then the config can be workbench.toml". Env interpolation inside the generated TOML replaced the from_env path - one mechanism instead of two. "include the defaults for the voice models, huggingface pins".
 - **Cache API naming.** An "ensure this pin" endpoint was proposed; the user rejected the framing: "instead of 'ensure', which sounds like a product for geriatrics to get their vitamins, how about framing it as 'cache this model', 'list cached models', and so on". Hence POST/GET/DELETE /v1/cache.
 - **Progress events.** "the gateway reports the total bytes needed, and the number of bytes it has downloaded thus far" - hence the SSE bytes/total events.
 - **Resilience.** "the workbench must tolerate losing the connection to the gateway, and reconnecting".

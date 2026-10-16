@@ -1,4 +1,4 @@
-﻿//! Tests for the auth primitives: the one-time handoff URL, the session cookie, and the fetch-metadata gate.
+//! Tests for the auth primitives: the one-time handoff URL, the session cookie, and the fetch-metadata gate.
 
 use axum::http::HeaderMap;
 use axum::http::header::{AUTHORIZATION, COOKIE};
@@ -120,10 +120,10 @@ fn the_cookie_parses_among_others() {
 #[test]
 fn malformed_cookies_present_nothing() {
     for cookie in [
-        "promptforge-gateway-session=zz",  // not hex
-        "promptforge-gateway-session=abc", // odd length
-        "other=746573742d746f6b656e",      // the wrong name
-        "promptforge-gateway-session",     // no value at all
+        "runvil-gateway-session=zz",  // not hex
+        "runvil-gateway-session=abc", // odd length
+        "other=746573742d746f6b656e", // the wrong name
+        "runvil-gateway-session",     // no value at all
     ] {
         let headers = HeaderMap::from_iter([(COOKIE, cookie.parse().expect("a header value"))]);
         assert_eq!(presented_cookie_proof(&headers), None, "{cookie}");

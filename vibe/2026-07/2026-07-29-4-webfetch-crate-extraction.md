@@ -1,9 +1,9 @@
 ---
 name: webfetch crate extraction
-overview: Extract web_fetch from promptforge-core into a new promptforge-webfetch crate and harden it to the full fetch security surface (SSRF URL and address policy, guarded DNS resolver, per-hop redirect re-check, size and char caps, content-type routing, charset, timeouts), with a model-facing contract of url plus optional raw and max_chars returning a provenance header and text. The prose design document design-webfetch.md is generated from this plan by the Architect. Implementation follows how-to-vibe.md, one self-contained commit per step.
+overview: Extract web_fetch from runvil-core into a new runvil-webfetch crate and harden it to the full fetch security surface (SSRF URL and address policy, guarded DNS resolver, per-hop redirect re-check, size and char caps, content-type routing, charset, timeouts), with a model-facing contract of url plus optional raw and max_chars returning a provenance header and text. The prose design document design-webfetch.md is generated from this plan by the Architect. Implementation follows how-to-vibe.md, one self-contained commit per step.
 todos:
   - id: scaffold
-    content: Create promptforge-webfetch crate; move web_fetch.rs from core unchanged; wire workspace member + dep; update CLI select_tools import; remove readabilityrs/htmd + the web_fetch module and re-export from core. Behavior unchanged; moved tests pass; workspace green.
+    content: Create runvil-webfetch crate; move web_fetch.rs from core unchanged; wire workspace member + dep; update CLI select_tools import; remove readabilityrs/htmd + the web_fetch module and re-export from core. Behavior unchanged; moved tests pass; workspace green.
     status: completed
   - id: url-policy
     content: Add FetchConfig (defaults), the FetchError foundation (model-facing vs log rendering + From into core Error/ToolError), and check_url; wire it into web_fetch.call so a bad scheme/userinfo/port/IP-literal URL is rejected end-to-end before any network. Test through web_fetch incl. literal encodings.
@@ -36,11 +36,11 @@ To generate the design document: spawn one subagent whose entire prompt is - rea
 
 ## House rules (load first)
 
-Rule 3: before writing code, the code subagent loads [tools-public/how-to/how-to-write-rust.md](tools-public/how-to/how-to-write-rust.md) and follows it. The workspace lints in [promptforge/Cargo.toml](promptforge/Cargo.toml) already enforce: `unsafe` forbidden, `missing_docs` warn, clippy `all = deny` + `pedantic = warn`, `unwrap_used = deny` (tests may unwrap via `clippy.toml`). Every public item carries docs and an `# Errors` section where it returns `Result`.
+Rule 3: before writing code, the code subagent loads [tools-public/how-to/how-to-write-rust.md](tools-public/how-to/how-to-write-rust.md) and follows it. The workspace lints in [runvil/Cargo.toml](runvil/Cargo.toml) already enforce: `unsafe` forbidden, `missing_docs` warn, clippy `all = deny` + `pedantic = warn`, `unwrap_used = deny` (tests may unwrap via `clippy.toml`). Every public item carries docs and an `# Errors` section where it returns `Result`.
 
 ## Level 1: what we are building
 
-A standalone Rust crate, `promptforge-webfetch`, providing the `web_fetch` tool: given a model-chosen URL, it fetches the page over HTTP and returns readable text, while refusing any request that could reach a private or internal address or abuse resources. It replaces the unguarded in-core `web_fetch`. Alongside the code, a prose-only `design-webfetch.md` records the decisions and the why. `web_search` is untouched and stays in core: it proxies through the gateway and never takes a model-chosen URL, so it has no SSRF surface.
+A standalone Rust crate, `runvil-webfetch`, providing the `web_fetch` tool: given a model-chosen URL, it fetches the page over HTTP and returns readable text, while refusing any request that could reach a private or internal address or abuse resources. It replaces the unguarded in-core `web_fetch`. Alongside the code, a prose-only `design-webfetch.md` records the decisions and the why. `web_search` is untouched and stays in core: it proxies through the gateway and never takes a model-chosen URL, so it has no SSRF surface.
 
 ## The tool contract (model-facing)
 
@@ -54,19 +54,19 @@ It returns the readable text preceded by a short provenance header the model rea
 
 ## Level 2: high-level components, in dependency order
 
-1. `promptforge-core` (exists) owns the `Tool` trait and `Error`/`Result`. Fixed first because the new crate implements `Tool` and returns core's `Result`; nothing compiles until the trait is importable. Core also sheds `readabilityrs`/`htmd`, which move to the fetch crate.
-2. `promptforge-webfetch` (new) depends on core. The only package carrying HTTP, HTML extraction, and the SSRF policy. Bright line: removing it leaves every other crate compiling, and no other crate mentions `reqwest`, `readabilityrs`, `htmd`, `url`, or `ipnet`.
-3. `promptforge-cli` (exists) depends on both; [promptforge/crates/promptforge-cli/src/tools.rs](promptforge/crates/promptforge-cli/src/tools.rs) `select_tools` constructs `WebFetch` from the new crate instead of core.
+1. `runvil-core` (exists) owns the `Tool` trait and `Error`/`Result`. Fixed first because the new crate implements `Tool` and returns core's `Result`; nothing compiles until the trait is importable. Core also sheds `readabilityrs`/`htmd`, which move to the fetch crate.
+2. `runvil-webfetch` (new) depends on core. The only package carrying HTTP, HTML extraction, and the SSRF policy. Bright line: removing it leaves every other crate compiling, and no other crate mentions `reqwest`, `readabilityrs`, `htmd`, `url`, or `ipnet`.
+3. `runvil-cli` (exists) depends on both; [runvil/crates/runvil-cli/src/tools.rs](runvil/crates/runvil-cli/src/tools.rs) `select_tools` constructs `WebFetch` from the new crate instead of core.
 
 ```mermaid
 flowchart LR
-    Cli["promptforge-cli"] --> Core["promptforge-core (Tool, Error, WebSearch)"]
-    Cli --> WF["promptforge-webfetch (WebFetch)"]
+    Cli["runvil-cli"] --> Core["runvil-core (Tool, Error, WebSearch)"]
+    Cli --> WF["runvil-webfetch (WebFetch)"]
     WF -->|"impl Tool"| Core
     WF -->|"guarded resolver + URL policy"| Net["public internet only"]
 ```
 
-## Level 3: pieces inside promptforge-webfetch
+## Level 3: pieces inside runvil-webfetch
 
 Each capability is defined and wired into `web_fetch` in one commit, so the tool's observable behavior moves forward at every step.
 
@@ -121,13 +121,13 @@ IPv6:
 
 Each step's intent is one line a reviewer can test the diff against. Each step from 2 on changes `web_fetch`'s observable behavior and adds any error variants it needs.
 
-1. **scaffold.** Intent: web_fetch lives in `promptforge-webfetch` and behaves exactly as before. Create the crate; move [promptforge/crates/promptforge-core/src/tools/web_fetch.rs](promptforge/crates/promptforge-core/src/tools/web_fetch.rs) verbatim; add the workspace member and `[workspace.dependencies]` entry; move `readabilityrs`/`htmd` off core onto the new crate; drop the `web_fetch` module and its re-export from [promptforge/crates/promptforge-core/src/tools.rs](promptforge/crates/promptforge-core/src/tools.rs); point CLI `select_tools` at the new crate. Test: the moved `extract_markdown` tests pass and the workspace suite stays green.
+1. **scaffold.** Intent: web_fetch lives in `runvil-webfetch` and behaves exactly as before. Create the crate; move [runvil/crates/runvil-core/src/tools/web_fetch.rs](runvil/crates/runvil-core/src/tools/web_fetch.rs) verbatim; add the workspace member and `[workspace.dependencies]` entry; move `readabilityrs`/`htmd` off core onto the new crate; drop the `web_fetch` module and its re-export from [runvil/crates/runvil-core/src/tools.rs](runvil/crates/runvil-core/src/tools.rs); point CLI `select_tools` at the new crate. Test: the moved `extract_markdown` tests pass and the workspace suite stays green.
 2. **url-policy.** Intent: web_fetch rejects a URL with a bad scheme, userinfo, disallowed port, or IP literal before any network access. Add `FetchConfig` with defaults; add `FetchError` whole; add `check_url` over a parsed `url::Url` and call it at the top of `web_fetch.call`. Test through `web_fetch`: `user:pass@host`, a non-443 port, `http://` under default, and IP literals `0177.0.0.1`, `2130706433`, `[::1]`, `127.1` are each refused with the right error, and an ordinary allowed URL still fetches.
 3. **address-resolver.** Intent: web_fetch only ever connects to allowed public addresses, at connect time, across redirects, and reports the final URL. Add `ipnet`, the CIDR table above, `addr_allowed`, and `deny_extra`/`allow_exact`; add a resolver over `reqwest`'s DNS trait that filters answers through `addr_allowed`; build the client with that resolver and a custom redirect policy re-running `check_url` and the address check per hop up to `max_redirects`; the return names the final URL after redirects (the first provenance field); add the address and redirect `FetchError` variants. Test on a loopback axum server with an `allow_exact` entry: public-then-loopback succeeds then fails; a multi-answer stub yields only the public address; a redirect to `127.0.0.1` and an `https` to `http` downgrade are refused; the address unit table covers just-inside and just-outside each range, an IPv4-mapped loopback, a NAT64 address, and `169.254.169.254`.
 4. **size-caps.** Intent: web_fetch refuses oversized structured responses, truncates flat text counting decompressed bytes, and honors a per-call `max_chars`. Add a `Content-Length` precheck, a streamed `max_bytes` cap with mid-stream abort, the `max_chars` input overriding the config default, and a `truncated` flag in the return; enable reqwest `gzip`/`brotli`/`stream`; add the size `FetchError` variant. Test: oversized HTML refused, a gzip bomb refused on the decompressed count, flat text truncated with the flag, a `max_chars` call cut to length, and a body one byte under the cap accepted.
 5. **content-type.** Intent: web_fetch handles each content type per the routing rule, honors `raw`, refuses an absent type, and decodes declared charsets. Add `mime`-based routing (html to readability+htmd; other text, json, xml to decoded plain; pdf and other binary refused with an actionable message; absent refused), the `raw` input (default false) forcing whole-page rendering, the extraction mode in the return, and `encoding_rs` charset handling; add the content-type `FetchError` variants. Test: HTML extracted, `raw` forces whole-page on a table page, JSON returned verbatim, PDF refused, absent-type refused, a Latin-1 page decoded.
 6. **client-hardening.** Intent: web_fetch applies both timeouts and a bounded pool idle, and sends no cookie or credential on any hop. Add `connect_timeout`, total `timeout`, and `pool_idle_timeout` from config, set the user agent, and ensure no cookie store and no `Authorization` header; add the timeout `FetchError` variant. Test: a slow server yields a timeout; the test server confirms the request carries no cookie or credential; and neither survives a redirect.
-7. **doc.** Intent: the crate carries the generated prose design doc and no stale search doc remains referenced. Generate `design-webfetch.md` here by dispatching one subagent whose entire prompt is the To-generate line above: read this plan, grep `<design-doc>`, and follow that block. It reads this plan's design sections - the tool contract, the blocked-CIDR set, the known limits, and the rationale threaded through the steps - and writes prose only, no code, into `crates/promptforge-webfetch/design-webfetch.md`. Then move [promptforge-design/design/design-search.md](promptforge-design/design/design-search.md) to `cabinet/_trash/` (per workspace rule, never delete) and update inbound cross-references in `design.md`, `design-mcp.md`, `design-core.md`, and `design-gateway.md`. This commit changes no behavior; say so in the message and skip the parent-commit test.
+7. **doc.** Intent: the crate carries the generated prose design doc and no stale search doc remains referenced. Generate `design-webfetch.md` here by dispatching one subagent whose entire prompt is the To-generate line above: read this plan, grep `<design-doc>`, and follow that block. It reads this plan's design sections - the tool contract, the blocked-CIDR set, the known limits, and the rationale threaded through the steps - and writes prose only, no code, into `crates/runvil-webfetch/design-webfetch.md`. Then move [runvil-design/design/design-search.md](runvil-design/design/design-search.md) to `cabinet/_trash/` (per workspace rule, never delete) and update inbound cross-references in `design.md`, `design-mcp.md`, `design-core.md`, and `design-gateway.md`. This commit changes no behavior; say so in the message and skip the parent-commit test.
 
 ## Before executing: one gap pass
 

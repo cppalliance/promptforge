@@ -12,7 +12,7 @@ todos:
     content: "W3: Add whisper library rows to the artifact asset table with provision_whisper_library"
     status: completed
   - id: w4-switchover
-    content: "W4: Switch promptforge-transcribe from whisper-rs to whisper-ffi"
+    content: "W4: Switch runvil-transcribe from whisper-rs to whisper-ffi"
     status: completed
   - id: w5-feature-removal
     content: "W5: Remove the cuda feature chain from all 5 crates and the CI toolkit installs"
@@ -41,7 +41,7 @@ isProject: true
 
 Three bounded tasks, run sequentially in separate sessions:
 
-1. **Whisper shared lib (W1-W6):** One commit for the workflow (push to fork, iterate until green), one commit for the FFI crate + asset table + switchover + feature removal + GPU probe. The workspace is `c:\Users\Vinnie\cursor\promptforge`. The Rust rulebook at `c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md` governs code quality. Read the root `AGENTS.md` and any nested `AGENTS.md` on the path of touched crates before writing code.
+1. **Whisper shared lib (W1-W6):** One commit for the workflow (push to fork, iterate until green), one commit for the FFI crate + asset table + switchover + feature removal + GPU probe. The workspace is `c:\Users\Vinnie\cursor\runvil`. The Rust rulebook at `c:\Users\Vinnie\cursor\tools-public\rulebooks\rust-rulebook.md` governs code quality. Read the root `AGENTS.md` and any nested `AGENTS.md` on the path of touched crates before writing code.
 2. **Download progress (P1):** One commit. Small change - emit the status frame the status bar already handles.
 3. **Auto-updater (U1-U3):** Two or three commits. Push to the fork for testing (the `latest.json` endpoint needs a real GitHub Release). Read the Unsloth Studio auto-updater as reference: `c:\Users\Vinnie\cursor\unsloth\studio\src-tauri\src\desktop_updater.rs`, `c:\Users\Vinnie\cursor\unsloth\studio\frontend\src\hooks\use-tauri-update.ts`, and `c:\Users\Vinnie\cursor\unsloth\studio\src-tauri\tauri.conf.json` (updater section at lines 43-51).
 
@@ -56,16 +56,16 @@ flowchart LR
   ghBuild["GitHub workflow\nbuilds libwhisper\nper platform"] --> release["GitHub Release\nwhisper-lib-b*"]
   release --> download["gateway downloads\nat runtime"]
   download --> load["libloading opens\nlibwhisper.dylib/.dll/.so"]
-  load --> transcribe["promptforge-transcribe\ncalls whisper C API"]
+  load --> transcribe["runvil-transcribe\ncalls whisper C API"]
 ```
 
-Today's chain: `promptforge-transcribe` -> `whisper-rs` -> `whisper-rs-sys` (cmake compile at build time).
+Today's chain: `runvil-transcribe` -> `whisper-rs` -> `whisper-rs-sys` (cmake compile at build time).
 
-New chain: `promptforge-transcribe` -> `whisper-ffi` (libloading at run time) -> prebuilt `libwhisper`.
+New chain: `runvil-transcribe` -> `whisper-ffi` (libloading at run time) -> prebuilt `libwhisper`.
 
 ## Whisper C API surface needed
 
-`promptforge-transcribe` uses exactly these whisper-rs functions (whisper-rs is used only in that crate, nowhere else in the workspace):
+`runvil-transcribe` uses exactly these whisper-rs functions (whisper-rs is used only in that crate, nowhere else in the workspace):
 
 - `WhisperContext::new_with_params(path, params)` - maps to `whisper_init_from_file_with_params`
 - `ctx.create_state()` - maps to `whisper_init_state`
@@ -101,7 +101,7 @@ Each job: clone whisper.cpp at the tag, cmake configure + build, pack the shared
 
 New crate: `crates/whisper-ffi/`. A pure Rust crate with no build dependencies. Uses `libloading` to open the shared library and resolve the ~12 function pointers.
 
-Public API mirrors the subset of `whisper-rs` that `promptforge-transcribe` uses:
+Public API mirrors the subset of `whisper-rs` that `runvil-transcribe` uses:
 
 ```rust
 pub struct WhisperLibrary { /* libloading::Library */ }
@@ -127,7 +127,7 @@ impl WhisperState {
 The `FullParams` struct and its setters are a Rust copy of `whisper_full_params` with `#[repr(C)]` and the same field layout (rulebook section 16: every foreign type is `#[repr(C)]`). `SamplingStrategy::Greedy` maps to `WHISPER_SAMPLING_GREEDY`.
 
 Implementation notes from the Rust rulebook review:
-- The crate lowers `unsafe_code` from `forbid` to `deny` with a reason (the FFI calls require it), matching the workspace pattern in `promptforge-workshop`.
+- The crate lowers `unsafe_code` from `forbid` to `deny` with a reason (the FFI calls require it), matching the workspace pattern in `runvil-workshop`.
 - Every `unsafe` block carries a `// SAFETY:` comment naming the precondition (rulebook section 15).
 - `WhisperContext` and `WhisperState` implement `Drop` calling `whisper_free`/`whisper_free_state` - infallible destructors (rulebook section 6).
 - `WhisperError` is a concrete `thiserror` enum, never `String` or `anyhow` in the public API (rulebook section 5).
@@ -135,34 +135,34 @@ Implementation notes from the Rust rulebook review:
 
 ### W3: The whisper asset table
 
-In [`crates/promptforge-gateway-local/src/artifacts/assets.rs`](crates/promptforge-gateway-local/src/artifacts/assets.rs), add a whisper library asset table alongside the llama-server table. Five rows (one per platform), each with:
+In [`crates/runvil-gateway-local/src/artifacts/assets.rs`](crates/runvil-gateway-local/src/artifacts/assets.rs), add a whisper library asset table alongside the llama-server table. Five rows (one per platform), each with:
 - archive name, URL, sha256
 - library filename (`whisper.dll`, `libwhisper.dylib`, `libwhisper.so`)
 
 `ArtifactStore` gains `provision_whisper_library` that downloads, verifies, and extracts the platform's archive, returning the library path.
 
-### W4: Switch `promptforge-transcribe` from `whisper-rs` to `whisper-ffi`
+### W4: Switch `runvil-transcribe` from `whisper-rs` to `whisper-ffi`
 
-Replace every `whisper_rs::` import with the `whisper_ffi::` equivalent. The API shapes are intentionally matched, so most call sites change only the import path. The library path comes from the new `provision_whisper_library` call in `promptforge-stt`'s startup.
+Replace every `whisper_rs::` import with the `whisper_ffi::` equivalent. The API shapes are intentionally matched, so most call sites change only the import path. The library path comes from the new `provision_whisper_library` call in `runvil-stt`'s startup.
 
 Remove `whisper-rs` and `whisper-rs-sys` from the dependency tree.
 
 ### W5: Remove the `cuda` feature chain
 
-- `promptforge-transcribe`: remove the `cuda` feature entirely. GPU whisper is now a download choice (the Windows asset has CUDA baked in; macOS has Metal; Linux has CPU).
-- `promptforge-stt`: remove the `cuda` feature.
-- `promptforge-gateway`: remove `workshop-cuda`; `workshop` no longer implies any native compilation.
-- `promptforge-workshop`: remove the `cuda` default feature and the `cuda` feature. `default = []`.
+- `runvil-transcribe`: remove the `cuda` feature entirely. GPU whisper is now a download choice (the Windows asset has CUDA baked in; macOS has Metal; Linux has CPU).
+- `runvil-stt`: remove the `cuda` feature.
+- `runvil-gateway`: remove `workshop-cuda`; `workshop` no longer implies any native compilation.
+- `runvil-workshop`: remove the `cuda` default feature and the `cuda` feature. `default = []`.
 - CI: the Windows workshop build no longer installs the CUDA toolkit.
 - Nightly/release workflows: remove the CUDA toolkit install step from the macOS and Windows workshop legs, remove the `.cargo/config.toml` deployment target hack.
 
 ### W6: Runtime GPU detection for whisper
 
-Today `gpu_transcription_available()` in `promptforge-transcribe` uses `cfg!(feature = "cuda")` - a compile-time check. Replace with a runtime probe: check whether the loaded `libwhisper` was built with CUDA/Metal support by calling a whisper API (for example `whisper_print_system_info` and looking for "CUDA" or "Metal" in the output).
+Today `gpu_transcription_available()` in `runvil-transcribe` uses `cfg!(feature = "cuda")` - a compile-time check. Replace with a runtime probe: check whether the loaded `libwhisper` was built with CUDA/Metal support by calling a whisper API (for example `whisper_print_system_info` and looking for "CUDA" or "Metal" in the output).
 
 ## What this eliminates
 
-- cmake, C++ compiler, and CUDA toolkit from `cargo build -p promptforge-workshop`
+- cmake, C++ compiler, and CUDA toolkit from `cargo build -p runvil-workshop`
 - The `cuda` feature flag chain (5 crates)
 - The `MACOSX_DEPLOYMENT_TARGET` hack in CI
 - The 10-minute CUDA toolkit install in the Windows workshop nightly/release builds
@@ -177,11 +177,11 @@ Today `gpu_transcription_available()` in `promptforge-transcribe` uses `cfg!(fea
 
 ## Part P: Download progress on the status bar
 
-Today `ArtifactStore` downloads llama-server archives and GGUF models through `promptforge-progress` (`ProgressHandle` with `download`/`verify`/`extract` child leaves), and the gateway's progress hub drives the console progress bars. The workshop UI's status bar already receives `{"type":"status",...}` frames from the progress hub. What's missing: the download byte fraction never reaches the WebSocket status frame.
+Today `ArtifactStore` downloads llama-server archives and GGUF models through `runvil-progress` (`ProgressHandle` with `download`/`verify`/`extract` child leaves), and the gateway's progress hub drives the console progress bars. The workshop UI's status bar already receives `{"type":"status",...}` frames from the progress hub. What's missing: the download byte fraction never reaches the WebSocket status frame.
 
 ### P1: Wire download byte progress to the status bar
 
-The `DownloadProgress` trait in `promptforge-gateway-local` already reports `(bytes_so_far, total_bytes)`. The `TreeProgress` adapter writes it to a `ProgressHandle` fraction. The gateway's `ProgressHub` already snapshots these fractions. The workshop's `/ws` status push already reads the hub. The gap: the status bar renders the `progress` field of the status frame only when the frame carries one, and the provisioning reporter emits `download` leaves but never surfaces their fraction as a status-bar frame.
+The `DownloadProgress` trait in `runvil-gateway-local` already reports `(bytes_so_far, total_bytes)`. The `TreeProgress` adapter writes it to a `ProgressHandle` fraction. The gateway's `ProgressHub` already snapshots these fractions. The workshop's `/ws` status push already reads the hub. The gap: the status bar renders the `progress` field of the status frame only when the frame carries one, and the provisioning reporter emits `download` leaves but never surfaces their fraction as a status-bar frame.
 
 Fix: in the gateway's provisioning reporter (the `ProgressHub` subscriber in `runner.rs`), when a `download` leaf's fraction changes, emit a status frame with `progress: fraction` and `label: "Downloading <model-name>"`. The status bar's existing `<progress>` element renders it. No new protocol, no new frontend code - just emit the frame the status bar already handles.
 
@@ -193,8 +193,8 @@ Following the Unsloth Studio pattern: `tauri-plugin-updater` checks a `latest.js
 
 ### U1: Add the updater plugin
 
-- Add `tauri-plugin-updater` to `crates/promptforge-workshop/Cargo.toml` and register it in `main.rs`.
-- Add the `updater` section to `tauri.conf.json`: `endpoints` pointing at `https://github.com/cppalliance/promptforge/releases/latest/download/latest.json`, a minisign `pubkey` (generate a keypair with `tauri signer generate`), and `windows.installMode: "passive"`.
+- Add `tauri-plugin-updater` to `crates/runvil-workshop/Cargo.toml` and register it in `main.rs`.
+- Add the `updater` section to `tauri.conf.json`: `endpoints` pointing at `https://github.com/cppalliance/runvil/releases/latest/download/latest.json`, a minisign `pubkey` (generate a keypair with `tauri signer generate`), and `windows.installMode: "passive"`.
 - Add `updater:default` to the capabilities.
 - Add `tauri-plugin-process` for `relaunch()`.
 
@@ -222,7 +222,7 @@ In [`release-workshop.yml`](.github/workflows/release-workshop.yml):
 1. **W1** first (whisper build workflow, tested on the fork)
 2. **W2** next (the FFI crate, tested locally)
 3. **W3** (whisper asset table)
-4. **W4** (the switchover in `promptforge-transcribe`)
+4. **W4** (the switchover in `runvil-transcribe`)
 5. **W5** (feature removal and CI cleanup)
 6. **W6** (runtime GPU probe)
 7. **P1** (download progress to the status bar - can run in parallel with W1-W6)
@@ -234,13 +234,13 @@ W1-W6 and P1 are independent. U1-U3 depend on P1 (the user sees download progres
 
 ## Context for a fresh session
 
-- **Repository**: `c:\Users\Vinnie\cursor\promptforge`, a Rust workspace under `crates/*`.
-- **Fork**: `vinniefalco/promptforge` on GitHub (for workflow testing). Upstream: `cppalliance/promptforge`.
+- **Repository**: `c:\Users\Vinnie\cursor\runvil`, a Rust workspace under `crates/*`.
+- **Fork**: `vinniefalco/runvil` on GitHub (for workflow testing). Upstream: `cppalliance/runvil`.
 - **Self-hosted runner**: registered on both repos, Windows x64 with two Blackwell GPUs, labels `self-hosted, windows, cuda`. Git bash and PowerShell execution policy are configured.
 - **Current state**: the nightly workflow exists but the macOS workshop legs fail because whisper-rs-sys compiles whisper.cpp from source and the `MACOSX_DEPLOYMENT_TARGET` hack doesn't reach through the cmake crate. This plan eliminates that problem at the root.
-- **Key files to read first**: root `AGENTS.md`, `crates/promptforge-transcribe/src/worker.rs` (whisper-rs usage), `crates/promptforge-gateway-local/src/artifacts/assets.rs` (asset table pattern), `crates/promptforge-stt/src/lib.rs` (public STT API).
-- **The whisper-rs API surface in `promptforge-transcribe`**: `WhisperContext::new_with_params`, `ctx.create_state()`, `ctx.tokenize()`, `FullParams::new(Greedy)` + setters, `state.full(params, samples)`, `state.as_iter()` / `segment.to_str_lossy()`, `install_logging_hooks()`, `convert_integer_to_float_audio` (test-only). Files: `worker.rs`, `final_pass.rs`, `prompt.rs`, `engine.rs`, `lib.rs`.
-- **The `cuda` feature chain**: `promptforge-workshop/cuda` -> `promptforge-gateway/workshop-cuda` -> `promptforge-stt/cuda` -> `promptforge-transcribe/cuda` -> `whisper-rs/cuda` -> `whisper-rs-sys/cuda`.
+- **Key files to read first**: root `AGENTS.md`, `crates/runvil-transcribe/src/worker.rs` (whisper-rs usage), `crates/runvil-gateway-local/src/artifacts/assets.rs` (asset table pattern), `crates/runvil-stt/src/lib.rs` (public STT API).
+- **The whisper-rs API surface in `runvil-transcribe`**: `WhisperContext::new_with_params`, `ctx.create_state()`, `ctx.tokenize()`, `FullParams::new(Greedy)` + setters, `state.full(params, samples)`, `state.as_iter()` / `segment.to_str_lossy()`, `install_logging_hooks()`, `convert_integer_to_float_audio` (test-only). Files: `worker.rs`, `final_pass.rs`, `prompt.rs`, `engine.rs`, `lib.rs`.
+- **The `cuda` feature chain**: `runvil-workshop/cuda` -> `runvil-gateway/workshop-cuda` -> `runvil-stt/cuda` -> `runvil-transcribe/cuda` -> `whisper-rs/cuda` -> `whisper-rs-sys/cuda`.
 - **Existing CI quirks**: GitHub Actions `with:` values must be scalars (no YAML sequences); the NVIDIA network installer works where `Jimver/cuda-toolkit` crashes on `windows-2022`; use `shell: powershell` not `pwsh` on self-hosted runners; set `RUSTUP_TOOLCHAIN` to override the repo's `rust-toolchain.toml` pin in CI.
 - **Unsloth reference for the auto-updater**: `c:\Users\Vinnie\cursor\unsloth\studio\src-tauri\src\desktop_updater.rs` (check command), `use-tauri-update.ts` (state machine and `downloadAndInstall` with chunk progress), `tauri.conf.json` lines 43-51 (updater config with pubkey and endpoint).
 

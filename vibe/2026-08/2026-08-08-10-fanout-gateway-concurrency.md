@@ -53,13 +53,13 @@ Local and remote completes already queue through the gateway. Fanout still runs 
 Intent: llama slot count equals `Config::local_model_concurrency` for that model.
 
 Do:
-- Add `parallel: u32` to `LaunchOptions` in [server.rs](promptforge/crates/promptforge-gateway/src/local/server.rs).
-- Set it from the resolved concurrency in [local/mod.rs](promptforge/crates/promptforge-gateway/src/local/mod.rs) when building launch options (value already validated >= 1).
+- Add `parallel: u32` to `LaunchOptions` in [server.rs](runvil/crates/runvil-gateway/src/local/server.rs).
+- Set it from the resolved concurrency in [local/mod.rs](runvil/crates/runvil-gateway/src/local/mod.rs) when building launch options (value already validated >= 1).
 - Replace hardcoded `"1"` in `server_args` with that field.
 - Update `launch_args_match_local_model_defaults` so default-no-lane still expects `--parallel` `1`; add a case that a lane with concurrency N emits `--parallel` N.
-- State in [design-gateway.md](promptforge/crates/promptforge-gateway/design-gateway.md): local lane concurrency is the admit limit and llama `--parallel`.
+- State in [design-gateway.md](runvil/crates/runvil-gateway/design-gateway.md): local lane concurrency is the admit limit and llama `--parallel`.
 
-Test command the coder names: `cargo test -p promptforge-gateway launch_args` (or the exact filter covering those tests).
+Test command the coder names: `cargo test -p runvil-gateway launch_args` (or the exact filter covering those tests).
 
 Decision: no new `[[local_model]]` field. Falsifier: a deployment needs `--parallel` different from admit limit - then split the knobs in a later commit.
 
@@ -67,7 +67,7 @@ Decision: no new `[[local_model]]` field. Falsifier: a deployment needs `--paral
 
 Intent: each leaf selects P; shared include stays model-agnostic.
 
-Do in workspace root (not inside `promptforge/` crate tree):
+Do in workspace root (not inside `runvil/` crate tree):
 
 - [common.toml](c:\Users\Vinnie\src\cursor\common.toml): add only the device
 
@@ -95,7 +95,7 @@ lane = "generative"
 
 Reason: include merge appends/replaces by id; a leaf that loads alone carries its own lane. Putting `gemma`/`qwen` lane ids in `common.toml` would couple every profile to those model names.
 
-Leave [profiles/analytical.toml](promptforge/profiles/analytical.toml) generative concurrency at 1.
+Leave [profiles/analytical.toml](runvil/profiles/analytical.toml) generative concurrency at 1.
 
 No automated test in this commit. Verify by reading the three TOML files after the commit. Manual gateway restart is post-plan ops, not this commit.
 
@@ -104,13 +104,13 @@ No automated test in this commit. Verify by reading the three TOML files after t
 Intent: every list item starts as its own task; replies stay list-ordered; first error aborts siblings.
 
 Do:
-- Refactor [fanout.rs](promptforge/crates/promptforge-core/src/fanout.rs): extract `run_one_arm`; spawn all arms on `tokio::task::JoinSet` inside the existing `block_in_place` / `block_on` bridge; clone `StoreRef` and `GatewayClient` per task.
+- Refactor [fanout.rs](runvil/crates/runvil-core/src/fanout.rs): extract `run_one_arm`; spawn all arms on `tokio::task::JoinSet` inside the existing `block_in_place` / `block_on` bridge; clone `StoreRef` and `GatewayClient` per task.
 - Replace shared `mut turns` with `AtomicU32` fetch_add for debug turn indices.
 - On first `Err`, call `abort_all` and return that error; on success return `Vec<String>` in item order.
-- Update [design-core.md](promptforge/crates/promptforge-core/design-core.md): concurrent arms; ordered replies; fail-fast abort; remove "parallel fanout" from non-goals; keep nested fanout as non-goal.
-- Update fanout module docs, [README.md](promptforge/README.md), [STATUS.md](promptforge/STATUS.md).
+- Update [design-core.md](runvil/crates/runvil-core/design-core.md): concurrent arms; ordered replies; fail-fast abort; remove "parallel fanout" from non-goals; keep nested fanout as non-goal.
+- Update fanout module docs, [README.md](runvil/README.md), [STATUS.md](runvil/STATUS.md).
 
-Test: existing suite filters still pass - `cargo test -p promptforge-core fanout` and `cargo test -p promptforge-core-tests fanout`.
+Test: existing suite filters still pass - `cargo test -p runvil-core fanout` and `cargo test -p runvil-core-tests fanout`.
 
 Decision: fail-fast aborts siblings (not wait-all). Falsifier: authors need every arm's partial result on failure - then switch to wait-all in a later commit.
 
@@ -122,9 +122,9 @@ Intent: a test fails if fanout becomes sequential-only again or if `--parallel` 
 
 Do:
 - Add a core-tests (or core unit) fixture: fanout of at least 2 preamble-only arms; each writes a distinct store path; assert both paths exist and reply order matches list order.
-- If [tests/it/main.rs](promptforge/crates/promptforge-gateway/tests/it/main.rs) already has a blocking-upstream concurrency fixture, add one case that concurrency 2 admits two in-flight requests; if that fixture cannot express it without a large rewrite, skip the IT and record the skip reason in the commit message (gateway unit tests from step 1 remain the lock).
+- If [tests/it/main.rs](runvil/crates/runvil-gateway/tests/it/main.rs) already has a blocking-upstream concurrency fixture, add one case that concurrency 2 admits two in-flight requests; if that fixture cannot express it without a large rewrite, skip the IT and record the skip reason in the commit message (gateway unit tests from step 1 remain the lock).
 
-Test command: `cargo test -p promptforge-core-tests fanout` and `cargo test -p promptforge-gateway`.
+Test command: `cargo test -p runvil-core-tests fanout` and `cargo test -p runvil-gateway`.
 
 ## Execution protocol
 
@@ -134,7 +134,7 @@ Follow vibe-rulebook. Per step:
 2. Main commits with a message that states why.
 3. Dispatch **review-and-fix** subagent: same plan path + step; apply vibe `<code-review>` and rust-rulebook non-negotiables; overwrite `cabinet/_scratch/vibe-review-fanout-concurrency/vibe-review.md`; one fix round; return under 1000 tokens.
 4. Main amends if the tree is dirty and amend rules allow; otherwise new fix commit (vibe rule 7).
-5. **Verify** on steps 1, 3, 4 and on any step that dirtied after review: `cargo fmt --all --check`, `cargo clippy -p promptforge-gateway -p promptforge-core --all-targets -- -D warnings`, then the step test filters. Verify returns one line: pass, or fail + log path. Main does not read the log body.
+5. **Verify** on steps 1, 3, 4 and on any step that dirtied after review: `cargo fmt --all --check`, `cargo clippy -p runvil-gateway -p runvil-core --all-targets -- -D warnings`, then the step test filters. Verify returns one line: pass, or fail + log path. Main does not read the log body.
 
 Main context may hold: this plan, step number, commit hashes, bounded git lines, scratch paths, Verify status line. Main must not hold: source dumps, full diffs, build logs, `vibe-review.md` body.
 

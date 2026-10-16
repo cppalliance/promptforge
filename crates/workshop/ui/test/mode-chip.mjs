@@ -54,7 +54,7 @@ globalThis.Element = dom.window.Element;
 globalThis.Node = dom.window.Node;
 globalThis.CustomEvent = dom.window.CustomEvent;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-mode-chip-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-mode-chip-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { AGENT_MODE_CHANGED_EVENT, ModeChip, UNIFIED_MODES, lifecycle } = await import(
   pathToFileURL(bundlePath).href

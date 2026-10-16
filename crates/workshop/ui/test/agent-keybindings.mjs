@@ -156,7 +156,7 @@ if (typeof window.crypto?.randomUUID !== "function") {
   });
 }
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-keybindings-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-keybindings-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,

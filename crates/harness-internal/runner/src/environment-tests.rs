@@ -1,8 +1,8 @@
 //! Tests for the Host snapshot and for model resolution with nothing to
 //! resolve.
 
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionErrorKind, CompletionOptions, Message, ModelBinding, ModelCatalog,
     ToolSchema,
 };

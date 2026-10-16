@@ -16,7 +16,7 @@
 //! `File` objects, and the desktop app receives each one as an
 //! [`ICoreWebView2File`] whose `Path` is the real OS path. [`attach`]
 //! subscribes to those messages and feeds the paths into the
-//! `promptforge:file-drop` dispatch ([`crate::drops`]) the page already
+//! `runvil:file-drop` dispatch ([`crate::drops`]) the page already
 //! listens for.
 //!
 //! The same subscription pass installs the `PermissionRequested` handler
@@ -44,7 +44,7 @@ const DROP_MESSAGE: &str = "workspace-drop";
 
 /// Subscribes the window's webview to drop messages and permission
 /// requests. The message handler reads the dropped paths off the event
-/// and queues the `promptforge:file-drop` dispatch ([`crate::drops`]) for
+/// and queues the `runvil:file-drop` dispatch ([`crate::drops`]) for
 /// the next event-loop turn - never inside the callback, where the OLE
 /// drop may still be on the stack; the permission handler grants the
 /// microphone and leaves every other kind to WebView2's default handling.

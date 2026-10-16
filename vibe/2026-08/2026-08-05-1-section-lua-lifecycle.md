@@ -1,6 +1,6 @@
 ---
 name: section-lua-lifecycle
-overview: Refactor PromptForge sections into shared compiled Lua, semantic capability binding, preamble, prose, and epilog phases with isolated per-section VMs. Add a new authoritative `design-core.md` that explains the complete crate design, rationale, invariants, and supported features while retaining `design-core-orig.md` as history.
+overview: Refactor Runvil sections into shared compiled Lua, semantic capability binding, preamble, prose, and epilog phases with isolated per-section VMs. Add a new authoritative `design-core.md` that explains the complete crate design, rationale, invariants, and supported features while retaining `design-core-orig.md` as history.
 todos:
   - id: observer-seam
     content: Replace structured events with report-only observations
@@ -54,9 +54,9 @@ isProject: false
 
 ## Resolution 1: What is being built
 
-PromptForge will parse one required H1, one optional shared `lua prompt` block immediately after it, and H2 sections containing an optional leading Lua preamble, prose, and optional trailing Lua epilog. Parsing compiles every Lua region once into source-backed process-local bytecode. Launch binding resolves prompt-local capability aliases to stable live `ToolId` values through `promptforge-tool-picker`. Execution creates one isolated VM per section, preserves its globals and functions across the model turn, exposes the final model text as `reply`, runs the epilog, and destroys the VM. One report-only observer receives deterministic `(Section, Detail)` strings across parsing, binding, execution, Lua phases, scope validation, model and tool boundaries, and harness-mediated store operations.
+Runvil will parse one required H1, one optional shared `lua prompt` block immediately after it, and H2 sections containing an optional leading Lua preamble, prose, and optional trailing Lua epilog. Parsing compiles every Lua region once into source-backed process-local bytecode. Launch binding resolves prompt-local capability aliases to stable live `ToolId` values through `runvil-tool-picker`. Execution creates one isolated VM per section, preserves its globals and functions across the model turn, exposes the final model text as `reply`, runs the epilog, and destroys the VM. One report-only observer receives deterministic `(Section, Detail)` strings across parsing, binding, execution, Lua phases, scope validation, model and tool boundaries, and harness-mediated store operations.
 
-The new [`design-core.md`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/design-core.md) is the authoritative design and is updated with each behavior-bearing step. [`design-core-orig.md`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/design-core-orig.md) remains byte-for-byte historical. Fan-out execution, branching, retries, child execution, persistent bytecode, compatibility parsing, reranking, and model-generated progress labels are non-goals.
+The new [`design-core.md`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/design-core.md) is the authoritative design and is updated with each behavior-bearing step. [`design-core-orig.md`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/design-core-orig.md) remains byte-for-byte historical. Fan-out execution, branching, retries, child execution, persistent bytecode, compatibility parsing, reranking, and model-generated progress labels are non-goals.
 
 Two rules govern every choice:
 
@@ -155,15 +155,15 @@ Each step carries its code, owning regression tests, Rust documentation, and the
    - Test: trait compatibility, null behavior, deterministic ordering, exact safe strings, failure reports, payload exclusion, execution equivalence between recording and null observers, and MCP handling of recognized and unknown details.
    - Complete when `Event` and its wire format no longer exist and observer choice cannot change execution behavior.
 2. **Stable live-tool identity**
-   - Code: extend [`tools.rs`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/src/tools.rs) and concrete tools with stable `ToolId`, description, and schema fidelity; preserve concrete wire names only as transport details.
+   - Code: extend [`tools.rs`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/src/tools.rs) and concrete tools with stable `ToolId`, description, and schema fidelity; preserve concrete wire names only as transport details.
    - Test: descriptor fidelity and ID-based registry lookup.
    - Complete when current Hosts compile against the identity surface without semantic binding.
 3. **Picker near-duplicate primitive**
-   - Code: add public `NearDuplicate` and `ToolPicker::near_duplicates(ids)` in [`promptforge-tool-picker`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-tool-picker), reusing stored vectors and `duplicate_threshold`.
+   - Code: add public `NearDuplicate` and `ToolPicker::near_duplicates(ids)` in [`runvil-tool-picker`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-tool-picker), reusing stored vectors and `duplicate_threshold`.
    - Test: absent and repeated IDs, below threshold, exact threshold, cross-server pairs, and deterministic order.
    - Complete when picker tests pass without a core dependency.
 4. **Parse-time `LuaProgram`**
-   - Code: add source retention, compilation, bytecode dump and load, a location-bearing compilation error, and safe parse and compile reports in [`lua.rs`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/src/lua.rs) and [`error.rs`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/src/error.rs).
+   - Code: add source retention, compilation, bytecode dump and load, a location-bearing compilation error, and safe parse and compile reports in [`lua.rs`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/src/lua.rs) and [`error.rs`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/src/error.rs).
    - Test: bytecode round trip, malformed Lua, and source-bearing diagnostics.
    - Complete when parser and executor remain otherwise unchanged.
 5. **Persistent `SectionVm`**
@@ -199,15 +199,15 @@ Each step carries its code, owning regression tests, Rust documentation, and the
     - Test: no automatic injection, `always`, H2 `add`, aliased schemas, concrete dispatch, similar tools isolated in separate sections, and near-duplicate failure before model.
     - Complete when prompt code requires no canonical tool name.
 13. **CLI registry integration**
-    - Code: construct the complete live registry and matching picker catalog in [`promptforge-cli`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-cli); omit unavailable gateway tools, bind synchronously, and pass `NullObserver` unless the caller installs another observer.
+    - Code: construct the complete live registry and matching picker catalog in [`runvil-cli`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-cli); omit unavailable gateway tools, bind synchronously, and pass `NullObserver` unless the caller installs another observer.
     - Test: available binding, absent unavailable capability, and ID agreement.
     - Complete when CLI selection uses needs only.
 14. **MCP registry integration**
-    - Code: construct or share the prepared picker and complete live registry in [`promptforge-mcp-server`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-mcp-server); move binding to `spawn_blocking`; consume reports and recognize only pinned cosmetic details.
+    - Code: construct or share the prepared picker and complete live registry in [`runvil-mcp-server`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-mcp-server); move binding to `spawn_blocking`; consume reports and recognize only pinned cosmetic details.
     - Test: registry agreement, semantic binding, `Send` execution, pinned progress details, and unknown-detail tolerance.
     - Complete when CLI and MCP use the same core contract.
 15. **Repository migration and authoritative design**
-    - Code: add the missing H1 to [`research-person.md`](C:/Users/Vinnie/src/cursor/promptforge/prompts/research-person.md), replace YAML tool names with aliased needs, and use `tools.always` only where universal.
+    - Code: add the missing H1 to [`research-person.md`](C:/Users/Vinnie/src/cursor/runvil/prompts/research-person.md), replace YAML tool names with aliased needs, and use `tools.always` only where universal.
     - Test: every repository prompt parses and binds under the new grammar.
     - Docs: finish `design-core.md`, README, and STATUS; document the spike's domain-dependent reranker results; leave `design-core-orig.md` unchanged.
     - Complete when the full workspace verification suite passes and no documentation describes the old grammar.
@@ -273,7 +273,7 @@ Each step carries its code, owning regression tests, Rust documentation, and the
 ## Project-specific review
 
 <project-review>
-1. Does the change use the smallest existing PromptForge facility that can carry the requirement?
+1. Does the change use the smallest existing Runvil facility that can carry the requirement?
 2. If machinery was added, does the commit documentation explain why existing facilities were insufficient?
 3. Does the diff implement only the named step?
 4. Are expected failures returned without panic, unwrap, expect, or swallowed errors?

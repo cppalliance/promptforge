@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use promptforge_plugin::ToolError;
 use reqwest::header::{HeaderName, HeaderValue};
+use runvil_plugin::ToolError;
 use serde_json::{Map, Value};
 
 /// The reason every local entry is refused with, until local servers

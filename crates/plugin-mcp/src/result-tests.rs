@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
-use promptforge_plugin::{OutputTrust, ToolErrorKind};
 use rmcp::ServiceError;
 use rmcp::model::{CallToolResult, ServerResult};
+use runvil_plugin::{OutputTrust, ToolErrorKind};
 use serde_json::{Value, json};
 
 use super::{output, render, service_error};

@@ -34,7 +34,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-socket-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-socket-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, AgentSocket } = await import(pathToFileURL(bundlePath).href);
 

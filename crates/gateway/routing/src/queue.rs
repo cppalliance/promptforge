@@ -12,7 +12,7 @@
 //! a 429 response.
 //!
 //! When `fair_scheduling` is on, waiting callers are served in per-client
-//! round-robin order keyed by the `X-PromptForge-Client` header. That header
+//! round-robin order keyed by the `X-Runvil-Client` header. That header
 //! is self-asserted: a scheduling hint for trusted callers, not an
 //! authenticated identity. There is deliberately no discipline abstraction -
 //! per-client round-robin is the only discipline.

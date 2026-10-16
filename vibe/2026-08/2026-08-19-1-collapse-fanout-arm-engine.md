@@ -21,16 +21,16 @@ todos:
     content: "Step 6: consolidation - delete surviving duplication, check against the delta list, Verify"
     status: completed
   - id: step-7-design-doc
-    content: "Step 7: generate design-promptforge-arm-engine-collapse.md via the design-doc block, Verify"
+    content: "Step 7: generate design-runvil-arm-engine-collapse.md via the design-doc block, Verify"
     status: completed
 isProject: false
 ---
 
-# PromptForge: collapse the fanout arm engine
+# Runvil: collapse the fanout arm engine
 
 ## Target
 
-`run_one_arm` (`crates/promptforge-core/src/fanout/arm.rs`) duplicates most of `run_one_section` (`crates/promptforge-core/src/execute/engine.rs`)'s block lifecycle. This plan does five things: (1) carves the engine out of `run_one_section` so the section lifecycle lives in one place (steps 1-2, behavior-identical); (2) rewrites the arm as an adapter over that engine - worker templates run the full block walk, with the infer hook and lazy client creation (step 3, a behavior change); (3) gives arms full control globals and jump (step 4, decision 3, a behavior change); (4) removes the total fanout item cap, leaving only the concurrency bound (step 5, decision 5, a behavior change); and (5) consolidates the arm driver down to the forced delta list (step 6). Steps 1-2 are proven by the existing suite staying green unchanged; steps 3-5 carry their own tests for the new behavior.
+`run_one_arm` (`crates/runvil-core/src/fanout/arm.rs`) duplicates most of `run_one_section` (`crates/runvil-core/src/execute/engine.rs`)'s block lifecycle. This plan does five things: (1) carves the engine out of `run_one_section` so the section lifecycle lives in one place (steps 1-2, behavior-identical); (2) rewrites the arm as an adapter over that engine - worker templates run the full block walk, with the infer hook and lazy client creation (step 3, a behavior change); (3) gives arms full control globals and jump (step 4, decision 3, a behavior change); (4) removes the total fanout item cap, leaving only the concurrency bound (step 5, decision 5, a behavior change); and (5) consolidates the arm driver down to the forced delta list (step 6). Steps 1-2 are proven by the existing suite staying green unchanged; steps 3-5 carry their own tests for the new behavior.
 
 ## Decisions
 
@@ -43,7 +43,7 @@ isProject: false
 ## Execution protocol
 
 - Per `tools-public/rulebooks/vibe-rulebook.md`: one testable commit per step carrying code, test, and docs; coder subagent dispatched with the plan path and step number; review-and-fix applies `<code-review>` from that file against the step's diff plus the plan-local `<debt-review>` block below - one debt-review subagent per modified file, run in parallel, each reviewing the whole file - overwriting `cabinet/_scratch/vibe-arm-engine-collapse/vibe-review.md` (code-review findings) and writing `debt-<file-name>.md` per reviewed file (debt findings); amend on a dirtied tree. Fix/review policy (user decision, overriding the rulebook's one-fix-round default): FIXES ARE UNLIMITED - keep fixing until every finding is addressed; REVIEWS ARE CAPPED AT TWO per step - the initial review plus one re-review after the fixes. Findings still open after the second review are not reviewed again; they go to Found debt with an estimated size.
-- Per `tools-public/rulebooks/rust-rulebook.md`: no `unwrap` outside tests; `cargo fmt --all` and `cargo clippy -p promptforge-core --all-targets --all-features -- -D warnings` green before each commit (master is now rustfmt-clean after the drift commit, so fmt should touch nothing outside the step's files).
+- Per `tools-public/rulebooks/rust-rulebook.md`: no `unwrap` outside tests; `cargo fmt --all` and `cargo clippy -p runvil-core --all-targets --all-features -- -D warnings` green before each commit (master is now rustfmt-clean after the drift commit, so fmt should touch nothing outside the step's files).
 - Decision currency: where a step's implementation contradicts, extends, or resolves a decision recorded here, the step revises this plan in the same commit, naming what forced the change.
 - Verify (workspace `cargo test`) runs on the rulebook schedule: step 2 (end of the carve-out component), steps 3 and 6 (every 3rd step), step 7 (final step), and whenever review-and-fix dirtied the tree. Steps 1-2's proof is the existing suite staying green unchanged.
 - Tests cover absence as well as presence.
@@ -83,7 +83,7 @@ From step 5's review (deferred):
 
 - `execute/config.rs`: the `fanout()` getter name is ambiguous now that `fanout_items()` is gone (it returns the concurrency bound) - a rename is a public API change beyond decision 5; step 6 owns the driver surface. Size: small. (Resolved in step 6: see decision 5's extension note.)
 - `fanout/mod.rs`: module-split opportunity (scheduler vs arm vs proxies). Unowned. Size: medium.
-- `design-promptforge-section-marker-and-fanout-collections.md` (lines 33, 74): describes the deleted item cap as live behavior. Historical design doc - do not rewrite; step 7's design document supersedes it.
+- `design-runvil-section-marker-and-fanout-collections.md` (lines 33, 74): describes the deleted item cap as live behavior. Historical design doc - do not rewrite; step 7's design document supersedes it.
 
 From step 2's review (deferred, owned by step 3):
 
@@ -174,7 +174,7 @@ Each step is one commit, worked as the rulebook loop: Code (coder subagent, disp
 
 ### Step 7: design document
 
-- Code: spawn one subagent whose entire prompt is - read this plan at c:\Users\Vinnie\.cursor\plans\collapse_the_fanout_arm_engine_*.plan.md (use the actual path of this file), grep for `<design-doc>`, and follow the block inside it. Move the generated `design-promptforge-arm-engine-collapse.md` into `crates/promptforge-core/` beside `design-core.md`. If the plan carries no key design choices, write no document and return the reason.
+- Code: spawn one subagent whose entire prompt is - read this plan at c:\Users\Vinnie\.cursor\plans\collapse_the_fanout_arm_engine_*.plan.md (use the actual path of this file), grep for `<design-doc>`, and follow the block inside it. Move the generated `design-runvil-arm-engine-collapse.md` into `crates/runvil-core/` beside `design-core.md`. If the plan carries no key design choices, write no document and return the reason.
 - Test: none (documentation deliverable).
 - Docs: the design document is the deliverable.
 - Commit: "add the arm-engine-collapse design document".
@@ -183,7 +183,7 @@ Each step is one commit, worked as the rulebook loop: Code (coder subagent, disp
 - Verify: scheduled (final step) - workspace `cargo test`.
 
 <design-doc>
-OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-promptforge-arm-engine-collapse.md,
+OUTPUT A DESIGN DOCUMENT, NOT CODE. Write one markdown file, design-runvil-arm-engine-collapse.md,
 that explains the design of what this plan describes. You run as the final step
 of the plan, after the implementation is complete, so describe the design as
 built, reconciling against the finished work any decision the implementation

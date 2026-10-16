@@ -64,7 +64,7 @@ bind = "127.0.0.1:8081"
 api_key = "t"
 
 [local]
-cache_dir = "/tmp/pf-models"
+cache_dir = "/tmp/rv-models"
 
 [[local_model]]
 name = "qwen-local"
@@ -79,7 +79,7 @@ cache_type_v = "f16"
 n_predict = 256
 "#;
     let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(config.local.cache_dir.as_deref(), Some("/tmp/pf-models"));
+    assert_eq!(config.local.cache_dir.as_deref(), Some("/tmp/rv-models"));
     let model = &config.local_models[0];
     assert_eq!(
         model.sha256.as_deref(),

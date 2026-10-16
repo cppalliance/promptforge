@@ -1,6 +1,6 @@
 ---
 name: Plugin terminology rename
-overview: Rename the activation unit from "capability" to Plugin, a capitalized defined term, across the promptforge repository (code, wire format, frontmatter, prose, and every plan's contents) and the promptforge-docs guide. Add Plugin as the fourth term in the root AGENTS.md, and extend the existing docs-claims guard so rulebooks cannot call a Plugin a capability again.
+overview: Rename the activation unit from "capability" to Plugin, a capitalized defined term, across the runvil repository (code, wire format, frontmatter, prose, and every plan's contents) and the runvil-docs guide. Add Plugin as the fourth term in the root AGENTS.md, and extend the existing docs-claims guard so rulebooks cannot call a Plugin a capability again.
 todos:
   - id: step-1
     content: "Step 1: rename the code to Plugin (crate move, name map, message texts, frontmatter key, Workshop JSON, service-id check, public-api.txt, Cargo.lock)"
@@ -9,7 +9,7 @@ todos:
     content: "Step 2: extend docs-claims.mjs, define Plugin in the root AGENTS.md, and sweep the repository's prose (rulebooks remove-first)"
     status: completed
   - id: step-3
-    content: "Step 3: sweep the contents of every vibe/ plan and the promptforge-docs guide"
+    content: "Step 3: sweep the contents of every vibe/ plan and the runvil-docs guide"
     status: completed
 isProject: false
 ---
@@ -20,10 +20,10 @@ isProject: false
 
 ## Product Requirements
 
-Today the activation unit is called a capability: the unit a prompt declares, which adds tools and an optional Lua prelude to a run. The same word also names the VFS `Access`, a model's capabilities, and Tauri's window permissions. The unit itself also goes by "pack" and, in older plans, "addon". This work renames the unit to Plugin, a capitalized defined term like Engine, Harness, and Host, everywhere in the `promptforge` repository and in the `promptforge-docs` guide. It changes terminology only: behavior stays the same, apart from the renamed frontmatter key, JSON field, and message texts.
+Today the activation unit is called a capability: the unit a prompt declares, which adds tools and an optional Lua prelude to a run. The same word also names the VFS `Access`, a model's capabilities, and Tauri's window permissions. The unit itself also goes by "pack" and, in older plans, "addon". This work renames the unit to Plugin, a capitalized defined term like Engine, Harness, and Host, everywhere in the `runvil` repository and in the `runvil-docs` guide. It changes terminology only: behavior stays the same, apart from the renamed frontmatter key, JSON field, and message texts.
 
 - Problem and users:
-  - Code, rules, and plans give one word four meanings. Examples: "Capabilities are delivered in packs" in `crates/harness-internal/capabilities/src/capability.rs` lines 4-8; "the RAII capability" in `crates/promptforge-internal/vfs/src/handle.rs` line 6; the role keywords in `crates/promptforge-internal/model-client/src/model/options.rs` lines 97-142; Tauri's window capability in `crates/workshop/desktop/src/main.rs` lines 280-286. The main readers are coding agents, then engineers.
+  - Code, rules, and plans give one word four meanings. Examples: "Capabilities are delivered in packs" in `crates/harness-internal/capabilities/src/capability.rs` lines 4-8; "the RAII capability" in `crates/runvil-internal/vfs/src/handle.rs` line 6; the role keywords in `crates/runvil-internal/model-client/src/model/options.rs` lines 97-142; Tauri's window capability in `crates/workshop/desktop/src/main.rs` lines 280-286. The main readers are coding agents, then engineers.
   - Prompt authors write the key in frontmatter, and models read the refusal messages that name it.
 - Goals:
   - The root `AGENTS.md` defines Plugin as its fourth term.
@@ -34,7 +34,7 @@ Today the activation unit is called a capability: the unit a prompt declares, wh
 - Non-goals:
   - Changing what a Plugin does or how activation works.
   - Renaming the other senses of "capability".
-  - Changing any repository other than `promptforge` and `promptforge-docs`.
+  - Changing any repository other than `runvil` and `runvil-docs`.
 - Success criteria:
   - Every gate in the Project Survey passes after each step.
   - Searching for `capabilit` finds only these: senses kept by design (Technical Design), verbatim quotations, plan file names and references to them, and the repository copy of this plan.
@@ -59,13 +59,13 @@ Today the activation unit is called a capability: the unit a prompt declares, wh
 Prompt authors declare Plugins under `plugins:`. The Host registers Plugins in a `PluginRegistry`, the Harness activates the ones a prompt declares, and Workshop lists a prompt's declared Plugins. Every text a user or model sees that named a capability now names a Plugin, in the exact words below.
 
 - Actors and workflows:
-  - A prompt author lists the Plugins a prompt requires under `plugins:`. Each entry is an id string, or a map with `ref`, `optional`, and `config`. This is the same shape `capabilities:` has today (`crates/promptforge-internal/parser/src/contract.rs` lines 163-182).
+  - A prompt author lists the Plugins a prompt requires under `plugins:`. Each entry is an id string, or a map with `ref`, `optional`, and `config`. This is the same shape `capabilities:` has today (`crates/runvil-internal/parser/src/contract.rs` lines 163-182).
   - The Host builds a `PluginRegistry` and hands it to `Harness::new` (`crates/harness-internal/runner/src/harness.rs` lines 133-139). The Harness activates each declared Plugin when the run starts.
   - Workshop's prompts route returns the declared Plugins under `plugins` (`crates/workshop/server/src/routes/prompts.rs` lines 55-98). The run panel parses them and renders one row per Plugin (`crates/workshop/ui/src/services/run-api.ts` lines 20-251; `crates/workshop/ui/src/parts/run/run-rows.ts` lines 7 and 133-141).
 - Inputs and outputs:
-  - The frontmatter key `plugins:` replaces `capabilities:`, with no alias. A prompt that still says `capabilities:` fails to parse with serde's unknown-field error, which lists `plugins` among the expected keys, because the frontmatter denies unknown fields (`crates/promptforge-internal/parser/src/build-frontmatter.rs` lines 40-41).
+  - The frontmatter key `plugins:` replaces `capabilities:`, with no alias. A prompt that still says `capabilities:` fails to parse with serde's unknown-field error, which lists `plugins` among the expected keys, because the frontmatter denies unknown fields (`crates/runvil-internal/parser/src/build-frontmatter.rs` lines 40-41).
   - The Workshop JSON field `plugins` replaces `capabilities`, in the server and the UI together.
-  - Id text does not change: `promptforge/web` stays `promptforge/web`, so tool ids and run records are unchanged. Docs describe the grammar as `namespace/plugin` for a Plugin and `namespace/plugin/name` for a tool.
+  - Id text does not change: `runvil/web` stays `runvil/web`, so tool ids and run records are unchanged. Docs describe the grammar as `namespace/plugin` for a Plugin and `namespace/plugin/name` for a tool.
 - States and validation:
   - Parsing, activation, conflict checks, and service checks behave exactly as they do today.
   - A Host service id is valid when it parses as a global name with exactly two segments. Its check no longer goes through the Plugin id parser (Technical Design).
@@ -89,15 +89,15 @@ Prompt authors declare Plugins under `plugins:`. The Host registers Plugins in a
 This is a rename: the module structure and dependency directions stay as they are. One crate directory moves and the crate gets a new name, two facade modules get new names, and every public item that names the unit is renamed. The Engine's public surface listing is regenerated. Senses of "capability" other than the activation unit keep their names.
 
 - Architecture:
-  - Unchanged. `harness-plugins`, at `crates/harness-internal/plugins/`, takes the place of `harness-capabilities` in the dependency graph. The Harness facade and `harness-runner` depend on it, and it depends on the `promptforge` facade.
+  - Unchanged. `harness-plugins`, at `crates/harness-internal/plugins/`, takes the place of `harness-capabilities` in the dependency graph. The Harness facade and `harness-runner` depend on it, and it depends on the `runvil` facade.
 - Modules and interfaces (the name map):
-  - Engine (`crates/promptforge/`, `crates/promptforge-internal/{types,parser,engine,lua}`):
-    - Module `promptforge_types::capabilities` and facade module `promptforge::capabilities` become `plugins` (`crates/promptforge-internal/types/src/lib.rs` line 39; `crates/promptforge/src/lib.rs` lines 113-124).
+  - Engine (`crates/runvil/`, `crates/runvil-internal/{types,parser,engine,lua}`):
+    - Module `runvil_types::capabilities` and facade module `runvil::capabilities` become `plugins` (`crates/runvil-internal/types/src/lib.rs` line 39; `crates/runvil/src/lib.rs` lines 113-124).
     - `CapabilityId`, `CapabilityIdError`, and `CapabilityIdErrorKind` become `PluginId`, `PluginIdError`, and `PluginIdErrorKind`.
-    - In `crates/promptforge-internal/types/src/names.rs`, `GlobalName::pack()` becomes `GlobalName::plugin()` and `GlobalName::capability_prefix()` becomes `plugin_prefix()`. `CapabilityId::pack()` becomes `PluginId::name()`, and `ToolId::capability()` becomes `ToolId::plugin()` (`types/src/tools/ids.rs` line 59).
+    - In `crates/runvil-internal/types/src/names.rs`, `GlobalName::pack()` becomes `GlobalName::plugin()` and `GlobalName::capability_prefix()` becomes `plugin_prefix()`. `CapabilityId::pack()` becomes `PluginId::name()`, and `ToolId::capability()` becomes `ToolId::plugin()` (`types/src/tools/ids.rs` line 59).
     - `Prelude::capability()` and its field become `plugin`.
     - `CapabilityDecl`, and its visitor, become `PluginDecl`. `Frontmatter::capabilities()`, and its serde field, become `plugins`. `parse_capability_id`, `check_distinct_capabilities`, and `check_slot_capabilities` become `parse_plugin_id`, `check_distinct_plugins`, and `check_slot_plugins`.
-    - `CapabilityConflict` becomes `PluginConflict`, and `MissingService::capability` becomes `MissingService::plugin` (`crates/promptforge-internal/engine/src/execute/requirements.rs`).
+    - `CapabilityConflict` becomes `PluginConflict`, and `MissingService::capability` becomes `MissingService::plugin` (`crates/runvil-internal/engine/src/execute/requirements.rs`).
   - Harness (`crates/harness/`, `crates/harness-internal/{capabilities,runner}/`, `crates/harness-web/`):
     - `Capability`, `CapabilityError`, `CapabilityErrorKind`, and `CapabilityRegistry` become `Plugin`, `PluginError`, `PluginErrorKind`, and `PluginRegistry`.
     - `ServiceGap::capability` becomes `plugin`.
@@ -111,17 +111,17 @@ This is a rename: the module structure and dependency directions stay as they ar
   - Names that stay:
     - `Contribution`, `Activation`, `activate`, `RunServices`, `HostServices`, `ServiceId`, and `ServiceKey`.
     - Every other sense of "capability":
-      - the whole `crates/promptforge-internal/vfs/` crate, and "access capability" in comments elsewhere
-      - `ModelBinding::capabilities` and `with_capabilities`, and Lua `model.capabilities` (`crates/promptforge-internal/lua/src/models-userdata.rs` lines 50 and 111)
+      - the whole `crates/runvil-internal/vfs/` crate, and "access capability" in comments elsewhere
+      - `ModelBinding::capabilities` and `with_capabilities`, and Lua `model.capabilities` (`crates/runvil-internal/lua/src/models-userdata.rs` lines 50 and 111)
       - "thinking capability" and "frontier-capability"
       - everything under `crates/gateway/`
       - Tauri's `CapabilityBuilder`, `window_capability`, and the generated schemas in `crates/workshop/desktop/`, plus `crates/workshop/ui/src/parts/chrome/window-chrome.ts` line 33
       - the gateway connection "capability" in `crates/workshop/gateway/src/{binding.rs,resolve.rs,test_gateway.rs}`, `crates/workshop/desktop/src/gateway/identity.rs`, and `crates/workshop/server/src/fixtures.rs`
     - The Workshop workspace sibling folder name `"plugins"` in `crates/workshop/workspace/src/workspace_file/siblings.rs` line 14, which already reads in the Plugin sense.
   - Ambiguous uses, decided by sense and reported rather than guessed:
-    - `crates/promptforge-internal/types/src/cancel.rs` line 11
-    - "capability description" in `crates/promptforge-internal/lua/src/handles.rs` and `lua/src/tools/userdata.rs`
-    - `crates/promptforge-internal/engine/src/execute/error.rs` line 21
+    - `crates/runvil-internal/types/src/cancel.rs` line 11
+    - "capability description" in `crates/runvil-internal/lua/src/handles.rs` and `lua/src/tools/userdata.rs`
+    - `crates/runvil-internal/engine/src/execute/error.rs` line 21
     - the "echo capability" fixture strings
 - File and public API changes:
   - Crate:
@@ -131,16 +131,16 @@ This is a rename: the module structure and dependency directions stay as they ar
     - `Cargo.lock` is rewritten.
     - These `crates/build-xtask/` tests name the crate or its path and change too: `src/harness_bans-tests.rs`, `src/product/tests.rs`, `src/product/harness_tests.rs`, `src/product/container_tests.rs`, and `src/test_support_leak-tests.rs`.
   - Files:
-    - `crates/promptforge-internal/types/src/capabilities.rs` and `capabilities-tests.rs` become `plugins.rs` and `plugins-tests.rs`.
-    - `crates/promptforge-internal/parser/src/contract/tests-capabilities.rs` becomes `tests-plugins.rs`.
-    - `crates/promptforge/tests/suite/capabilities.rs` becomes `plugins.rs`.
+    - `crates/runvil-internal/types/src/capabilities.rs` and `capabilities-tests.rs` become `plugins.rs` and `plugins-tests.rs`.
+    - `crates/runvil-internal/parser/src/contract/tests-capabilities.rs` becomes `tests-plugins.rs`.
+    - `crates/runvil/tests/suite/capabilities.rs` becomes `plugins.rs`.
     - `crates/harness-internal/plugins/src/capability.rs` and `capability-tests.rs` become `plugin.rs` and `plugin-tests.rs`.
     - Every `mod` and `#[path]` line that names these files is updated.
-  - Engine facade surface: `crates/promptforge/public-api.txt` is regenerated. About 67 of its 69 matching lines change; `ModelBinding::capabilities` and `with_capabilities` stay.
+  - Engine facade surface: `crates/runvil/public-api.txt` is regenerated. About 67 of its 69 matching lines change; `ModelBinding::capabilities` and `with_capabilities` stay.
   - Service ids: `HostServices::provide` stops validating with `CapabilityId::parse` (`crates/harness-internal/capabilities/src/service.rs` line 161). It instead accepts a literal that parses as a `GlobalName` with exactly one `/`. `ServiceError::InvalidId` keeps only its `id` field: the `source` field goes, so no error calls a service id a Plugin id. Its Display text stays `service id {id} is not a namespace/name id`.
   - Frontmatter in `prompts/research-person.md`, `crates/workshop/agents/agents/chat.md`, and every Rust and `.mjs` test fixture changes from `capabilities:` to `plugins:`.
 - Data, persistence, failure, security, and privacy constraints:
-  - Run records and events are unchanged. No serialized field is named after capabilities. A `PluginId` serializes as the same `namespace/name` string a `CapabilityId` did. `ToolDescriptor`'s field is named `conflicts` (`crates/promptforge-internal/types/src/tools/descriptor.rs` lines 22-43).
+  - Run records and events are unchanged. No serialized field is named after capabilities. A `PluginId` serializes as the same `namespace/name` string a `CapabilityId` did. `ToolDescriptor`'s field is named `conflicts` (`crates/runvil-internal/types/src/tools/descriptor.rs` lines 22-43).
   - The Workshop JSON field changes in the server and the UI in the same commit.
   - Message texts. These are model-facing, and each test that pins one changes in the same commit as the string. `{...}` marks an interpolated value.
     - `- missing required Plugin: {id}` (refusal notice; was "missing required capability")
@@ -170,8 +170,8 @@ Existing tests carry most of the proof: they are renamed, and their pinned texts
   - `HostServices::provide` rejects a three-segment literal and a malformed literal as `ServiceError::InvalidId`, and still accepts a valid two-segment literal.
   - The refusal notice, the parser messages, the prelude errors, and the registry Display text assert the new texts listed in the Functional Specification.
 - Integration and end-to-end:
-  - The existing suites of `promptforge`, `promptforge-engine`, `promptforge-lua`, `promptforge-parser`, `harness-plugins`, `harness-runner`, `harness`, `harness-web`, `workshop-server`, and `workshop-agents` pass under their renamed tests and fixtures.
-  - `crates/promptforge/tests/suite/shipped.rs` parses every prompt under `prompts/`.
+  - The existing suites of `runvil`, `runvil-engine`, `runvil-lua`, `runvil-parser`, `harness-plugins`, `harness-runner`, `harness`, `harness-web`, `workshop-server`, and `workshop-agents` pass under their renamed tests and fixtures.
+  - `crates/runvil/tests/suite/shipped.rs` parses every prompt under `prompts/`.
   - `crates/workshop/server/src/routes/prompts-tests.rs` asserts the `plugins` JSON field. `crates/workshop/ui/test/run-api.mjs` and `run-panel.mjs` assert the `plugins` contract and its row.
 - Regression, security, and performance:
   - `crates/workshop/ui/test/docs-claims.mjs` gains two checks over every rulebook it already reads. Both strip inline code first, as the existing checks do.
@@ -200,7 +200,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
 - Decisions:
   - **Plugin becomes the fourth defined term, capitalized everywhere.** User: "I want a top to bottom rewrite of the entire project to settle on the word Plugin capitalized. I want the root AGENTS.md which lists Engine, Host, and Harness, to add a forth term Plugin".
   - **The word is Plugin.** User: "how about Plugin instead of Addon". Plugin matches the owner's own phrase "the plugins directory" from the design conversation, and Workshop already reserves a `plugins` workspace folder (`crates/workshop/workspace/src/workspace_file/siblings.rs` line 14). Its other uses in the repository are vendor names that are always qualified.
-  - **Scope is the `promptforge` repository plus the `promptforge-docs` guide, and every plan in `vibe/`, the dated month folders included.** These were the owner's selections when asked.
+  - **Scope is the `runvil` repository plus the `runvil-docs` guide, and every plan in `vibe/`, the dated month folders included.** These were the owner's selections when asked.
   - **Commit straight to `master`.** User: "use master not plugin-rename".
   - **Plan files keep their names.** User: "dont rename plan files, the filenames are baked into commit messages. you can only change the contents of plan files." Code files, test files, and the crate directory are still renamed.
   - **Rulebooks yield to the plan, in the order remove, then edit, then add.** User: "when an AGENTS.md conflicts with the plan, prefer the plan, and prefer removing material from AGENTS.md over editing, and prefer editing over adding. Same for prose rules in source files like INVARIANTS or whatever". The root `AGENTS.md` therefore gets one new bullet and edits elsewhere (Execution Instructions, Step 2).
@@ -222,7 +222,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
   - **Wrong sense calls.** A kept sense could be renamed, or a Plugin could be left behind. The kept and ambiguous lists in Technical Design, plus the residual reports, catch these.
   - **Lockfile.** Every `--locked` command fails until `Cargo.lock` is rewritten after the crate is renamed.
   - **Docs lag.** The guide's quoted messages are stale between the code step and the guide step. No test reads them.
-  - **External references.** References to the old names outside the two repositories stay as they are: cabinet reports, the `promptforge-design` repository, `~/.cursor/plans`, and the sibling checkouts `promptforge2/` and `promptforge3/`.
+  - **External references.** References to the old names outside the two repositories stay as they are: cabinet reports, the `runvil-design` repository, `~/.cursor/plans`, and the sibling checkouts `runvil2/` and `runvil3/`.
   - **The shell.** If the shell cannot run commands on this machine, edits still proceed, and Vinnie runs the gates.
 
 ### Deferred and Out of Scope
@@ -230,8 +230,8 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
 - Deferred: **the Plugin API redesign** (a manifest as data, a Plugin source that loads Plugins from configuration, lazy per-run creation, teardown, and configuration tiers). Revisit after this rename lands.
 - Out of scope:
   - the `tools-public` repository, which uses "capability" in its plain-English sense
-  - the `promptforge-design` repository and cabinet reports
-  - the sibling checkouts `promptforge2/` and `promptforge3/`
+  - the `runvil-design` repository and cabinet reports
+  - the sibling checkouts `runvil2/` and `runvil3/`
   - the gateway's model-capability vocabulary
 
 </decision-record>
@@ -242,10 +242,10 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
 - Status: complete
 - Build command:
   - Default build: `cargo build --locked -p gateway`. `gateway` is the workspace's only default member.
-  - The crates this plan touches: `cargo build --locked -p promptforge -p promptforge-engine -p harness-capabilities -p harness-runner -p harness -p harness-web -p workshop-server`. After the crate rename, `harness-capabilities` is `harness-plugins`.
+  - The crates this plan touches: `cargo build --locked -p runvil -p runvil-engine -p harness-capabilities -p harness-runner -p harness -p harness-web -p workshop-server`. After the crate rename, `harness-capabilities` is `harness-plugins`.
   - Headless gateway shape: `cargo check -p gateway --no-default-features`.
 - Focused test command pattern:
-  - `cargo nextest run --locked -p <crate> --all-features <test-name-substring>`, for example `cargo nextest run --locked -p promptforge-parser --all-features plugin`.
+  - `cargo nextest run --locked -p <crate> --all-features <test-name-substring>`, for example `cargo nextest run --locked -p runvil-parser --all-features plugin`.
   - For `workshop`, `workshop-server`, and `workshop-server-api`, drop `--all-features`.
   - A UI test file: `node --test test/<file>.mjs` from `crates/workshop/ui`.
 - Component test command pattern:
@@ -262,37 +262,37 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
   - UI typecheck: `npm run typecheck --workspaces --if-present` from `crates/workshop`.
 - Formatter check command: `cargo fmt --all --check`.
 - Docs command:
-  - With `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`.
-  - Facade surface: `cargo +nightly-2026-09-05 xtask api --check`. `cargo +nightly-2026-09-05 xtask api --bless` rewrites `crates/promptforge/public-api.txt`. The pin lives in `crates/build-xtask/src/api/toolchain.rs`.
-  - Guide: `cargo xtask site --books-only`, with `PROMPTFORGE_DOCS` set to `c:\Users\Vinnie\cursor\promptforge-docs` (PowerShell: `$env:PROMPTFORGE_DOCS="c:\Users\Vinnie\cursor\promptforge-docs"`).
+  - With `RUSTDOCFLAGS=-D warnings` set (PowerShell: `$env:RUSTDOCFLAGS="-D warnings"`), run `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, then `cargo doc -p runvil --no-deps` and `cargo doc -p harness --no-deps`.
+  - Facade surface: `cargo +nightly-2026-09-05 xtask api --check`. `cargo +nightly-2026-09-05 xtask api --bless` rewrites `crates/runvil/public-api.txt`. The pin lives in `crates/build-xtask/src/api/toolchain.rs`.
+  - Guide: `cargo xtask site --books-only`, with `RUNVIL_DOCS` set to `c:\Users\Vinnie\cursor\runvil-docs` (PowerShell: `$env:RUNVIL_DOCS="c:\Users\Vinnie\cursor\runvil-docs"`).
 - Test placement and naming conventions:
-  - Unit tests sit in an inline `#[cfg(test)] mod tests`, or in a sibling `foo-tests.rs` wired as `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;` (for example `crates/promptforge-internal/types/src/capabilities-tests.rs`).
-  - Each crate has one integration binary: `tests/it/main.rs` (in `harness-runner`, `harness-capabilities`, and `workshop-server`) or `tests/suite/main.rs` (in `harness` and `promptforge`). It holds one module per topic plus a `support.rs`. Prompt fixtures sit under `tests/prompts/`.
-  - The Engine's execution tests live in `crates/promptforge-internal/engine/src/execute/tests/`, each declared in `execute/tests.rs`.
+  - Unit tests sit in an inline `#[cfg(test)] mod tests`, or in a sibling `foo-tests.rs` wired as `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;` (for example `crates/runvil-internal/types/src/capabilities-tests.rs`).
+  - Each crate has one integration binary: `tests/it/main.rs` (in `harness-runner`, `harness-capabilities`, and `workshop-server`) or `tests/suite/main.rs` (in `harness` and `runvil`). It holds one module per topic plus a `support.rs`. Prompt fixtures sit under `tests/prompts/`.
+  - The Engine's execution tests live in `crates/runvil-internal/engine/src/execute/tests/`, each declared in `execute/tests.rs`.
   - Test names are snake_case behavior sentences, such as `activation_receives_the_runs_own_services`.
   - UI tests are `node --test` `.mjs` files in `crates/workshop/ui/test/`. `docs-claims.mjs` checks the Definitions vocabulary in every `AGENTS.md`, every `.cursor/rules/*.mdc`, and the `//!` crate doc of every `lib.rs` or `main.rs` that carries `## Invariants`. It strips fenced and inline code first, and skips the root `AGENTS.md` Definitions section.
 - Directory map:
-  - `crates/`: every crate. The top level holds the `promptforge` and `harness` facades, the Host-side crates `harness-web` (which provides the `promptforge/web` Plugin) and `harness-gateway-client`, the shared crates, and the build tooling (`build-xtask`, `build-ceiling`, `build-user-guide`, and others).
-  - Manifestless containers hold each family's private crates: `promptforge-internal/` (`types`, `parser`, `engine`, `lua`, `vfs`, `model-client`), `harness-internal/` (`runner`, `capabilities`), `gateway/`, and `workshop/`. `workshop/` also holds the TypeScript packages `ui`, `look`, and `platform`, with one npm install at `crates/workshop`.
-  - `prompts/`: example prompts, each of which must parse (`crates/promptforge/tests/suite/shipped.rs`).
-  - `guide/`: the docs site's chrome, landing page, and `books/<book>/book.toml`. The chapter text lives in the `promptforge-docs` checkout.
+  - `crates/`: every crate. The top level holds the `runvil` and `harness` facades, the Host-side crates `harness-web` (which provides the `runvil/web` Plugin) and `harness-gateway-client`, the shared crates, and the build tooling (`build-xtask`, `build-ceiling`, `build-user-guide`, and others).
+  - Manifestless containers hold each family's private crates: `runvil-internal/` (`types`, `parser`, `engine`, `lua`, `vfs`, `model-client`), `harness-internal/` (`runner`, `capabilities`), `gateway/`, and `workshop/`. `workshop/` also holds the TypeScript packages `ui`, `look`, and `platform`, with one npm install at `crates/workshop`.
+  - `prompts/`: example prompts, each of which must parse (`crates/runvil/tests/suite/shipped.rs`).
+  - `guide/`: the docs site's chrome, landing page, and `books/<book>/book.toml`. The chapter text lives in the `runvil-docs` checkout.
   - `vibe/`: dated plans at the top level, older months in `2026-07/`, `2026-08/`, and `2026-09/`, and the gitignored `scratch/`. `vibe/.cursorignore` hides the subfolders from root-level Cursor search.
   - `.github/workflows/`: CI, release, site, and nightly jobs. `.cursor/rules/`: two Workshop rule files.
-  - `promptforge-docs` (`c:\Users\Vinnie\cursor\promptforge-docs`) is its own git repository with default branch `master`. Chapters sit under `src/<book>/`, alongside `src/introduction.md`. Its `SUMMARY.md` and the guide exports are generated at build time into `target/`, never committed.
+  - `runvil-docs` (`c:\Users\Vinnie\cursor\runvil-docs`) is its own git repository with default branch `master`. Chapters sit under `src/<book>/`, alongside `src/introduction.md`. Its `SUMMARY.md` and the guide exports are generated at build time into `target/`, never committed.
 - Component boundaries:
-  - The Engine is sans-I/O, and the Harness reaches it only through the `promptforge` facade.
-    - `promptforge-engine` depends on `lua`, `parser`, `model-client`, `types`, and `vfs`.
-    - `promptforge-parser` depends on `lua` and `types`.
-    - `promptforge-types` depends on nothing.
-  - `harness-capabilities` depends on `promptforge`. `harness-runner` depends on it and on `promptforge`, and the `harness` facade re-exports both.
+  - The Engine is sans-I/O, and the Harness reaches it only through the `runvil` facade.
+    - `runvil-engine` depends on `lua`, `parser`, `model-client`, `types`, and `vfs`.
+    - `runvil-parser` depends on `lua` and `types`.
+    - `runvil-types` depends on nothing.
+  - `harness-capabilities` depends on `runvil`. `harness-runner` depends on it and on `runvil`, and the `harness` facade re-exports both.
   - `harness-web` and `harness-gateway-client` depend on the `harness` facade.
-  - Workshop is a Host. `workshop-server` and `workshop-agents` depend on the Harness crates and `promptforge`.
+  - Workshop is a Host. `workshop-server` and `workshop-agents` depend on the Harness crates and `runvil`.
   - `cargo test -p build-xtask` enforces the product and container boundaries, the Harness tokio ban, the `test-support` leak guard, the retired-symbol scan, the `## Invariants` marker, and the 500-line file ceiling. Several of its tests name the `harness-capabilities` crate and its path.
   - For this plan:
-    - Ids and preludes: `crates/promptforge-internal/types/src/capabilities.rs` and `names.rs`.
-    - Frontmatter: `crates/promptforge-internal/parser/src/build-frontmatter.rs` and `contract.rs`.
-    - The refusal notice: `crates/promptforge-internal/engine/src/execute/requirements.rs`.
-    - Prelude errors: `crates/promptforge-internal/lua/src/prelude.rs`.
+    - Ids and preludes: `crates/runvil-internal/types/src/capabilities.rs` and `names.rs`.
+    - Frontmatter: `crates/runvil-internal/parser/src/build-frontmatter.rs` and `contract.rs`.
+    - The refusal notice: `crates/runvil-internal/engine/src/execute/requirements.rs`.
+    - Prelude errors: `crates/runvil-internal/lua/src/prelude.rs`.
     - The trait, registry, activation, and services: `crates/harness-internal/capabilities/src/{capability,registry,activation,service}.rs`.
     - The Workshop contract: `crates/workshop/server/src/routes/prompts.rs` and `crates/workshop/ui/src/services/run-api.ts`.
 - Conventions summary:
@@ -325,7 +325,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
   - Run `cargo update --workspace`.
 - Apply the name map and the file renames from Technical Design. Update every `mod`, `#[path]`, `use`, and doc link that names a renamed item, and every frontmatter fixture.
 - Split the work across three sub-agents on disjoint files. Each leaves its changes unstaged; the coding agent merges them, builds, and fixes.
-  - Engine: `crates/promptforge/` and `crates/promptforge-internal/{types,parser,engine,lua}/`.
+  - Engine: `crates/runvil/` and `crates/runvil-internal/{types,parser,engine,lua}/`.
   - Harness: `crates/harness/`, `crates/harness-internal/{plugins,runner}/`, `crates/harness-web/`, including `ServiceError::InvalidId`.
   - Workshop: `crates/workshop/{server,agents,ui}/`, `prompts/research-person.md`, and the `build-xtask` tests.
 - Prose changes in this step are limited to the words that name a renamed item: doc links, `use` lines, and identifiers in comments. The rest waits for Step 2.
@@ -346,7 +346,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
   - Run `node --test test/docs-claims.mjs` from `crates/workshop/ui`, and confirm it fails on the root `AGENTS.md` and the crate docs listed below.
 - Root `AGENTS.md`: one addition, and edits everywhere else.
   - Edit "Three words have exactly one meaning each" to "Four words".
-  - Add this bullet after Host: "**Plugin**: a named unit of tools, and optionally a Lua prelude, that the Host installs for its runs, such as `promptforge/web`. Every tool it adds sits under its two-segment id (`promptforge/web/fetch`). A prompt declares the Plugins it requires under `plugins:` in its frontmatter, and the Harness activates them when the run starts. A Plugin has no other name: never capability, pack, or addon."
+  - Add this bullet after Host: "**Plugin**: a named unit of tools, and optionally a Lua prelude, that the Host installs for its runs, such as `runvil/web`. Every tool it adds sits under its two-segment id (`runvil/web/fetch`). A prompt declares the Plugins it requires under `plugins:` in its frontmatter, and the Harness activates them when the run starts. A Plugin has no other name: never capability, pack, or addon."
   - Edit the "Using the terms" bullet that opens with "Engine" and "Harness" to open: "Engine", "Harness", and "Plugin" mean only the defined terms. Anything else gets a qualified lowercase name: the gateway's speech engine, the database, Rust's built-in test harness, a Tauri or ProseMirror plugin. The rest of that bullet is kept.
   - Edit lines 31 and 33 to say "feature" in place of "capability".
   - Change nothing else in this file.
@@ -356,8 +356,8 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
   - `crates/harness-web/src/lib.rs` lines 1-11
   - `crates/harness-internal/runner/src/lib.rs` line 5
   - `crates/workshop/protocol/src/lib.rs` line 46
-  - `crates/promptforge-internal/types/src/lib.rs` lines 15-19
-  - `crates/promptforge-internal/lua/src/lib.rs` lines 28-33. Its line 20 says "access capability" and stays.
+  - `crates/runvil-internal/types/src/lib.rs` lines 15-19
+  - `crates/runvil-internal/lua/src/lib.rs` lines 28-33. Its line 20 says "access capability" and stays.
 - In code files, change comment text in place and never add a line. A code file shrinks only by its reported rulebook removals; `docs-claims.mjs` is the one exception. Engine docs call the code that steps a run "the caller", and never name the Harness. Verbatim quotations of people stay as written.
 - Sweep the remaining prose with three sub-agents on disjoint files: the Engine crates, the Harness crates, and everything else.
   - What they sweep: comments, `//!` docs, READMEs, Cargo `description` strings, and comments in `.ts`, `.mjs`, `.css`, `.lua`, `.toml`, and `.yml` files.
@@ -391,7 +391,7 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
     - other senses, such as model capabilities in the gateway plans and Tauri capabilities in the Tauri migration plan
   - Leave out entirely: `vibe/scratch/`, `vibe/ACTIVE`, and this plan's repository copy.
   - Split the work across three sub-agents: the top level plus `2026-07` and `2026-08`; `2026-09-28-2` plus `2026-09-13-1`; the rest of `2026-09`.
-- Guide, in `c:\Users\Vinnie\cursor\promptforge-docs` on `master`:
+- Guide, in `c:\Users\Vinnie\cursor\runvil-docs` on `master`:
   - Rename five headings, and update the 18 links that target them:
     - `src/language/04-how-a-prompt-runs.md` line 472, "Capability activation", becomes `#plugin-activation`
     - `05-lua-environment.md` line 723, "Declaring the capability", becomes `#declaring-the-plugin`
@@ -403,12 +403,12 @@ The owner chose Plugin over Addon and Extension, and asked for one defined term 
     - Change `namespace/pack` to `namespace/plugin`.
     - Copy every quoted message exactly from Technical Design's "Message texts".
   - Leave alone: the gateway chapters, `src/introduction.md`, `10-models.md`, "thinking capability", and `handle.capabilities`.
-  - Commit `promptforge-docs` first, as its own commit, before this step's `promptforge` commit.
+  - Commit `runvil-docs` first, as its own commit, before this step's `runvil` commit.
 - Checks:
   - Each `vibe/` folder's residual report holds only explained hits.
-  - `git status` in `promptforge` shows only modified files under `vibe/`, and nothing under `vibe/scratch/`.
+  - `git status` in `runvil` shows only modified files under `vibe/`, and nothing under `vibe/scratch/`.
   - In the guide, no link targets a removed heading slug, and every new slug matches a heading.
-  - `cargo xtask site --books-only` passes with `PROMPTFORGE_DOCS` set.
+  - `cargo xtask site --books-only` passes with `RUNVIL_DOCS` set.
 
 </step-3>
 

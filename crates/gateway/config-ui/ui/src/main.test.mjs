@@ -24,14 +24,14 @@ test("booting the bundle without a stored key renders the key prompt", async () 
   const doc = dom.window.document;
   const title = doc.querySelector("#app .key-prompt h1");
   assert.ok(title, "the key prompt title mounted under #app");
-  assert.equal(title.textContent, "PromptForge Gateway");
+  assert.equal(title.textContent, "Runvil Gateway");
 
   const medallion = doc.querySelector("#app .key-prompt img");
   assert.ok(medallion, "the medallion is on the card");
-  assert.equal(medallion.getAttribute("src"), "icons/promptforge-icon.png");
+  assert.equal(medallion.getAttribute("src"), "icons/runvil-icon.png");
   assert.equal(
     medallion.getAttribute("srcset"),
-    "icons/promptforge-icon.png 1x, icons/promptforge-icon@2x.png 2x",
+    "icons/runvil-icon.png 1x, icons/runvil-icon@2x.png 2x",
     "the medallion names the @2x render for high-DPI displays",
   );
   assert.equal(medallion.getAttribute("alt"), "", "the medallion is decorative");

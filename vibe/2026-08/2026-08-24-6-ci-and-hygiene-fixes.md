@@ -22,29 +22,29 @@ Three commits, one per finding.
 
 `.github/workflows/ci.yml` runs everything on `ubuntu-latest` but the workbench crates need GTK/GLib/WebKit dev packages. Also, the workbench voice (whisper-rs-sys) needs cmake + libclang.
 
-**Fix:** split the CI matrix. The portable crates (everything except `promptforge-wb` and `promptforge-wb-server`) run on Ubuntu with no special deps. The workbench crates get their own job that provisions the GUI stack, or are excluded from the Ubuntu jobs.
+**Fix:** split the CI matrix. The portable crates (everything except `runvil-wb` and `runvil-wb-server`) run on Ubuntu with no special deps. The workbench crates get their own job that provisions the GUI stack, or are excluded from the Ubuntu jobs.
 
 Simplest approach: exclude the two workbench crates from the main `check` and `msrv` jobs:
 
 ```yaml
 - name: Clippy
-  run: cargo clippy --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-targets --all-features -- -D warnings
+  run: cargo clippy --workspace --exclude runvil-wb --exclude runvil-wb-server --all-targets --all-features -- -D warnings
 
 - name: Test
-  run: cargo test --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
+  run: cargo test --locked --workspace --exclude runvil-wb --exclude runvil-wb-server --all-features
 ```
 
 Same for the MSRV job. The workbench gets its own job on `windows-latest` (the primary target platform, where WebView2 and CUDA are available) or on Ubuntu with provisioned packages. Windows is the natural choice since that's where it ships.
 
-Add a `check-workbench` job on `windows-latest` that builds and tests only `promptforge-wb` and `promptforge-wb-server` (needs npm for the UI build step). Note: CUDA is not available on CI runners, so whisper-rs must build without the `cuda` feature in CI. The `cuda` feature is currently set unconditionally in root `Cargo.toml` - gate it behind a `--no-default-features` or move it to a feature flag on the server crate rather than baking it into the workspace dependency. This is the one design call in this commit.
+Add a `check-workbench` job on `windows-latest` that builds and tests only `runvil-wb` and `runvil-wb-server` (needs npm for the UI build step). Note: CUDA is not available on CI runners, so whisper-rs must build without the `cuda` feature in CI. The `cuda` feature is currently set unconditionally in root `Cargo.toml` - gate it behind a `--no-default-features` or move it to a feature flag on the server crate rather than baking it into the workspace dependency. This is the one design call in this commit.
 
 ## Commit 2: Clippy lint fixes
 
 Two files:
 
-1. `crates/promptforge-tool-picker/build.rs:262`: `source.len() % 4 != 0` -> `!source.len().is_multiple_of(4)` (the `manual_is_multiple_of` lint).
+1. `crates/runvil-tool-picker/build.rs:262`: `source.len() % 4 != 0` -> `!source.len().is_multiple_of(4)` (the `manual_is_multiple_of` lint).
 
-2. `crates/promptforge-mcp-server/src/watch/reload.rs:86-92`: the `#[expect(dead_code)]` is unfulfilled. Either the code it protects is now used (remove the expect) or the reason no longer applies (update or switch to `#[allow(dead_code, reason = "...")]` if the classifier is still legitimately test-only). Check which.
+2. `crates/runvil-mcp-server/src/watch/reload.rs:86-92`: the `#[expect(dead_code)]` is unfulfilled. Either the code it protects is now used (remove the expect) or the reason no longer applies (update or switch to `#[allow(dead_code, reason = "...")]` if the classifier is still legitimately test-only). Check which.
 
 ## Commit 3: Gateway client request timeouts
 

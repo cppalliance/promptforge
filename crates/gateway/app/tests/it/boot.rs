@@ -50,7 +50,7 @@ fn a_stale_state_file_boots_with_no_profile_and_logs_the_warning() {
         "active_profile = \"ghost\"\n",
     )
     .expect("write the stale state");
-    let run_dir = temp.path().join(".promptforge").join("run");
+    let run_dir = temp.path().join(".runvil").join("run");
     let mut gateway = GatewayProcess::spawn_selecting(&path, temp.path(), None);
     let connection = wait_for_connection(&run_dir, Duration::from_secs(30));
     let url = format!("http://127.0.0.1:{}", connection.port);
@@ -92,13 +92,8 @@ fn a_stale_state_file_boots_with_no_profile_and_logs_the_warning() {
     let exit = gateway.wait_for_exit(Duration::from_secs(30));
     assert!(exit.success(), "the gateway exits cleanly: {exit}");
 
-    let log = std::fs::read_to_string(
-        temp.path()
-            .join(".promptforge")
-            .join("logs")
-            .join("gateway.log"),
-    )
-    .expect("read the log");
+    let log = std::fs::read_to_string(temp.path().join(".runvil").join("logs").join("gateway.log"))
+        .expect("read the log");
     assert!(
         log.contains(
             "state file selects profile \"ghost\", which is not defined (defined profiles: main); booting with no profile"
@@ -123,13 +118,8 @@ fn an_undefined_profile_flag_fails_the_boot_naming_the_defined_profiles() {
 
     let exit = gateway.wait_for_exit(Duration::from_secs(30));
     assert!(!exit.success(), "an undefined --profile fails the boot");
-    let log = std::fs::read_to_string(
-        temp.path()
-            .join(".promptforge")
-            .join("logs")
-            .join("gateway.log"),
-    )
-    .expect("the fatal outcome drained to the log file");
+    let log = std::fs::read_to_string(temp.path().join(".runvil").join("logs").join("gateway.log"))
+        .expect("the fatal outcome drained to the log file");
     assert!(
         log.contains("active profile ghost is not defined (defined profiles: main)"),
         "the error names the missing profile and the defined ones: {log}"
@@ -137,7 +127,7 @@ fn an_undefined_profile_flag_fails_the_boot_naming_the_defined_profiles() {
     assert!(
         !temp
             .path()
-            .join(".promptforge")
+            .join(".runvil")
             .join("run")
             .join("gateway.json")
             .exists(),
@@ -159,13 +149,9 @@ fn headless_serve_bookends_the_log_file() {
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
-    let run_dir = temp.path().join(".promptforge").join("run");
-    let log = temp
-        .path()
-        .join(".promptforge")
-        .join("logs")
-        .join("gateway.log");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let run_dir = temp.path().join(".runvil").join("run");
+    let log = temp.path().join(".runvil").join("logs").join("gateway.log");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")
@@ -228,7 +214,7 @@ fn headless_serve_bookends_the_log_file() {
     );
     assert!(
         lines.first().is_some_and(|line| line.contains(&format!(
-            "promptforge-gateway {} starting",
+            "runvil-gateway {} starting",
             env!("CARGO_PKG_VERSION")
         ))),
         "the versioned launch record is first: {contents}"
@@ -249,12 +235,8 @@ fn headless_serve_bookends_the_log_file() {
 #[test]
 fn the_root_invocation_serves_with_boot_discovery() {
     let temp = tempfile::tempdir().unwrap();
-    let connection = temp
-        .path()
-        .join(".promptforge")
-        .join("run")
-        .join("gateway.json");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let connection = temp.path().join(".runvil").join("run").join("gateway.json");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--no-tray")
         .env("USERPROFILE", temp.path())
         .env("HOME", temp.path())
@@ -275,10 +257,7 @@ fn the_root_invocation_serves_with_boot_discovery() {
     let _ = child.kill();
     let _ = child.wait();
     assert!(
-        temp.path()
-            .join(".promptforge")
-            .join("gateway.toml")
-            .is_file(),
+        temp.path().join(".runvil").join("gateway.toml").is_file(),
         "first-run generation wrote the profile config"
     );
 }
@@ -289,7 +268,7 @@ fn the_root_invocation_serves_with_boot_discovery() {
 #[test]
 fn the_workshop_package_smoke_profile_boots_without_cli_arguments() {
     let temp = tempfile::tempdir().unwrap();
-    let profile = temp.path().join(".promptforge");
+    let profile = temp.path().join(".runvil");
     std::fs::create_dir(&profile).expect("create isolated profile");
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../.github/fixtures/workshop-package-smoke");
@@ -298,12 +277,12 @@ fn the_workshop_package_smoke_profile_boots_without_cli_arguments() {
         std::fs::copy(entry.path(), profile.join(entry.file_name())).expect("copy fixture entry");
     }
     let connection = profile.join("run").join("gateway.json");
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--no-tray")
         .env("USERPROFILE", temp.path())
         .env("HOME", temp.path())
-        .env_remove("PROMPTFORGE_PROFILE")
-        .env_remove("PROMPTFORGE_GATEWAY_CONFIG")
+        .env_remove("RUNVIL_PROFILE")
+        .env_remove("RUNVIL_GATEWAY_CONFIG")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()

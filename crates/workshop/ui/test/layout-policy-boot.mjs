@@ -94,7 +94,7 @@ await bootWorkbench(
           )
         : bootFetch(url, init);
     try {
-      window.dispatchEvent(new window.CustomEvent("promptforge:workspace-changed"));
+      window.dispatchEvent(new window.CustomEvent("runvil:workspace-changed"));
       await sleep(100);
     } finally {
       globalThis.fetch = bootFetch;

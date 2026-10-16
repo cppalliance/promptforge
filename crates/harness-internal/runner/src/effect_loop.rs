@@ -4,7 +4,7 @@
 //! resume`. Every step's events are handed to the run's recorder before any
 //! of the step's effects is issued, so an effect's record never precedes the
 //! events its step reported. Each effect is appended as its
-//! [`EffectRecord`](promptforge::effect::EffectRecord) and then handled by
+//! [`EffectRecord`](runvil::effect::EffectRecord) and then handled by
 //! kind. A chat, tool-call, or timer effect's performer future joins the
 //! effects in flight, which the loop polls inside the run's own future: the
 //! loop starts no task, so a run is one future that any executor can drive.
@@ -48,12 +48,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 
-use promptforge::cancel::CancelHandle;
-use promptforge::effect::{Effect, EffectAnswer, EffectId};
-use promptforge::event::Event;
-use promptforge::ids::Provenance;
-use promptforge::vfs::{Access, VfsOp, perform_vfs_op};
-use promptforge::{Run, Step};
+use runvil::cancel::CancelHandle;
+use runvil::effect::{Effect, EffectAnswer, EffectId};
+use runvil::event::Event;
+use runvil::ids::Provenance;
+use runvil::vfs::{Access, VfsOp, perform_vfs_op};
+use runvil::{Run, Step};
 
 use crate::harness::StopSignal;
 use crate::performers::{BoxFuture, Performers};

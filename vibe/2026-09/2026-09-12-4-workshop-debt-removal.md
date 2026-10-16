@@ -3,7 +3,7 @@ name: Workshop Decomposition Debt Removal
 overview: "Remove the seven accepted debts the workshop decomposition (f566cc1e..310804cc) introduced: redesign the registry from per-subsystem slots to contribution collections keyed by kind and type with one wiring path, close the enforcement gaps the rulebook promised, add drift tests for the twin build pipelines and lazy CSS, fix the CI docs break, and revise the decomposition plan and rule files so the records match the tree."
 todos:
   - id: d1-docs-link
-    content: "D1 (WSD-07): qualify the Observer intra-doc link in promptforge-core input.rs; docs command green"
+    content: "D1 (WSD-07): qualify the Observer intra-doc link in runvil-core input.rs; docs command green"
     status: completed
   - id: d2-facade-enforcement
     content: "D2 (WSD-04, WSD-03): handles.rs facades; workshop-server opts into tidy; split tests/it/agents.rs; rule wording matches enforcement"
@@ -35,7 +35,7 @@ The workshop decomposition (13 commits, f566cc1e..310804cc, PR #36) left seven a
   - `crates/workshop-menu/src/lib.rs` (`MenuHandles` plus `register`), `workshop-status/src/lib.rs`, and `workshop-workspace/src/lib.rs` hold registration logic; the rule says `lib.rs` is a facade only; `workshop-gateway/src/handles.rs` shows the intended shape. (DEBT-WSD-04)
   - `crates/build-ui/src/lib.rs` and `crates/workshop-server/ui/build.mjs` both implement splitting, `bundle/app-[hash]`, `chunks/[name]-[hash]`, manifest emission, and index stamping, and document each other as mirrors; the Rust path ships and the Node path serves `npm run watch` and the jsdom suite; nothing fails when they drift. (DEBT-WSD-05)
   - `crates/workshop-server/ui/src/main.ts` re-imports the ten stylesheets of the lazily loaded directories on the premise that a lazy chunk's CSS is otherwise missing. That premise is unverified and likely inverted: esbuild's documented and maintainer-confirmed behavior is to hoist all reachable CSS, including through dynamic imports, into the entry's sibling CSS file (esbuild issue 1590, "by design"); the documented failure modes are CSS duplication across chunk files and missing CSS in multi-entry setups, neither of which applies to this single-entry app. (DEBT-WSD-06, premise under empirical test in step 4)
-  - `crates/promptforge-core/src/input.rs:19` links `[Observer]` after the import that resolved it was removed in 4afa3c82; the CI docs job fails with exit 101 (runs 34728011104 and 34728674340). (DEBT-WSD-07)
+  - `crates/runvil-core/src/input.rs:19` links `[Observer]` after the import that resolved it was removed in 4afa3c82; the CI docs job fails with exit 101 (runs 34728011104 and 34728674340). (DEBT-WSD-07)
   - `vibe/2026-09-12-3-workshop-server-decomposition.md` closed with "No hand-wiring in composition roots", "All crates under 2k lines", "No file exceeds 500 lines", and "CSS lint blocks raw values" marked met, and lines 132 and 404 specify "One proxy slot per subsystem", contradicting its own registration inventory (five kinds, each registered by every subsystem crate) and the operator's quoted intent. (DEBT-WSD-08)
 - Goals:
   - `workshop-registry` never changes when a subsystem is added.
@@ -49,7 +49,7 @@ The workshop decomposition (13 commits, f566cc1e..310804cc, PR #36) left seven a
   - No SPA per-directory menu ownership (operator decision 2026-09-12: leave until stressed).
   - No `GatewaySupervisor` port (defers to the headless agent mode plan so the second consumer shapes the API).
   - No phased contribution lifecycle; the redesign must not preclude it.
-  - No wire-format, `promptforge-*`, or `shared-*` public API change.
+  - No wire-format, `runvil-*`, or `shared-*` public API change.
   - No splitting of pre-existing oversized SPA test files; no typed-error expansion beyond the workspace API.
 - Success criteria:
   - `git grep -n 'session_routes\|workspace_routes\|status_state\|menu_state\|gateway_state\|sessions_state' -- crates/workshop-registry` is empty.
@@ -129,7 +129,7 @@ flowchart LR
   - `crates/xtask/src/tidy.rs`: `tier_dependency_violations` reports a tiered crate whose manifest is missing instead of skipping it.
   - `crates/workshop-server/ui/build.mjs`: gains `--out <dir>` (default `dist/`).
   - `crates/workshop-server/ui/src/main.ts`: the ten feature-stylesheet imports are deleted if the empirical check takes branch A; a comment naming the rule is added only in branch B.
-  - `crates/promptforge-core/src/input.rs:19`: `[Observer]` becomes `[Observer](crate::Observer)`.
+  - `crates/runvil-core/src/input.rs:19`: `[Observer]` becomes `[Observer](crate::Observer)`.
   - Root `Cargo.toml`: `[workspace.lints.rustdoc]` gains `broken_intra_doc_links = "deny"` and `private_intra_doc_links = "deny"`.
   - `AGENTS.md`, `.cursor/rules/workshop-architecture.mdc`, `.cursor/rules/workshop-spa.mdc`, `crates/workshop-registry/src/lib.rs` `//!`, and `vibe/2026-09-12-3-workshop-server-decomposition.md`: reworded or annotated to match the tree (see D5).
 - Data, persistence, failure, security, and privacy constraints:
@@ -192,7 +192,7 @@ Light by design: each debt gets one focused check and the existing suites are th
   - The SPA menu centralization deferral has a named revisit condition: the roadmap's Edit, View, Run, Terminal, and Help menus are the stress the operator said he would wait for ("we will experience the pain when we stress it and then we'll just fix it then"); per-directory `register()` ownership of commands, items, and shortcuts is the client-side analog of this plan's registry decision.
   - Context for the resolved `user_input` debt (EXP-03, no work here): the operator's standing rule is "user_input as a callable tool by the LLM must never be available without an explicit tools.add"; the Lua `user_input()` function stays available to scripts.
   - Exposed pre-existing debt, reported and excluded: `crates/workshop/src/gateway/supervisor.rs` (688 lines) and `tests/recovery.rs` (652) and five `ui/test/*.mjs` files (544-1371 lines) over the ceiling at both baseline and endpoint; the shell supervisor port deferred to the headless plan; the untyped model catalog (`Vec<serde_json::Value>`) crossing `CatalogSink` and `is_chat_capable`; stringly-typed errors outside the workspace API.
-  - Unexplained observations, follow-up candidates only: a 0-byte session event log at `~/.promptforge/sessions/306342003041d93688fa40f3e8802142.jsonl` beside a populated one from ten minutes earlier; no component logs the model provider's non-2xx status or body, so "Model turn failed" is all that ever leaves the process.
+  - Unexplained observations, follow-up candidates only: a 0-byte session event log at `~/.runvil/sessions/306342003041d93688fa40f3e8802142.jsonl` beside a populated one from ten minutes earlier; no component logs the model provider's non-2xx status or body, so "Model turn failed" is all that ever leaves the process.
   - Per-crate guidance stays two-layered: AGENTS.md for product contracts, `lib.rs` `//! ## Invariants` for structural rules. No AGENTS.md files are created for the six extracted crates (their invariant docs are that layer), and rules already enforced by xtask or the compiler are not restated as prose. The review of the three existing per-crate AGENTS.md files found one active contradiction (the workshop-server service-locator bullet, broken by the decomposition at HEAD) and two gaps (the supervisor KEEP decision, the `user_input` standing rule); the contradiction is fixed in step 2 because it would otherwise forbid step 3's work, and the two gaps are added in step 5.
   - Analysis provenance: six findings accepted by the analysis subagent and upheld by an independent challenger (WSD-02's panic aspect narrowed to a doc conflict, WSD-03's exposure widened by the five SPA test files); 19 candidates rejected (7 residual-but-acceptable, 9 weak/speculative, 2 false, 3 unrelated pre-existing).
 
@@ -201,7 +201,7 @@ Light by design: each debt gets one focused check and the existing suites are th
 - The exposed pre-existing items in the Decision Record (oversized shell and SPA test files, supervisor port, untyped catalog, stringly-typed errors elsewhere).
 - The 0-byte session log and missing upstream-error logging investigations.
 - SPA per-directory menu ownership; the phased contribution lifecycle; build-implementer unification; the CSS raw-value lint and `lib.rs` shape check (both need operator approval as structural checks).
-- Any `promptforge-*` or `shared-*` public API change beyond step 1's doc comment.
+- Any `runvil-*` or `shared-*` public API change beyond step 1's doc comment.
 
 </decision-record>
 <project-survey>
@@ -218,7 +218,7 @@ Light by design: each debt gets one focused check and the existing suites are th
 - Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server` (with `RUSTDOCFLAGS: -D warnings` in CI); user guide: `mdbook build guide`.
 - Test placement and naming conventions: Rust unit tests live in `#[cfg(test)]` modules beside the code; integration tests live in each crate's `tests/` directory, conventionally as a single `it` target (`tests/it/main.rs` with one module file per area, or `tests/it.rs`) plus occasional standalone targets (e.g. `tests/paths.rs`, `tests/gateway_client.rs`); shared fixtures in `tests/common/`. Test names are descriptive snake_case sentences (e.g. `simultaneous_direct_launches_leave_one_owner_and_one_clean_handoff`). Cross-product integration tests live in the `product-integration-tests` crate. UI tests are `.test.mjs` files run by `node --test` (`test/**/*.mjs` and `src/**/*.test.mjs`).
 - Directory map: `crates/` holds every workspace member (Cargo glob `crates/*`, except `crates/shared-ui`, a TypeScript+CSS package); `crates/<product>/ui/` holds the esbuild-bundled web UIs; `tools/` holds Node helper scripts (sidecar staging, live TTS checks); `guide/` is the mdbook user guide; `prompts/` holds prompt files; `vibe/` holds architecture docs and session notes (`vibe/archdoc.md`); `images/` holds README art; `local/` holds local config; `.github/workflows/` holds CI and release workflows; `.config/nextest.toml` configures nextest profiles; `.cargo/config.toml`, `clippy.toml`, `rustfmt.toml`, `deny.toml`, `dist-workspace.toml`, `rust-toolchain.toml` (stable) pin tooling at the root.
-- Component boundaries: three products with strict crate-name prefixes and one-way dependencies. `promptforge-*` (executor, parser, Lua boundary, tools, store, vfs, webfetch, agent) must not depend on gateway or workshop crates; `gateway-*` (server, config, routing, protocol, STT, web search) must not depend on promptforge or workshop crates; `workshop-*` (Tauri desktop shell and in-process server) must not depend on gateway crates; `shared-*` (loopback, progress, sidecar, vfs, ui) holds the cross-product API surface and depends on no product crates; `build-*` crates build specific outputs. Dependency rules bind normal, dev, build, and target-specific dependencies.
+- Component boundaries: three products with strict crate-name prefixes and one-way dependencies. `runvil-*` (executor, parser, Lua boundary, tools, store, vfs, webfetch, agent) must not depend on gateway or workshop crates; `gateway-*` (server, config, routing, protocol, STT, web search) must not depend on runvil or workshop crates; `workshop-*` (Tauri desktop shell and in-process server) must not depend on gateway crates; `shared-*` (loopback, progress, sidecar, vfs, ui) holds the cross-product API surface and depends on no product crates; `build-*` crates build specific outputs. Dependency rules bind normal, dev, build, and target-specific dependencies.
 - Conventions summary: Rust 2024 edition, stable toolchain; workspace lints forbid unsafe code outside owned boundaries and deny `unwrap_used`/`expect_used`/clippy::all; dependencies flow shell -> features -> services -> vocabulary; no file exceeds 500 lines (split first, then edit); every workshop crate's lib.rs and every SPA concern directory's index.ts opens with a doc listing allowed dependencies; behavior changes ship with tests in the same change; CSS lives beside its TypeScript in self-contained feature directories and uses only `--ws-*` tokens from `tokens/`; comments cite upstream issue URLs for workarounds; long-running work reports through `shared-progress`; build steps must not dirty the git tree (CI enforces a clean tree).
 
 </project-survey>
@@ -246,7 +246,7 @@ Single piece, single step.
 
 **Changes:**
 
-- `crates/promptforge-core/src/input.rs:19` - `[Observer]` becomes `[Observer](crate::Observer)`.
+- `crates/runvil-core/src/input.rs:19` - `[Observer]` becomes `[Observer](crate::Observer)`.
 - Root `Cargo.toml` - add `[lints.rustdoc]` to `[workspace.lints]` with `broken_intra_doc_links = "deny"` and `private_intra_doc_links = "deny"`, so every local `cargo doc` fails on a broken link instead of only CI's `RUSTDOCFLAGS` invocation. Both CI docs breaks in the parent run were this lint firing only in CI.
 
 **Verification:**
@@ -370,14 +370,14 @@ Single piece, single step.
 **Per-crate AGENTS.md additions:** both describe the tree as it already stands; neither governs in-flight work, so they are safe at this position:
 
 - `crates/workshop/AGENTS.md` - add: "The gateway supervisor (`src/gateway/supervisor.rs`) stays in this crate. Porting it to a shared crate defers to the headless agent mode plan, which shapes the shared API."
-- `crates/promptforge-core/AGENTS.md` - add: "The input broker backs only the script-side `user_input()` function. No `user_input` tool is ever advertised to a model unless a prompt explicitly adds it."
+- `crates/runvil-core/AGENTS.md` - add: "The input broker backs only the script-side `user_input()` function. No `user_input` tool is ever advertised to a model unless a prompt explicitly adds it."
 - Do not create AGENTS.md files for the extracted crates; their `lib.rs` invariant docs are that layer.
 
 **Verification:**
 
 - `git grep -c 'Corrected 2026-09-12' vibe/2026-09-12-3-workshop-server-decomposition.md` is at least 4.
 - `git grep -n 'slot per subsystem' .cursor/rules crates/workshop-registry` is empty.
-- The two added bullets are present in `crates/workshop/AGENTS.md` and `crates/promptforge-core/AGENTS.md`.
+- The two added bullets are present in `crates/workshop/AGENTS.md` and `crates/runvil-core/AGENTS.md`.
 
 </step-5>
 

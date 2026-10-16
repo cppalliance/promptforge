@@ -36,9 +36,9 @@
 //! SPA suite's `crates/workshop/ui/test/agent-wire-fixtures.mjs`, so drift
 //! on either side fails that side's tests.
 
-use promptforge::event::Event;
-use promptforge::metrics::{CallMetrics, ToolCallEvent};
-use promptforge::tools::ToolId;
+use runvil::event::Event;
+use runvil::metrics::{CallMetrics, ToolCallEvent};
+use runvil::tools::ToolId;
 use serde::{Deserialize, Serialize};
 
 /// A session request the client sends: `launch`, `attach`, or `cancel`.

@@ -52,13 +52,13 @@ Line numbers are not a security control. Keep `store.write` as create-or-overwri
 
 ### Existing code
 
-- [store.rs](promptforge/crates/promptforge-core/src/store.rs): `read` = numbered → rename `read_lines`; `read_raw` = verbatim → rename `read`
-- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs): private `wrap_untrusted` / `make_nonce` for tool results only
+- [store.rs](runvil/crates/runvil-core/src/store.rs): `read` = numbered → rename `read_lines`; `read_raw` = verbatim → rename `read`
+- [execute.rs](runvil/crates/runvil-core/src/execute.rs): private `wrap_untrusted` / `make_nonce` for tool results only
 - Lua `store` exposes numbered `read` only today
 
 ### A1. Lift untrusted wrapping
 
-Add [untrusted.rs](promptforge/crates/promptforge-core/src/untrusted.rs):
+Add [untrusted.rs](runvil/crates/runvil-core/src/untrusted.rs):
 
 - `pub fn wrap(content: &str, nonce: &str) -> String`
 - `pub fn nonce() -> String`
@@ -96,8 +96,8 @@ Semantics by position:
 
 Implementation:
 
-- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs): thread `last_reply` (already tracked) into `inject_host` or a new injection point before the preamble. Today `reply` is set to nil in `inject_host`; instead set it to `last_reply.as_deref()` (nil → Lua nil, Some(s) → Lua string).
-- [subst.rs](promptforge/crates/promptforge-core/src/subst.rs): allow `{{ reply }}` as a top-level substitution namespace (like `{{ args }}`). Resolve to current `reply` value at substitution time (which is the previous section's reply, since substitution happens before the model turn).
+- [execute.rs](runvil/crates/runvil-core/src/execute.rs): thread `last_reply` (already tracked) into `inject_host` or a new injection point before the preamble. Today `reply` is set to nil in `inject_host`; instead set it to `last_reply.as_deref()` (nil → Lua nil, Some(s) → Lua string).
+- [subst.rs](runvil/crates/runvil-core/src/subst.rs): allow `{{ reply }}` as a top-level substitution namespace (like `{{ args }}`). Resolve to current `reply` value at substitution time (which is the previous section's reply, since substitution happens before the model turn).
 - Lua: `reply` global readable in preamble. After `bind_reply`, same global is overwritten with current section's answer.
 - Docs: README substitution section, design-core.md - `reply` is now described as carrying forward. Remove/update the design-core statement that "store is the sole intentional mutable channel" to note that `reply` also carries the previous section's text.
 - Tests: section 1 preamble sees nil `reply`; section 2 preamble sees section 1's model text; `{{ reply }}` substitutes correctly; epilog still sees current section's reply after model turn.
@@ -126,7 +126,7 @@ Implementation:
 
 ### A5. Verify Part A
 
-fmt, clippy `-D warnings`, `cargo test -p promptforge-core` + `cargo test -p promptforge-core-tests`. Commit 1: store triad + untrusted module + reply forward.
+fmt, clippy `-D warnings`, `cargo test -p runvil-core` + `cargo test -p runvil-core-tests`. Commit 1: store triad + untrusted module + reply forward.
 
 ---
 
@@ -224,7 +224,7 @@ V1: fail-fast. First arm error aborts the fanout and propagates to the invoker. 
 
 ### B implementation notes
 
-Add [fanout.rs](promptforge/crates/promptforge-core/src/fanout.rs):
+Add [fanout.rs](runvil/crates/runvil-core/src/fanout.rs):
 
 - Load-time bullet parser (called from parser on list H3 sections; stores `Vec<String>` on the section)
 - `### Title` heading resolution against sibling sections
@@ -233,11 +233,11 @@ Add [fanout.rs](promptforge/crates/promptforge-core/src/fanout.rs):
 
 Other touchpoints:
 
-- [parser.rs](promptforge/crates/promptforge-core/src/parser.rs): detect list H3 (no Lua fences), parse bullets at load, store items on `Section`
-- [execute.rs](promptforge/crates/promptforge-core/src/execute.rs): wire the `fanout` Engine function into invoker VMs
-- [subst.rs](promptforge/crates/promptforge-core/src/subst.rs): `{{ item }}` namespace (error outside arms)
-- [observe.rs](promptforge/crates/promptforge-core/src/observe.rs): `Fanout arm started` / `Fanout arm finished` (payload-free); section = worker heading; sequential so order is unambiguous
-- [lib.rs](promptforge/crates/promptforge-core/src/lib.rs): `pub mod fanout`
+- [parser.rs](runvil/crates/runvil-core/src/parser.rs): detect list H3 (no Lua fences), parse bullets at load, store items on `Section`
+- [execute.rs](runvil/crates/runvil-core/src/execute.rs): wire the `fanout` Engine function into invoker VMs
+- [subst.rs](runvil/crates/runvil-core/src/subst.rs): `{{ item }}` namespace (error outside arms)
+- [observe.rs](runvil/crates/runvil-core/src/observe.rs): `Fanout arm started` / `Fanout arm finished` (payload-free); section = worker heading; sequential so order is unambiguous
+- [lib.rs](runvil/crates/runvil-core/src/lib.rs): `pub mod fanout`
 - Update design-core: this explicit fanout is in-contract; inferred fanout remains a non-goal
 
 ### B4. Tests for Part B
@@ -268,7 +268,7 @@ Other touchpoints:
 
 ### B5. Verify Part B
 
-fmt, clippy `-D warnings`, `cargo test -p promptforge-core` + `cargo test -p promptforge-core-tests`. Commit 2: fanout.
+fmt, clippy `-D warnings`, `cargo test -p runvil-core` + `cargo test -p runvil-core-tests`. Commit 2: fanout.
 
 ---
 

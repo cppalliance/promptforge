@@ -1,11 +1,11 @@
 [book]
-title = "PromptForge Language Guide"
+title = "Runvil Language Guide"
 description = "Writing prompts in Markdown and Lua"
 authors = ["Vinnie Falco"]
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/cppalliance/promptforge-docs"
-site-url = "/promptforge/language/"
+git-repository-url = "https://github.com/cppalliance/runvil-docs"
+site-url = "/runvil/language/"
 additional-js = ["back-link.js"]

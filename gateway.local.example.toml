@@ -1,4 +1,4 @@
-# PromptForge gateway configuration, schema version 0.
+# Runvil gateway configuration, schema version 0.
 # The Config UI writes this file. The ordering below is canonical so equivalent
 # edits do not create avoidable merge noise.
 config-version = 0
@@ -6,7 +6,7 @@ config-version = 0
 # Gateway API listener and shared bearer credential.
 [server]
 bind = "127.0.0.1:8081"
-# Use a variable reference (api_key = "${PROMPTFORGE_GATEWAY_API_KEY}") to
+# Use a variable reference (api_key = "${RUNVIL_GATEWAY_API_KEY}") to
 # keep the secret out of the file, or a literal for single-user setups.
 api_key = "change-me-to-a-secret"
 # Loopback callers that present no key are trusted (the default). On a shared
@@ -20,7 +20,7 @@ trust_loopback = true
 [stt]
 window_seconds = 15
 interval_ms = 500
-vocabulary = ["PromptForge", "WG21", "GGUF"]
+vocabulary = ["Runvil", "WG21", "GGUF"]
 # Which whisper runtime build to download on Windows x86-64 and Linux x86-64:
 # "auto" (the default) picks CUDA when an NVIDIA GPU is found and CPU
 # otherwise; "cpu" and "cuda" force the build. The Linux CUDA build needs
@@ -47,10 +47,10 @@ vocabulary = ["PromptForge", "WG21", "GGUF"]
 # without it.
 # whisper_backend = "auto"
 
-# Optional artifact cache root. The default is ~/.promptforge, or
-# %USERPROFILE%\.promptforge on Windows.
+# Optional artifact cache root. The default is ~/.runvil, or
+# %USERPROFILE%\.runvil on Windows.
 [local]
-cache_dir = "~/.promptforge"
+cache_dir = "~/.runvil"
 
 # Optional built-in web search configuration.
 # [tools.web_search]

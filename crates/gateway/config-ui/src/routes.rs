@@ -17,8 +17,8 @@ pub fn routes() -> Router {
         .route("/", get(ui_index))
         .route("/app.js", get(ui_app_js))
         .route("/app.css", get(ui_app_css))
-        .route("/icons/promptforge-icon.png", get(ui_program_icon))
-        .route("/icons/promptforge-icon@2x.png", get(ui_program_icon_2x))
+        .route("/icons/runvil-icon.png", get(ui_program_icon))
+        .route("/icons/runvil-icon@2x.png", get(ui_program_icon_2x))
         .layer(axum::middleware::from_fn(require_loopback))
 }
 
@@ -40,13 +40,13 @@ async fn ui_app_css() -> Response {
 
 /// Serves the program icon at 1x (128 px), the `src` of every `<img>`.
 async fn ui_program_icon() -> Response {
-    assets::ui_asset("icons/promptforge-icon.png", "image/png")
+    assets::ui_asset("icons/runvil-icon.png", "image/png")
 }
 
 /// Serves the program icon at 2x (256 px), the `srcset` entry for
 /// high-DPI displays.
 async fn ui_program_icon_2x() -> Response {
-    assets::ui_asset("icons/promptforge-icon@2x.png", "image/png")
+    assets::ui_asset("icons/runvil-icon@2x.png", "image/png")
 }
 
 #[cfg(test)]
@@ -101,8 +101,8 @@ mod tests {
             "/",
             "/app.js",
             "/app.css",
-            "/icons/promptforge-icon.png",
-            "/icons/promptforge-icon@2x.png",
+            "/icons/runvil-icon.png",
+            "/icons/runvil-icon@2x.png",
         ] {
             let response = get_as_loopback(uri).await;
             let cache_control = response
@@ -130,12 +130,12 @@ mod tests {
 
     #[tokio::test]
     async fn program_icon_is_served_as_png() {
-        assert_ui_asset("/icons/promptforge-icon.png", "image/png").await;
+        assert_ui_asset("/icons/runvil-icon.png", "image/png").await;
     }
 
     #[tokio::test]
     async fn program_icon_2x_is_served_as_png() {
-        assert_ui_asset("/icons/promptforge-icon@2x.png", "image/png").await;
+        assert_ui_asset("/icons/runvil-icon@2x.png", "image/png").await;
     }
 
     #[tokio::test]
@@ -144,8 +144,8 @@ mod tests {
             "/",
             "/app.js",
             "/app.css",
-            "/icons/promptforge-icon.png",
-            "/icons/promptforge-icon@2x.png",
+            "/icons/runvil-icon.png",
+            "/icons/runvil-icon@2x.png",
         ] {
             let mut request = Request::builder()
                 .uri(uri)

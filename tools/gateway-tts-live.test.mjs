@@ -103,7 +103,7 @@ function makeHarness(t, mode, { withKey = true } = {}) {
   const binaryDir = join(repo, "target", "debug");
   mkdirSync(binaryDir, { recursive: true });
   const binaryName =
-    process.platform === "win32" ? "promptforge-gateway.exe" : "promptforge-gateway";
+    process.platform === "win32" ? "runvil-gateway.exe" : "runvil-gateway";
   writeFileSync(join(binaryDir, binaryName), "fake binary", "utf8");
 
   const lines = [];
@@ -170,7 +170,7 @@ test("passes against a conforming gateway and ferries the key only to the subpro
   assert.match(output, /PASS voices union shape/);
   assert.match(output, /PASS field 'instructions' tolerated/);
   assert.match(output, /PASS field 'sample_rate' tolerated/);
-  assert.match(output, /PASS field 'promptforge_probe' tolerated/);
+  assert.match(output, /PASS field 'runvil_probe' tolerated/);
   assert.match(output, /LIVE OK: every assertion passed/);
   assert.equal(readFileSync(sinkPath, "utf8"), "match");
   assertAllDead(spawned);

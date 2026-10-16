@@ -191,9 +191,9 @@ fn sidecar_command(
 
 fn gateway_binary_name(target: &str) -> &'static str {
     if target.split('-').any(|part| part == "windows") {
-        "promptforge-gateway.exe"
+        "runvil-gateway.exe"
     } else {
-        "promptforge-gateway"
+        "runvil-gateway"
     }
 }
 

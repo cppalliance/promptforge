@@ -3,7 +3,7 @@
 // posts the DOM File objects over the WebView2 web-message channel
 // (postMessageWithAdditionalObjects) and the app reads each file's real
 // path; off Windows the app's own drag-drop event supplies the paths.
-// Both paths answer with a `promptforge:file-drop` event, which this
+// Both paths answer with a `runvil:file-drop` event, which this
 // module validates and grants through the workspace HTTP API. Desktop
 // mode never reads file bytes merely because a file was dragged onto the
 // window. In a plain browser neither the bridge nor the event exists and
@@ -23,7 +23,7 @@ import type { StatusBar } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT } from "../../services/workspace-events";
 
 /** The native event the app dispatches when files land on the window. */
-const FILE_DROP_EVENT = "promptforge:file-drop";
+const FILE_DROP_EVENT = "runvil:file-drop";
 
 /**
  * Fired on a drop target element (one marked data-ws-file-drop) after
@@ -44,7 +44,7 @@ interface WebView2Bridge {
 /**
  * Posts a drop's File objects to the app, which reads their real OS
  * paths (something the page itself is never allowed to see) and answers
- * with the `promptforge:file-drop` event. Where the bridge does not exist
+ * with the `runvil:file-drop` event. Where the bridge does not exist
  * (a plain browser, or the non-Windows platforms whose drops arrive as
  * the app's own drag-drop event) the drop ends here.
  */
@@ -172,7 +172,7 @@ export function setupWorkspaceDrops(statusBar: StatusBar): IDisposable {
   window.addEventListener("dragover", onDragOver);
   store.add(toDisposable(() => window.removeEventListener("dragover", onDragOver)));
   // The element under an OS drop, when it is (or is inside) a marked
-  // drop target; the matching promptforge:file-drop answers with the
+  // drop target; the matching runvil:file-drop answers with the
   // paths, and the target gets them after the grants complete.
   let pendingDropTarget: Element | null = null;
   const onDrop = (event: DragEvent): void => {

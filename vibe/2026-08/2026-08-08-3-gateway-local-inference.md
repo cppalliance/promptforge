@@ -1,6 +1,6 @@
 ---
 name: Gateway Local Inference
-overview: Design for embedding local model inference (llama.cpp + Candle) into the promptforge gateway, with profiles, device groups, lanes, queuing, and remote endpoint support.
+overview: Design for embedding local model inference (llama.cpp + Candle) into the runvil gateway, with profiles, device groups, lanes, queuing, and remote endpoint support.
 todos:
   - id: queue
     content: Add per-device/lane semaphores and fair scheduling to gateway routing
@@ -15,7 +15,7 @@ todos:
     content: Serve local llama.cpp inference through /v1/chat/completions endpoint
     status: completed
   - id: model-download
-    content: HTTP download from source URL with cache management in ~/.promptforge/models/
+    content: HTTP download from source URL with cache management in ~/.runvil/models/
     status: completed
   - id: candle-gpu
     content: Extend Candle from CPU-only to CUDA/Metal for utility models (classifiers, embedders)
@@ -23,11 +23,11 @@ todos:
 isProject: false
 ---
 
-# PromptForge Gateway - Local Inference Design
+# Runvil Gateway - Local Inference Design
 
 ## Core Concept
 
-The gateway becomes the single point of inference for all promptforge workloads. It holds API keys for remote providers, loads local models into VRAM, manages concurrency, and exposes a unified OpenAI-compatible API. The executor (promptforge-cli, MCP server) never knows whether a model is local or remote - it just talks to the gateway.
+The gateway becomes the single point of inference for all runvil workloads. It holds API keys for remote providers, loads local models into VRAM, manages concurrency, and exposes a unified OpenAI-compatible API. The executor (runvil-cli, MCP server) never knows whether a model is local or remote - it just talks to the gateway.
 
 ## Profiles
 
@@ -36,7 +36,7 @@ A profile is a named configuration that describes everything loaded on the local
 ### Profile location
 
 ```
-~/.promptforge/profiles/
+~/.runvil/profiles/
 ├── base.toml
 ├── analytical.toml
 ├── threat.toml
@@ -64,7 +64,7 @@ Concrete semantics:
 
 ```bash
 # At startup
-promptforge-gateway serve --profile analytical
+runvil-gateway serve --profile analytical
 
 # At runtime (admin API)
 POST /admin/switch-profile
@@ -135,10 +135,10 @@ flash_attention = true
 gpu_layers = 99
 ```
 
-The `source` field is a URL. On first use (or on `POST /admin/pull`), the gateway downloads the GGUF to a local cache directory (`~/.promptforge/models/`). If the file already exists, it's used directly. A local file path also works:
+The `source` field is a URL. On first use (or on `POST /admin/pull`), the gateway downloads the GGUF to a local cache directory (`~/.runvil/models/`). If the file already exists, it's used directly. A local file path also works:
 
 ```toml
-source = "~/.promptforge/models/custom-finetune.gguf"
+source = "~/.runvil/models/custom-finetune.gguf"
 ```
 
 ### Local utility models (Candle, CPU or GPU)
@@ -148,7 +148,7 @@ source = "~/.promptforge/models/custom-finetune.gguf"
 name = "paper-classifier"
 description = "Multi-hypothesis classifier for WG21 paper routing"
 framework = "candle"
-source = "~/.promptforge/models/paper-classifier-v1.safetensors"
+source = "~/.runvil/models/paper-classifier-v1.safetensors"
 device = "local-4090"
 lane = "utility"
 compute = "cuda"          # or "cpu" or "metal"
@@ -203,7 +203,7 @@ For remote endpoints, the device's `concurrency` is the semaphore. For local mod
 
 ## Model Catalog and Semantic Binding
 
-The gateway serves `GET /v1/models` with all available models (local + remote) from the active profile. The promptforge executor's semantic picker matches prompt needs (e.g. "A careful analysis model suited to structured reasoning") against model descriptions via cosine similarity, same as today.
+The gateway serves `GET /v1/models` with all available models (local + remote) from the active profile. The runvil executor's semantic picker matches prompt needs (e.g. "A careful analysis model suited to structured reasoning") against model descriptions via cosine similarity, same as today.
 
 When a profile switch occurs, the catalog changes. Any cached bindings in an executor are stale - the executor must re-fetch the catalog on its next run.
 
@@ -256,7 +256,7 @@ GET  /admin/profiles                                       # list available prof
 ## Example: Full Profile for Analytical Reports
 
 ```toml
-# ~/.promptforge/profiles/analytical.toml
+# ~/.runvil/profiles/analytical.toml
 include = ["base.toml"]
 
 [[device]]
@@ -288,11 +288,11 @@ gpu_layers = 99
 ```
 
 ```toml
-# ~/.promptforge/profiles/base.toml
+# ~/.runvil/profiles/base.toml
 
 [server]
 bind = "127.0.0.1:8081"
-token = "${PROMPTFORGE_TOKEN}"
+token = "${RUNVIL_TOKEN}"
 
 [queue]
 max_depth = 100
@@ -326,16 +326,16 @@ api_key = "${BRAVE_API_KEY}"
 
 ```bash
 # Prepare for analytical work
-promptforge-gateway serve --profile analytical
+runvil-gateway serve --profile analytical
 
 # In another terminal (or in a script)
-promptforge run briefer.md "The C++ Alliance"
+runvil run briefer.md "The C++ Alliance"
 
 # Switch to threat analysis
 curl -X POST http://localhost:8081/admin/switch-profile -d '{"name":"threat"}'
 
 # Run threat workload
-promptforge run threat-briefer.md "Target Organization"
+runvil run threat-briefer.md "Target Organization"
 ```
 
 Or in a batch script:
@@ -343,21 +343,21 @@ Or in a batch script:
 ```bash
 #!/bin/bash
 curl -s -X POST http://localhost:8081/admin/switch-profile -d '{"name":"analytical"}'
-promptforge run briefer.md "Subject A"
-promptforge run briefer.md "Subject B"
-promptforge run briefer.md "Subject C"
+runvil run briefer.md "Subject A"
+runvil run briefer.md "Subject B"
+runvil run briefer.md "Subject C"
 
 curl -s -X POST http://localhost:8081/admin/switch-profile -d '{"name":"paperflow"}'
-promptforge run classify-paper.md "P3456R2.md"
+runvil run classify-paper.md "P3456R2.md"
 ```
 
 ## Implementation Layers (in build order)
 
 1. **Queue + concurrency** - add semaphores and fair scheduling to existing gateway routing. Works immediately for remote endpoints. Easiest, immediately useful.
-2. **Local generative inference + model download** - DONE via managed `llama-server` subprocess (not in-process FFI; revisit if IPC/lifecycle fails). Gateway owns download/caching under `~/.promptforge/`, spawns one child per `[[local_model]]`, serves through `/v1/chat/completions`.
+2. **Local generative inference + model download** - DONE via managed `llama-server` subprocess (not in-process FFI; revisit if IPC/lifecycle fails). Gateway owns download/caching under `~/.runvil/`, spawns one child per `[[local_model]]`, serves through `/v1/chat/completions`.
 3. **Profile system** - config loading, inheritance resolution, `switch-profile` admin API, profile directory scanning. Now meaningful because there are models to load/unload.
 4. **Local utility models on GPU** - extend Candle integration from CPU-only (tool-picker) to CUDA/Metal for classifiers and embedders that need speed. Only when the paper classifier demands it.
-5. **Core-tests migration** - DONE. core-tests writes a profile TOML and launches promptforge-gateway; download/cache/spawn live in the gateway.
+5. **Core-tests migration** - DONE. core-tests writes a profile TOML and launches runvil-gateway; download/cache/spawn live in the gateway.
 
 ## Execution Method
 

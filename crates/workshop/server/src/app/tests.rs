@@ -45,7 +45,7 @@ async fn boot_reopens_the_workspace_the_pointer_names() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("mine.pfwork");
+    let file = home.path().join("mine.rvwork");
     // Author the file in a previous "run", then let go of it.
     let author = Workspace::new();
     let granted = author.grant(root.path()).expect("grant the root");
@@ -88,7 +88,7 @@ async fn boot_with_corrupt_pointer_bytes_starts_ephemeral() {
 async fn boot_with_a_pointer_to_a_vanished_file_starts_ephemeral() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let gone = home.path().join("gone.pfwork");
+    let gone = home.path().join("gone.rvwork");
     std::fs::write(
         pointer_path(state_dir.path()),
         gone.to_string_lossy().as_bytes(),
@@ -107,7 +107,7 @@ async fn boot_with_a_pointer_to_a_vanished_file_starts_ephemeral() {
 async fn boot_with_a_pointer_to_an_alien_database_starts_ephemeral() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
-    let alien = home.path().join("alien.pfwork");
+    let alien = home.path().join("alien.rvwork");
     workshop_workspace::create_alien_database_for_test(&alien)
         .await
         .expect("the alien database creates");
@@ -182,7 +182,7 @@ fn startup_sweeps_orphaned_temp_files_from_the_state_directory() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     // Residue of a write that crashed between its temp file and its
     // rename in a previous run.
-    let orphan = dir.path().join("workshop-state.json.42-7.pf-tmp");
+    let orphan = dir.path().join("workshop-state.json.42-7.rv-tmp");
     std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
     let config = config_for("http://127.0.0.1:1", dir.path());
     let gateway = ResolvedGateway::from_config(&config.gateway);

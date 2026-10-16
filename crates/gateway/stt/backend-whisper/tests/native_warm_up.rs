@@ -45,13 +45,9 @@ impl FirstDecodeTiming {
 /// Builds an engine, warmed or not, and times its first interim decode and
 /// the mean of the next [`STEADY_DECODES`] over the same window.
 async fn first_decode_timing(warm_up: bool) -> FirstDecodeTiming {
-    let library = require_fixture("PROMPTFORGE_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
-    let model = require_fixture(
-        "PROMPTFORGE_WHISPER_MODEL",
-        &fixture_dir(),
-        "ggml-tiny.en.bin",
-    );
-    let final_model = std::env::var_os("PROMPTFORGE_WHISPER_FINAL_MODEL").map(PathBuf::from);
+    let library = require_fixture("RUNVIL_WHISPER_LIBRARY", &fixture_dir(), "whisper.dll");
+    let model = require_fixture("RUNVIL_WHISPER_MODEL", &fixture_dir(), "ggml-tiny.en.bin");
+    let final_model = std::env::var_os("RUNVIL_WHISPER_FINAL_MODEL").map(PathBuf::from);
     let factory = WhisperModelFactory::new(WhisperConfig::new(
         library,
         model,

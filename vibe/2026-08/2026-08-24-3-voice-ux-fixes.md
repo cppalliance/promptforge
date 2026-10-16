@@ -10,13 +10,13 @@ isProject: false
 
 # Voice UX overhaul - single commit
 
-One commit touching both `crates/promptforge-wb-server` (Rust + UI) and its tests. Follow the rust-rulebook and vibe-rulebook; run fmt, clippy, and targeted tests before committing.
+One commit touching both `crates/runvil-wb-server` (Rust + UI) and its tests. Follow the rust-rulebook and vibe-rulebook; run fmt, clippy, and targeted tests before committing.
 
 Note: two fixes are already uncommitted in the working tree from the earlier debugging session (voice.ts 120s stop timeout, voice.rs `status.idle()` on session close). They fold into this commit.
 
 ## Files and changes
 
-### Rust: `crates/promptforge-wb-server/src/status.rs`
+### Rust: `crates/runvil-wb-server/src/status.rs`
 
 Rename the `Activity` enum variants:
 ```rust
@@ -42,7 +42,7 @@ Search with `Activity::Gateway` and `Activity::Voice` to catch every site. Do no
 
 ### Rust: tests
 
-Every test asserting `activity == Activity::Gateway` or `Activity::Voice` must be updated to the new variant. Run `cargo test -p promptforge-wb-server` and fix until green.
+Every test asserting `activity == Activity::Gateway` or `Activity::Voice` must be updated to the new variant. Run `cargo test -p runvil-wb-server` and fix until green.
 
 ### HTML: `ui/index.html`
 
@@ -175,9 +175,9 @@ Change `.shell` from `height: 100vh` to `flex: 1; min-height: 0;`.
 
 ```
 cargo fmt --all
-cargo clippy -p promptforge-wb-server --all-targets --all-features -- -D warnings
-cargo test -p promptforge-wb-server
-npm run build && npm run typecheck && npm test   (in crates/promptforge-wb-server/ui)
+cargo clippy -p runvil-wb-server --all-targets --all-features -- -D warnings
+cargo test -p runvil-wb-server
+npm run build && npm run typecheck && npm test   (in crates/runvil-wb-server/ui)
 ```
 
 All must pass before committing. Single commit message: "Redesign the status bar and voice UX".

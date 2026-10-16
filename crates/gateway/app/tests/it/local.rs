@@ -14,10 +14,10 @@ use crate::support::{
 /// through the child and returns one vector per input. Ignored by default so
 /// CI stays fast.
 #[tokio::test]
-#[ignore = "downloads llama-server + bge-small-en-v1.5; set PROMPTFORGE_LIVE_LOCAL=1 to opt in"]
+#[ignore = "downloads llama-server + bge-small-en-v1.5; set RUNVIL_LIVE_LOCAL=1 to opt in"]
 async fn local_model_embeddings_return_vectors() {
-    if std::env::var_os("PROMPTFORGE_LIVE_LOCAL").is_none() {
-        eprintln!("skipping: set PROMPTFORGE_LIVE_LOCAL=1 to run this test");
+    if std::env::var_os("RUNVIL_LIVE_LOCAL").is_none() {
+        eprintln!("skipping: set RUNVIL_LIVE_LOCAL=1 to run this test");
         return;
     }
 
@@ -100,10 +100,10 @@ flash_attention = false
 /// through the child and returns one scored result per document. Ignored by
 /// default so CI stays fast.
 #[tokio::test]
-#[ignore = "downloads llama-server + jina-reranker-v1-tiny-en; set PROMPTFORGE_LIVE_LOCAL=1 to opt in"]
+#[ignore = "downloads llama-server + jina-reranker-v1-tiny-en; set RUNVIL_LIVE_LOCAL=1 to opt in"]
 async fn local_model_rerank_returns_scores() {
-    if std::env::var_os("PROMPTFORGE_LIVE_LOCAL").is_none() {
-        eprintln!("skipping: set PROMPTFORGE_LIVE_LOCAL=1 to run this test");
+    if std::env::var_os("RUNVIL_LIVE_LOCAL").is_none() {
+        eprintln!("skipping: set RUNVIL_LIVE_LOCAL=1 to run this test");
         return;
     }
 

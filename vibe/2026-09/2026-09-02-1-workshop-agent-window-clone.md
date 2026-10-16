@@ -27,7 +27,7 @@ todos:
     content: Build TypeaheadPopup (positioned, keyboard-navigable, suggestion lifecycle)
     status: completed
   - id: stt-rename
-    content: Rename voice to stt across UI and wire routes (/voice -> /stt, incl. promptforge-stt crate)
+    content: Rename voice to stt across UI and wire routes (/voice -> /stt, incl. runvil-stt crate)
     status: completed
   - id: tiptap-integrate
     content: Replace textarea in AgentSessionView with PromptInput, wire stt adapter
@@ -63,7 +63,7 @@ isProject: false
 
 ## Current State
 
-The agent session UI ([agent-session-view.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session-view.ts)) is plain text only: a `<textarea>` input, `textContent`-rendered transcript, flat `<code>` tool calls. The backend supports chat, streaming, reasoning, tool calls, tool results, model selection, and voice. No markdown, no mentions, no modes, no context tracking.
+The agent session UI ([agent-session-view.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session-view.ts)) is plain text only: a `<textarea>` input, `textContent`-rendered transcript, flat `<code>` tool calls. The backend supports chat, streaming, reasoning, tool calls, tool results, model selection, and voice. No markdown, no mentions, no modes, no context tracking.
 
 ## Naming Conventions
 
@@ -123,7 +123,7 @@ flowchart TB
 
 ## Dependencies to Add
 
-In [ui/package.json](promptforge/crates/promptforge-workshop-server/ui/package.json):
+In [ui/package.json](runvil/crates/runvil-workshop-server/ui/package.json):
 
 - `@tiptap/core`, `@tiptap/pm`, `@tiptap/starter-kit` - editor framework (vanilla install confirmed: `new Editor({ element, extensions, content })`, no framework needed)
 - `@tiptap/extension-mention`, `@tiptap/extension-placeholder` - mention and placeholder (mention has an official vanilla-JS example in Tiptap docs)
@@ -139,8 +139,8 @@ No React. All vanilla TS with Tiptap's framework-agnostic API.
 All paths in this plan are relative to the workspace root `c:\Users\Vinnie\cursor`.
 
 Governing rule files for every dispatch (read before working; their rules bind):
-- `promptforge/AGENTS.md` (repo root)
-- `promptforge/crates/promptforge-workshop-server/ui/AGENTS.md` (UI layer rules)
+- `runvil/AGENTS.md` (repo root)
+- `runvil/crates/runvil-workshop-server/ui/AGENTS.md` (UI layer rules)
 - `tools-public/rulebooks/vibe-rulebook.md` (execution discipline)
 - `tools-public/rulebooks/typescript-rulebook.md`
 - `tools-public/rulebooks/javascript-rulebook.md`
@@ -149,16 +149,16 @@ Governing rule files for every dispatch (read before working; their rules bind):
 
 ## Build and Test Commands
 
-All UI commands run in `promptforge/crates/promptforge-workshop-server/ui`:
+All UI commands run in `runvil/crates/runvil-workshop-server/ui`:
 
 - Build: `npm run build` (esbuild -> `dist/`)
 - Typecheck + layer check: `npm run typecheck`
 - Tests: `npm test` (node --test over `test/**/*.mjs` and `src/**/*.test.mjs`; jsdom-based)
 
-Rust commands run at the workspace root `promptforge/`:
+Rust commands run at the workspace root `runvil/`:
 
-- Build: `cargo build -p promptforge-workshop-server -p promptforge-stt`
-- Tests: `cargo test -p promptforge-workshop-server -p promptforge-stt`
+- Build: `cargo build -p runvil-workshop-server -p runvil-stt`
+- Tests: `cargo test -p runvil-workshop-server -p runvil-stt`
 
 TypeScript rulebook bindings for all new code:
 - `strict: true` + `verbatimModuleSyntax` are enforced by the project's `tsconfig.json`; `noUncheckedIndexedAccess` is NOT in tsconfig - write new code as if it were (defensive indexed access), but do not enable it globally in these steps
@@ -197,19 +197,19 @@ JavaScript rulebook bindings:
 
 ### Modified files
 
-- [agent-session-view.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session-view.ts) - Replace textarea with `PromptInput`, replace `renderItem()` to use markdown renderer and `ToolCallCard`. Feed structure stays (identity-diffed prefix repaint).
-- [agent-session.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session.css) - Restyle the feed: single-column, streaming cursor, left accent on user messages, Cursor-density spacing.
-- [agent-panel.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/agent-panel.ts) - Pass `ModelService` into the view for the toolbar.
-- [panel-types.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/panel-types.ts) - Thread `ModelService` into `AgentPanel` factory.
-- [main.ts](promptforge/crates/promptforge-workshop-server/ui/src/main.ts) - Pass `ModelService` through to panel factory. Restore zoom from localStorage on boot.
-- [style.css](promptforge/crates/promptforge-workshop-server/ui/style.css) - Add all design tokens (Step 1).
-- [build.mjs](promptforge/crates/promptforge-workshop-server/ui/build.mjs) - Verify esbuild handles the new Tiptap/ProseMirror/marked/shiki/DOMPurify imports.
-- [shortcuts.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/shortcuts.ts) - Add zoom keybinds.
-- [window-menu.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/window-menu.ts) - Add zoom menu items.
-- [index.html](promptforge/crates/promptforge-workshop-server/ui/index.html) - REC badge span becomes a second LED span (Step 17).
-- [status-bar.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.ts) - `setRecording()` targets the rec LED modifier (Step 17).
+- [agent-session-view.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session-view.ts) - Replace textarea with `PromptInput`, replace `renderItem()` to use markdown renderer and `ToolCallCard`. Feed structure stays (identity-diffed prefix repaint).
+- [agent-session.css](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session.css) - Restyle the feed: single-column, streaming cursor, left accent on user messages, Cursor-density spacing.
+- [agent-panel.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/agent-panel.ts) - Pass `ModelService` into the view for the toolbar.
+- [panel-types.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/panel-types.ts) - Thread `ModelService` into `AgentPanel` factory.
+- [main.ts](runvil/crates/runvil-workshop-server/ui/src/main.ts) - Pass `ModelService` through to panel factory. Restore zoom from localStorage on boot.
+- [style.css](runvil/crates/runvil-workshop-server/ui/style.css) - Add all design tokens (Step 1).
+- [build.mjs](runvil/crates/runvil-workshop-server/ui/build.mjs) - Verify esbuild handles the new Tiptap/ProseMirror/marked/shiki/DOMPurify imports.
+- [shortcuts.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/shortcuts.ts) - Add zoom keybinds.
+- [window-menu.ts](runvil/crates/runvil-workshop-server/ui/src/ui/window-menu.ts) - Add zoom menu items.
+- [index.html](runvil/crates/runvil-workshop-server/ui/index.html) - REC badge span becomes a second LED span (Step 17).
+- [status-bar.ts](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.ts) - `setRecording()` targets the rec LED modifier (Step 17).
 - `voice.ts`/`voice.css` - renamed to `stt.ts`/`stt.css` (Step 9), then gain the `SttInputTarget` adapter seam (Step 10).
-- Rust: `promptforge-stt` crate route registration and `promptforge-workshop-server` router composition - `/voice` -> `/stt`, `/voice/capability` -> `/stt/capability` (Step 9).
+- Rust: `runvil-stt` crate route registration and `runvil-workshop-server` router composition - `/voice` -> `/stt`, `/voice/capability` -> `/stt/capability` (Step 9).
 
 ### Unchanged
 
@@ -223,7 +223,7 @@ Steps are ordered by dependency. Each step is one commit with its own focused te
 
 ### Step 1: Design tokens
 
-Full sweep of [style.css](promptforge/crates/promptforge-workshop-server/ui/style.css) to sync with Cursor's dark theme. All values extracted from Cursor's `tokens.js` and embedded `:root` CSS in `workbench.glass.main.js`. The `--cursor-*` prefix is dropped; values map to the workshop's existing token names plus new ones.
+Full sweep of [style.css](runvil/crates/runvil-workshop-server/ui/style.css) to sync with Cursor's dark theme. All values extracted from Cursor's `tokens.js` and embedded `:root` CSS in `workbench.glass.main.js`. The `--cursor-*` prefix is dropped; values map to the workshop's existing token names plus new ones.
 
 **Surfaces** - replace current tokens:
 - `--bg` #0f0f0f -> `#181818`
@@ -323,7 +323,7 @@ Test: visual inspection; existing tests pass.
 
 ### Step 5: Feed integration
 
-Replace the rendering paths in `renderItem()` in [agent-session-view.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session-view.ts):
+Replace the rendering paths in `renderItem()` in [agent-session-view.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session-view.ts):
 - `reply` items: use `renderMarkdown(item.text, { streaming: item.pending })` instead of `textBlock()`; the fragment lands in a container with class `markdown-content` (Step 2's contract - Step 4's caret selector depends on it)
 - `reasoning` items: use `renderMarkdown()` inside the existing `<details>` block, same `markdown-content` container
 - `tool-call` items: use `ToolCallCard` instead of flat `<code>` + `<ul>`; compute `running` by scanning the transcript for a `tool-result` whose `toolCallId` matches one of the call's rows (Step 3's contract)
@@ -369,7 +369,7 @@ Test: typing `@` opens the popup, arrow keys navigate with wraparound, Enter sel
 
 ### Step 9: Rename voice to stt
 
-Mechanical rename, no behavior change. The capability is speech-to-text dictation - no voice output exists - and prior art is unanimous that `/voice` signals a two-way voice pipeline (STT+LLM+TTS), not one-way dictation: OpenAI uses `/v1/audio/transcriptions` for STT and reserves voice naming for Realtime; Azure uses `/stt/...`; Deepgram uses `/listen`; Corti's push-to-talk dictation endpoint is `/transcribe`. The Rust crate is already `promptforge-stt`, so `/stt` is the coherent name across the stack.
+Mechanical rename, no behavior change. The capability is speech-to-text dictation - no voice output exists - and prior art is unanimous that `/voice` signals a two-way voice pipeline (STT+LLM+TTS), not one-way dictation: OpenAI uses `/v1/audio/transcriptions` for STT and reserves voice naming for Realtime; Azure uses `/stt/...`; Deepgram uses `/listen`; Corti's push-to-talk dictation endpoint is `/transcribe`. The Rust crate is already `runvil-stt`, so `/stt` is the coherent name across the stack.
 
 UI:
 - `ui/src/ui/voice.ts` -> `ui/src/ui/stt.ts`, `voice.css` -> `stt.css`
@@ -378,7 +378,7 @@ UI:
 - References: `agent-session-view.ts`, `agent-panel.ts` (`SILENT_STATUS` type), `workshop/panel-types.ts` (imports `VoiceStatus` from `../voice` - becomes `SttStatus` from `../stt`), `ui/test/agent-voice.mjs` -> `agent-stt.mjs`, `agent-voice-boot.mjs` -> `agent-stt-boot.mjs`
 
 Wire routes (same commit - one rename, one history line):
-- `/voice` -> `/stt`, `/voice/capability` -> `/stt/capability` - every reference across the `promptforge-stt` crate (route registration), `promptforge-workshop-server` (router composition, any tests), and the UI fetch paths in `stt.ts`.
+- `/voice` -> `/stt`, `/voice/capability` -> `/stt/capability` - every reference across the `runvil-stt` crate (route registration), `runvil-workshop-server` (router composition, any tests), and the UI fetch paths in `stt.ts`.
 
 Test: existing voice test suite passes under the new names and routes; build passes on both the UI and the Rust workspace.
 
@@ -416,13 +416,13 @@ Test: toolbar renders all three controls, correct spacing, correct alignment.
 
 ### Step 15: Toolbar integration
 
-Mount `AgentToolbar` above `PromptInput` in `AgentSessionView`. The threading seam already exists: [panel-types.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/panel-types.ts) defines `PanelServices` (currently `{ statusBar: TreeStatusSink & SttStatus }`) which `main.ts` passes through Dockview's `createComponent` into `createPanelComponent(options, services)`. Add `modelService: ModelService` to `PanelServices`, populate it in `main.ts`, and consume it in the `agent` factory: `new AgentPanel(services?.statusBar, services?.modelService)`. [agent-panel.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/agent-panel.ts) forwards it to the view. The toolbar sits between the feed and the input bar.
+Mount `AgentToolbar` above `PromptInput` in `AgentSessionView`. The threading seam already exists: [panel-types.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/panel-types.ts) defines `PanelServices` (currently `{ statusBar: TreeStatusSink & SttStatus }`) which `main.ts` passes through Dockview's `createComponent` into `createPanelComponent(options, services)`. Add `modelService: ModelService` to `PanelServices`, populate it in `main.ts`, and consume it in the `agent` factory: `new AgentPanel(services?.statusBar, services?.modelService)`. [agent-panel.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/agent-panel.ts) forwards it to the view. The toolbar sits between the feed and the input bar.
 
 Test: full agent session UI shows toolbar with working model picker, mode chip, and context ring.
 
 ### Step 16: Global zoom
 
-Add Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom to [shortcuts.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/shortcuts.ts) and [window-menu.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/window-menu.ts). Export `zoomIn()`, `zoomOut()`, `resetZoom()` functions. Step size 0.1, range 0.5 to 2.0.
+Add Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom to [shortcuts.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/shortcuts.ts) and [window-menu.ts](runvil/crates/runvil-workshop-server/ui/src/ui/window-menu.ts). Export `zoomIn()`, `zoomOut()`, `resetZoom()` functions. Step size 0.1, range 0.5 to 2.0.
 
 Keybinding detail: `event.key` is `"="` for Ctrl+= but `"+"` for Ctrl+Shift+= (same physical key, shifted). The existing `installShortcuts` handler returns early for Shift combinations except `Ctrl+Shift+F`, so the zoom cases must be evaluated BEFORE that early return, accepting both `"="` and `"+"` as zoom-in (both are the plus key conventionally). Ctrl+- is `"-"` and Ctrl+0 is `"0"` with or without Shift.
 
@@ -432,7 +432,7 @@ Two-tier approach:
 - **Desktop (Tauri)**: native webview zoom via `getCurrentWebviewWindow().setZoom(factor)` from `@tauri-apps/api/webviewWindow` (already a dependency at ^2.11.1 - no new package), gated on `window.__TAURI_INTERNALS__ !== undefined` (the existing desktop-detection pattern used in `workshop-panel.ts`). Native zoom scales the entire coordinate system consistently - no overlay breakage.
 - **Browser/dev fallback**: CSS zoom on `document.documentElement` with `position: relative` on `body` (the documented floating-ui workaround for #3032). Degraded but functional for development; dropdown/popup positions may drift at non-1.0 zoom.
 
-Persistence: `promptforge.workshop.zoom` in localStorage (default 1.0), restored at boot in `main.ts` (calls `setZoom` on desktop). Native zoom does not persist across sessions on its own.
+Persistence: `runvil.workshop.zoom` in localStorage (default 1.0), restored at boot in `main.ts` (calls `setZoom` on desktop). Native zoom does not persist across sessions on its own.
 
 Note: WebView2 can compound app zoom with OS display/text scaling on a minority of systems (WebView2Feedback #3839) - not actionable, but documented so a reported "UI too big/small" bug checks OS scaling first.
 
@@ -440,7 +440,7 @@ Test: keyboard zoom works, menu items work, zoom persists across reload, all pan
 
 ### Step 17: REC badge becomes an LED
 
-Replace the REC text badge in the status bar with a second LED. Today [index.html](promptforge/crates/promptforge-workshop-server/ui/index.html) renders `<span class="status-bar__rec">REC</span>` beside `<span class="status-bar__led">` inside `.status-bar__indicators`; [status-bar.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.ts) `setRecording()` toggles `--active` on the badge; [status-bar.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.css) styles the badge with `--rec-idle`/`--rec-active`.
+Replace the REC text badge in the status bar with a second LED. Today [index.html](runvil/crates/runvil-workshop-server/ui/index.html) renders `<span class="status-bar__rec">REC</span>` beside `<span class="status-bar__led">` inside `.status-bar__indicators`; [status-bar.ts](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.ts) `setRecording()` toggles `--active` on the badge; [status-bar.css](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.css) styles the badge with `--rec-idle`/`--rec-active`.
 
 The change:
 - `index.html`: replace the REC span with `<span class="status-bar__led status-bar__led--rec" aria-label="Recording indicator"></span>`, placed one LED-width to the left of the activity LED (the indicators group's `gap` becomes `var(--led-size)`).
@@ -471,7 +471,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin and intent
 
-The creator chat opened with "Find the UI for the agent window here C:\Users\Vinnie\AppData\Local\Programs\cursor" - the first move was to read Cursor's installed source, not to design from imagination. The goal, verbatim: "I want to replicate the look and feel and behavior of Cursor's agent window, but in my promptforge/crates/promptforge-workshop/"
+The creator chat opened with "Find the UI for the agent window here C:\Users\Vinnie\AppData\Local\Programs\cursor" - the first move was to read Cursor's installed source, not to design from imagination. The goal, verbatim: "I want to replicate the look and feel and behavior of Cursor's agent window, but in my runvil/crates/runvil-workshop/"
 
 The decisive scoping sentence: "I want a clone of Cursor's agent window, when it is in project mode (a visible workspace tree showing folders, not the glass shit). Dont just add everything, get the scaffold in place for what we currently support, which is I think just the chat." This is why the plan builds full visual surface (mode dropdown, token ring, mention chips) with stubbed or absent backends - everything visible, wired only where the backend exists.
 
@@ -479,8 +479,8 @@ The decisive scoping sentence: "I want a clone of Cursor's agent window, when it
 
 - **React**: user floated it ("would react make this easier?") then closed it: "I'm not trying to add React though can we just look at React implementation to copy the shape?" Rejected on bundle size, rewrite cost against dockview, and because the existing identity-diffed `renderItem()` already is React's model written against the DOM. Tiptap/ProseMirror was confirmed framework-free before adoption ("does ProseMirror NodeView require react?" - no).
 - **highlight.js**: considered as simpler to bundle; rejected because Cursor ships Shiki and look-fidelity was the point.
-- **30-language Shiki bundle**: the assistant initially conceded "Ship the languages you want," but the user later reversed: "lets not bundle 30 languages just yet. bundle Lua, Python, Rust, Typescript, HTML, CSS, Javascript plus any other language we are using in promptforge or its toolchain (YAML? TOML?)" - hence the plan's explicit static-import grammar list.
-- **Lazy grammar loading**: discussed and rejected in favor of static bundling - it matches the esbuild one-file-out pipeline and avoids serving grammar assets from promptforge-workshop-server.
+- **30-language Shiki bundle**: the assistant initially conceded "Ship the languages you want," but the user later reversed: "lets not bundle 30 languages just yet. bundle Lua, Python, Rust, Typescript, HTML, CSS, Javascript plus any other language we are using in runvil or its toolchain (YAML? TOML?)" - hence the plan's explicit static-import grammar list.
+- **Lazy grammar loading**: discussed and rejected in favor of static bundling - it matches the esbuild one-file-out pipeline and avoids serving grammar assets from runvil-workshop-server.
 - **Nested subagent tree views**: discarded after user correction: "hmm no I have never seen cursor show a hierarchical subagent view. opening a subagent always opens a new agent tab but it is a special agent tab that has no edit boxes."
 - **Inline diff rendering and drag-and-drop context pills**: user expressed interest ("not sure what inline diff rendering is but I probably want it") but both were scoped out by the "scaffold for what we currently support" directive.
 

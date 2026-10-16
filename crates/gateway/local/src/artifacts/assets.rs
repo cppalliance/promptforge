@@ -227,7 +227,7 @@ const WINDOWS_X86_64_CUDA: ServerAsset<'static> = ServerAsset {
     executable_name: "llama-server.exe",
 };
 
-// The PromptForge Blackwell build, produced by the llama-cuda-blackwell
+// The Runvil Blackwell build, produced by the llama-cuda-blackwell
 // workflow from `crates/build-llama-cuda`. The zip ships the CUDA runtime
 // DLLs, so the machine needs only the NVIDIA driver.
 //
@@ -238,7 +238,7 @@ const WINDOWS_X86_64_CUDA_BLACKWELL: ServerAsset<'static> = ServerAsset {
     platform: "windows-x86_64-cuda-blackwell",
     archives: &[ArchiveRef {
         archive_name: "llama-server-cuda-blackwell-b10082-win-x64.zip",
-        url: "https://github.com/cppalliance/promptforge/releases/download/llama-cuda-blackwell-b10082/llama-server-cuda-blackwell-b10082-win-x64.zip",
+        url: "https://github.com/cppalliance/runvil/releases/download/llama-cuda-blackwell-b10082/llama-server-cuda-blackwell-b10082-win-x64.zip",
         sha256: "10dcd278f0051060bd9adeee75e1d0024e7d19fe359c2df2e20b1ffc7937168c",
         archive_kind: ArchiveKind::Zip,
     }],
@@ -287,7 +287,7 @@ const DEV_SERVER_ASSETS: &[ServerAsset<'static>] = &[
 ];
 
 /// The `auto` pick on Windows x86-64: a Blackwell GPU (compute capability
-/// 12.x) gets the PromptForge CUDA build, any other NVIDIA GPU gets the
+/// 12.x) gets the Runvil CUDA build, any other NVIDIA GPU gets the
 /// upstream CUDA build, and anything else - including a failed probe -
 /// gets Vulkan.
 fn auto_backend(gpus: Option<&[(u64, u64)]>) -> LlamaBackend {

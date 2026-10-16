@@ -11,20 +11,15 @@ fn an_outside_crate_depending_into_the_private_container_is_reported() {
         root.path(),
         "workshop-sessions",
         "workshop-sessions",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
+        "[dependencies]\nrunvil-lua = { path = \"../runvil-internal/lua\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        "",
-    );
+    write_crate(root.path(), "runvil-internal/lua", "runvil-lua", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("workshop-sessions depends on promptforge-lua")
-            && violations[0].contains("crates/promptforge-internal is private to its family")
-            && violations[0].contains("only promptforge or promptforge-plugin may depend into it"),
+        violations[0].contains("workshop-sessions depends on runvil-lua")
+            && violations[0].contains("crates/runvil-internal is private to its family")
+            && violations[0].contains("only runvil or runvil-plugin may depend into it"),
         "the violation includes the container privacy message: {violations:?}"
     );
 }
@@ -34,16 +29,11 @@ fn a_container_crate_depending_on_a_container_sibling_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-internal/parser",
-        "promptforge-parser",
-        "[dependencies]\npromptforge-lua = { path = \"../lua\" }\n",
+        "runvil-internal/parser",
+        "runvil-parser",
+        "[dependencies]\nrunvil-lua = { path = \"../lua\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        "",
-    );
+    write_crate(root.path(), "runvil-internal/lua", "runvil-lua", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -56,16 +46,11 @@ fn the_facade_depending_into_the_engine_container_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge",
-        "promptforge",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
+        "runvil",
+        "runvil",
+        "[dependencies]\nrunvil-lua = { path = \"../runvil-internal/lua\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        "",
-    );
+    write_crate(root.path(), "runvil-internal/lua", "runvil-lua", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -78,23 +63,13 @@ fn the_plugin_contract_depending_into_the_engine_container_passes() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-plugin",
-        "promptforge-plugin",
-        "[dependencies]\npromptforge-types = { path = \"../promptforge-internal/types\" }\n\
-         promptforge-vfs = { path = \"../promptforge-internal/vfs\" }\n",
+        "runvil-plugin",
+        "runvil-plugin",
+        "[dependencies]\nrunvil-types = { path = \"../runvil-internal/types\" }\n\
+         runvil-vfs = { path = \"../runvil-internal/vfs\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/types",
-        "promptforge-types",
-        "",
-    );
-    write_crate(
-        root.path(),
-        "promptforge-internal/vfs",
-        "promptforge-vfs",
-        "",
-    );
+    write_crate(root.path(), "runvil-internal/types", "runvil-types", "");
+    write_crate(root.path(), "runvil-internal/vfs", "runvil-vfs", "");
     let violations = product_boundary_violations(root.path());
     assert!(
         violations.is_empty(),
@@ -103,31 +78,25 @@ fn the_plugin_contract_depending_into_the_engine_container_passes() {
 }
 
 #[test]
-fn a_root_promptforge_crate_other_than_the_named_ones_depending_into_the_engine_container_is_reported()
- {
+fn a_root_runvil_crate_other_than_the_named_ones_depending_into_the_engine_container_is_reported() {
     assert_eq!(
-        container_named_exception("promptforge-internal"),
-        ["promptforge", "promptforge-plugin"],
+        container_named_exception("runvil-internal"),
+        ["runvil", "runvil-plugin"],
         "the facade and the Plugin contract are the container's named crates"
     );
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge-extra",
-        "promptforge-extra",
-        "[dependencies]\npromptforge-lua = { path = \"../promptforge-internal/lua\" }\n",
+        "runvil-extra",
+        "runvil-extra",
+        "[dependencies]\nrunvil-lua = { path = \"../runvil-internal/lua\" }\n",
     );
-    write_crate(
-        root.path(),
-        "promptforge-internal/lua",
-        "promptforge-lua",
-        "",
-    );
+    write_crate(root.path(), "runvil-internal/lua", "runvil-lua", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].starts_with("promptforge-extra depends on promptforge-lua:")
-            && violations[0].contains("only promptforge or promptforge-plugin may depend into it"),
+        violations[0].starts_with("runvil-extra depends on runvil-lua:")
+            && violations[0].contains("only runvil or runvil-plugin may depend into it"),
         "no crate outside the container but the named ones enters it: {violations:?}"
     );
 }
@@ -137,15 +106,15 @@ fn an_outside_crate_depending_into_the_gateway_container_is_reported() {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(
         root.path(),
-        "promptforge",
-        "promptforge",
+        "runvil",
+        "runvil",
         "[dependencies]\ngateway-protocol = { path = \"../gateway/protocol\" }\n",
     );
     write_crate(root.path(), "gateway/protocol", "gateway-protocol", "");
     let violations = product_boundary_violations(root.path());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
-        violations[0].contains("promptforge depends on gateway-protocol")
+        violations[0].contains("runvil depends on gateway-protocol")
             && violations[0].contains("crates/gateway is private to its family")
             && violations[0].contains("no outside crate"),
         "the violation includes the gateway container privacy message: {violations:?}"

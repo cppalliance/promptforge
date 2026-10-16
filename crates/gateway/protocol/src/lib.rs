@@ -1,4 +1,4 @@
-//! The PromptForge gateway's OpenAI wire protocol and upstream abstraction.
+//! The Runvil gateway's OpenAI wire protocol and upstream abstraction.
 //!
 //! This crate is the shared protocol contract between the gateway, its local
 //! inference subsystem, and external clients: the request and response

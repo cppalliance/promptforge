@@ -61,7 +61,7 @@ dotenvy = "0.15"
 
 ### 2. Add `dotenvy` dependency to the gateway crate
 
-In [crates/promptforge-gateway/Cargo.toml](crates/promptforge-gateway/Cargo.toml), add under `[dependencies]`:
+In [crates/runvil-gateway/Cargo.toml](crates/runvil-gateway/Cargo.toml), add under `[dependencies]`:
 
 ```toml
 dotenvy.workspace = true
@@ -73,7 +73,7 @@ The env file is found by walking the config include tree (root first, includes a
 
 **a) Collect config paths during the include walk**
 
-In [crates/promptforge-gateway/src/profile.rs](crates/promptforge-gateway/src/profile.rs), add a `config_chain: &mut Vec<PathBuf>` parameter to `load_value()`. Push each config path at the top of the function:
+In [crates/runvil-gateway/src/profile.rs](crates/runvil-gateway/src/profile.rs), add a `config_chain: &mut Vec<PathBuf>` parameter to `load_value()`. Push each config path at the top of the function:
 
 ```rust
 fn load_value(
@@ -114,7 +114,7 @@ pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
 **Layered example:**
 
 ```
-promptforge-gateway serve gateway.toml
+runvil-gateway serve gateway.toml
 
 gateway.toml includes ["shared/base.toml"]
   shared/base.toml includes ["shared/common.toml"]
@@ -189,16 +189,16 @@ Tests go in `profile/tests.rs` (or `profile.rs` `#[cfg(test)]` - match existing 
 - Assert chain is `[root, child, grandchild]`
 
 **b) Single config, env file present** - env vars are set:
-- Create `solo.toml` (valid minimal gateway config) and `solo.env` with `PFG_TEST_SOLO=hello`
+- Create `solo.toml` (valid minimal gateway config) and `solo.env` with `RVG_TEST_SOLO=hello`
 - Call `load_path`
-- Assert `std::env::var("PFG_TEST_SOLO")` returns `"hello"`
+- Assert `std::env::var("RVG_TEST_SOLO")` returns `"hello"`
 - Clean up with `std::env::remove_var`
 
 **c) Layered precedence** - root env wins over included env:
-- Create `root.toml` (includes `parent.toml`), `root.env` with `PFG_TEST_KEY=root_val`, `parent.env` with `PFG_TEST_KEY=parent_val` and `PFG_TEST_EXTRA=extra_val`
+- Create `root.toml` (includes `parent.toml`), `root.env` with `RVG_TEST_KEY=root_val`, `parent.env` with `RVG_TEST_KEY=parent_val` and `RVG_TEST_EXTRA=extra_val`
 - Call `load_path` on root
-- Assert `PFG_TEST_KEY` is `"root_val"` (root wins)
-- Assert `PFG_TEST_EXTRA` is `"extra_val"` (parent default filled in)
+- Assert `RVG_TEST_KEY` is `"root_val"` (root wins)
+- Assert `RVG_TEST_EXTRA` is `"extra_val"` (parent default filled in)
 - Clean up
 
 **d) No env file** - load succeeds silently:
@@ -207,22 +207,22 @@ Tests go in `profile/tests.rs` (or `profile.rs` `#[cfg(test)]` - match existing 
 
 **e) Partial chain** - some configs have env files, some don't:
 - Create `root.toml` (includes `mid.toml` includes `leaf.toml`)
-- Only `leaf.env` exists with `PFG_TEST_LEAF=leaf_val`
-- Assert `PFG_TEST_LEAF` is `"leaf_val"`
+- Only `leaf.env` exists with `RVG_TEST_LEAF=leaf_val`
+- Assert `RVG_TEST_LEAF` is `"leaf_val"`
 - Clean up
 
 **f) Process env takes precedence over all env files:
-- Set `PFG_TEST_PROC=process_val` via `std::env::set_var` before calling `load_path`
-- `root.env` has `PFG_TEST_PROC=file_val`
-- Assert `PFG_TEST_PROC` is still `"process_val"`
+- Set `RVG_TEST_PROC=process_val` via `std::env::set_var` before calling `load_path`
+- `root.env` has `RVG_TEST_PROC=file_val`
+- Assert `RVG_TEST_PROC` is still `"process_val"`
 - Clean up
 
 ### 7. Build, lint, and verify
 
 - `cargo fmt --all --check` - formatting clean
-- `cargo clippy -p promptforge-gateway --all-targets -- -D warnings` - no lint warnings
-- `cargo build -p promptforge-gateway` - compiles
-- `cargo test -p promptforge-gateway` - all tests pass (existing + new)
+- `cargo clippy -p runvil-gateway --all-targets -- -D warnings` - no lint warnings
+- `cargo build -p runvil-gateway` - compiles
+- `cargo test -p runvil-gateway` - all tests pass (existing + new)
 
 Per the Rust rulebook: run fmt and clippy before committing. Tests go in `#[cfg(test)] mod tests` in the same file as the code (`profile.rs`), with `use super::*;`. Use `tempfile::TempDir` for filesystem tests (already a dev-dependency).
 
@@ -235,4 +235,4 @@ Per the Rust rulebook: run fmt and clippy before committing. Tests go in `#[cfg(
 
 ## Scope note
 
-Only the gateway gets this change. The dev runner needs `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` (not vendor API keys) - those are low-sensitivity and fine in the shell environment or a future follow-up.
+Only the gateway gets this change. The dev runner needs `RUNVIL_GATEWAY_URL` and `RUNVIL_GATEWAY_KEY` (not vendor API keys) - those are low-sensitivity and fine in the shell environment or a future follow-up.

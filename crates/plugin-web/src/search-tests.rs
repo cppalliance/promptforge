@@ -9,7 +9,7 @@ use crate::provider::{
     Freshness, SafeSearch, SearchError, SearchErrorKind, SearchProvider, SearchQuery, SearchResult,
     SearchResults,
 };
-use promptforge_plugin::{OutputTrust, ToolError, ToolErrorKind};
+use runvil_plugin::{OutputTrust, ToolError, ToolErrorKind};
 
 /// A provider that records every query and answers each with `reply`.
 struct Fake {

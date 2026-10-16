@@ -4,7 +4,7 @@
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use promptforge::model::{CompletionResult, Message};
+use runvil::model::{CompletionResult, Message};
 
 use super::*;
 use crate::CompletionErrorKind;

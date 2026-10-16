@@ -26,7 +26,7 @@ export function mountKeyPrompt(root: HTMLElement, deps: KeyPromptDeps): void {
   const medallion = programIcon(64, "");
 
   const title = document.createElement("h1");
-  title.textContent = "PromptForge Gateway";
+  title.textContent = "Runvil Gateway";
 
   const form = document.createElement("form");
 

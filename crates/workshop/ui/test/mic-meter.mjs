@@ -74,7 +74,7 @@ function runFrames() {
   for (const callback of due) callback(0);
 }
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-mic-meter-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-mic-meter-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, StatusBar, MicMeter, METER_BARS, SpeechCaptureService } = await import(
   pathToFileURL(bundlePath).href

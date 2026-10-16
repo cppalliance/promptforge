@@ -1,6 +1,6 @@
 ---
 name: "Stage 1: The Window"
-overview: "Build stage 1 of the PromptForge Workbench: two new crates in the promptforge workspace (server + shell), a streaming chat panel with push-to-talk voice, and the raw append-only tape recording every request and response from the first commit."
+overview: "Build stage 1 of the Runvil Workbench: two new crates in the runvil workspace (server + shell), a streaming chat panel with push-to-talk voice, and the raw append-only tape recording every request and response from the first commit."
 todos:
   - id: scaffold
     content: "Workspace scaffolding: two crates, health endpoint, empty window"
@@ -37,19 +37,19 @@ isProject: false
 
 # Stage 1: The Window
 
-Build the first deliverable of the PromptForge Workbench per the design notes at `c:\Users\Vinnie\.cursor\plans\promptforge_workbench_notes_8491f808.plan.md` (read its "Running this plan" section first; it governs). Stage 1 is defined there as: server crate plus shell crate plus a chat panel - streaming conversation with Claude through the gateway, local models too, and push-to-talk voice from day one - with a raw append-only JSONL tape recording every request and response from the first commit.
+Build the first deliverable of the Runvil Workbench per the design notes at `c:\Users\Vinnie\.cursor\plans\runvil_workbench_notes_8491f808.plan.md` (read its "Running this plan" section first; it governs). Stage 1 is defined there as: server crate plus shell crate plus a chat panel - streaming conversation with Claude through the gateway, local models too, and push-to-talk voice from day one - with a raw append-only JSONL tape recording every request and response from the first commit.
 
 ## What is being built
 
-A local desktop app: a Rust HTTP server holding all logic, a thin native webview window displaying the UI, and a plain HTML/JS chat panel. You run the exe, a window opens, you talk to Claude or a local model through the promptforge-gateway, markdown renders, voice dictation works, and every byte lands on the tape.
+A local desktop app: a Rust HTTP server holding all logic, a thin native webview window displaying the UI, and a plain HTML/JS chat panel. You run the exe, a window opens, you talk to Claude or a local model through the runvil-gateway, markdown renders, voice dictation works, and every byte lands on the tape.
 
 The UI is dark mode and resembles Cursor: a left sidebar, the chat as the main column, the input box docked at the bottom, monospace for code, a dark neutral palette with subtle borders and one accent color. No light theme in this stage.
 
 ## Components (dependency order)
 
-1. **promptforge-wb-server** (new member of the promptforge workspace) - axum HTTP server: serves the UI, proxies chat to the gateway, streams tokens via SSE, accepts voice audio over WebSocket, transcribes in-process via whisper-rs, writes the tape.
+1. **runvil-wb-server** (new member of the runvil workspace) - axum HTTP server: serves the UI, proxies chat to the gateway, streams tokens via SSE, accepts voice audio over WebSocket, transcribes in-process via whisper-rs, writes the tape.
 2. **ui/** (static assets served by the server) - index.html, app.js, style.css. Vanilla DOM plus markdown-it. No framework.
-3. **promptforge-wb** (new member) - the executable. wry/tao window pointed at the server URL. WebView2 on Windows.
+3. **runvil-wb** (new member) - the executable. wry/tao window pointed at the server URL. WebView2 on Windows.
 4. **The tape** - `tape.jsonl`, one event per line: timestamp, kind, model, request, response, latency.
 
 ## Data flow
@@ -58,7 +58,7 @@ The UI is dark mode and resembles Cursor: a left sidebar, the chat as the main c
 flowchart TD
     UI[Chat panel webview] -->|POST /chat| SRV[workbench-server]
     UI -->|WS /voice| SRV
-    SRV -->|SSE proxy| GW[promptforge-gateway]
+    SRV -->|SSE proxy| GW[runvil-gateway]
     GW --> CLAUDE[Anthropic API]
     GW --> LOCAL[Local GGUF via llama-server]
     SRV --> TAPE[(tape.jsonl)]
@@ -70,13 +70,13 @@ flowchart TD
 - **Drive to completion.** Do not stop until every step is done or an error has no forward path. A failed review, a red verify, or a hard step are not stop conditions; fix forward. Stop only when truly blocked - and say exactly what blocked you.
 - Follow `tools-public/rulebooks/vibe-rulebook.md`: work in subagents, one testable commit per step, coder then review-and-fix, verify on schedule.
 - Follow `tools-public/rulebooks/rust-rulebook.md` for all Rust: workspace lints, `&str`/`String` discipline, thiserror in libraries, doctests, clippy clean.
-- Config: `workbench.toml` beside the binary - gateway base URL, gateway bearer key (via `${VAR}` env reference, matching promptforge convention), whisper model paths, tape path. No secrets in the file.
+- Config: `workbench.toml` beside the binary - gateway base URL, gateway bearer key (via `${VAR}` env reference, matching runvil convention), whisper model paths, tape path. No secrets in the file.
 - When a build decision contradicts or extends the design notes, revise the notes in the same commit, naming what forced the change.
-- Record every design choice made during the build in `promptforge/design/design-promptforge-wb-1.md`: each entry states the choice, the evidence, and what it cost, appended as the build proceeds. The file is created at the first decision and grows throughout the run.
+- Record every design choice made during the build in `runvil/design/design-runvil-wb-1.md`: each entry states the choice, the evidence, and what it cost, appended as the build proceeds. The file is created at the first decision and grows throughout the run.
 
 ## Steps
 
-1. **Workspace scaffolding.** Add `crates/promptforge-wb-server` and `crates/promptforge-wb` to the promptforge workspace with workspace lints inherited. Server answers `GET /health` with `{"status":"serving"}`. Shell builds an empty window. Test: health endpoint returns 200 with the expected body.
+1. **Workspace scaffolding.** Add `crates/runvil-wb-server` and `crates/runvil-wb` to the runvil workspace with workspace lints inherited. Server answers `GET /health` with `{"status":"serving"}`. Shell builds an empty window. Test: health endpoint returns 200 with the expected body.
 2. **Gateway client and config.** Load `workbench.toml` with `${VAR}` interpolation. `GET /v1/models` proxied from the gateway. Non-streaming `POST /chat` round-trip: message in, completion out. Test: mock gateway (axum test server) returns canned catalog and completion; assert relay byte-for-byte.
 3. **The tape.** JSONL writer behind a mutex; one event per chat request/response carrying timestamp, kind, model, request body, response body, latency. Test: write events, read the file back, parse every line, assert fields and ordering.
 4. **SSE streaming chat.** `POST /chat` streams: the server opens the gateway's SSE stream and forwards events as they arrive. Test: mock gateway emits a multi-event SSE stream; assert the client receives all events in order.
@@ -104,7 +104,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Why this exists
 
-The session began with the user trying to point Cursor at a local Ollama endpoint to escape "the expensive frontier cloud services," then asking how a Cursor prompt round-trip works because "I want to replicate this functionality in my own IDE." The IDE ambition was examined and discarded the same day, in the user's words: "The whole idea of building my own IDE was fucking crazy, because first of all, I'd be duplicating everything, second of all, the risk is off the charts, third of all, I would just have like, I would have one million difficult problems that I'd have to solve in a row before I could get to the interesting thing." The surviving scope: a developer environment for PromptForge prompts, which "does one thing and it does one thing only. It doesn't generate reports, it doesn't edit your C++ program, it edits your PromptForge prompt."
+The session began with the user trying to point Cursor at a local Ollama endpoint to escape "the expensive frontier cloud services," then asking how a Cursor prompt round-trip works because "I want to replicate this functionality in my own IDE." The IDE ambition was examined and discarded the same day, in the user's words: "The whole idea of building my own IDE was fucking crazy, because first of all, I'd be duplicating everything, second of all, the risk is off the charts, third of all, I would just have like, I would have one million difficult problems that I'd have to solve in a row before I could get to the interesting thing." The surviving scope: a developer environment for Runvil prompts, which "does one thing and it does one thing only. It doesn't generate reports, it doesn't edit your C++ program, it edits your Runvil prompt."
 
 The tape's rationale is the session's central thesis. The user: "the prompts themselves isn't something that you wanna edit, you wanna actually edit the plan that created the prompts... If you have the chat that created the plan that created the prompt, then you know what the human did. The human's inputs is the most valuable substance in the entire agentic workflow, and the chat captures it." And later: "we've lost the most precious human substance: the judgment, the choices, the indecisions, the mistakes." This is why the plan mandates the append-only tape from the first commit, before the UI exists. The plan's note "capture never waits" compresses this.
 
@@ -120,14 +120,14 @@ The tape's rationale is the session's central thesis. The user: "the prompts the
 
 The user dictated the staging shape: "First stage is just a chat box with Claude. Second stage add agentic tools and the sync with file. Third stage is the earliest we add the database." He then elevated plan mode to stage 2 ("plan mode is the first deliverable... step one is talking to a model, and I think recording events. Like JSONL"), which fixed stage 1 as window + chat + voice + tape. Everything else discussed in the session - the immutable event database, branching timelines, deterministic replay, lineage, plan mode - was deliberately excluded: "No tools, no database, no block editor, no plan mode in this stage."
 
-That exclusion was hard-won. The user personally attacked replay/caching as unsound: "this is not priced 'intermediate-large,' I would say this is priced at 'impossible'," citing model variance, fan-out ordering nondeterminism, and the need to "perfectly capture the entire state of the Lua virtual machine." He also questioned the storage substrate ("why not just use git as the storage engine... you can't 'submit a pull request' to someones promptforge db"). These unresolved questions are why stage 1's tape is a raw record, not a replay system, and why the database debate was pushed to stage 3. Two rounds of ChatGPT red-team feedback were mined for a few "cheap fixes" and then cut off: "I am getting the feeling that we are experiencing the classic generic red-team 'diminishing returns' from ChatGPT... I feel like we are going in the weeds now."
+That exclusion was hard-won. The user personally attacked replay/caching as unsound: "this is not priced 'intermediate-large,' I would say this is priced at 'impossible'," citing model variance, fan-out ordering nondeterminism, and the need to "perfectly capture the entire state of the Lua virtual machine." He also questioned the storage substrate ("why not just use git as the storage engine... you can't 'submit a pull request' to someones runvil db"). These unresolved questions are why stage 1's tape is a raw record, not a replay system, and why the database debate was pushed to stage 3. Two rounds of ChatGPT red-team feedback were mined for a few "cheap fixes" and then cut off: "I am getting the feeling that we are experiencing the classic generic red-team 'diminishing returns' from ChatGPT... I feel like we are going in the weeds now."
 
 ## Plan mechanics and naming
 
-- The crate prefix `promptforge-wb-` is the user's abbreviation, chosen over `promptforge-workbench-` and `promptforge-web-shell`.
+- The crate prefix `runvil-wb-` is the user's abbreviation, chosen over `runvil-workbench-` and `runvil-web-shell`.
 - A standalone copy of the plan was deleted by the user: "it can never be a first-class plan and then we would just be maintaining the same thing twice for no benefit. only the first class plan matters."
 - The "Drive to completion" rule is verbatim user instruction: "when this plan runs DO NOT STOP until it is done or there is an error you cannot get past."
-- The running design-decision log (`design-promptforge-wb-1.md`) and the rule to revise the design notes in the same commit as any contradicting build decision were both explicit user requests, as were the dark Cursor-like UI and the vibe/rust rulebooks.
+- The running design-decision log (`design-runvil-wb-1.md`) and the rule to revise the design notes in the same commit as any contradicting build decision were both explicit user requests, as were the dark Cursor-like UI and the vibe/rust rulebooks.
 
 ## After the run (context for later plans)
 

@@ -166,7 +166,7 @@ pub struct WhisperLibrary {
 }
 
 impl WhisperLibrary {
-    /// Opens `path` and resolves every C symbol PromptForge uses.
+    /// Opens `path` and resolves every C symbol Runvil uses.
     ///
     /// # Errors
     /// Returns [`WhisperError::OpenLibrary`] when the platform loader rejects

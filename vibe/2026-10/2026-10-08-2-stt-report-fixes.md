@@ -1,6 +1,6 @@
 ---
 name: Fix STT report findings
-overview: "Fix the promptforge gateway STT defects that the talktron evaluation report found and the source confirms: silent session exits, word loss in the overlap fallback, the PCM double count and causeless errors, term hints that never reach the realtime route, the realtime model name refused by batch, and the missing long-speech test. Each fix lands as its own commit with tests."
+overview: "Fix the runvil gateway STT defects that the talktron evaluation report found and the source confirms: silent session exits, word loss in the overlap fallback, the PCM double count and causeless errors, term hints that never reach the realtime route, the realtime model name refused by batch, and the missing long-speech test. Each fix lands as its own commit with tests."
 todos:
   - id: s6-silent-exits
     content: "S6: skip budget-starved captions; route the three silent returns in realtime/route.rs through end_session (log, error event, 1011 close); tests"
@@ -26,7 +26,7 @@ todos:
 isProject: false
 ---
 
-# Fix the STT findings in promptforge
+# Fix the STT findings in runvil
 
 <product-contract>
 
@@ -36,7 +36,7 @@ The gateway's speech-to-text has six defects. An external evaluation found them 
 
 - Problem and users:
   - The users are realtime and batch clients of the gateway's OpenAI-compatible STT routes. The main one is talktron, which streams interview answers from a browser microphone.
-  - The defects come from the evaluation "PromptForge master STT against talktron's pinned gateway" by Will Pak, October 8, 2026 (https://gist.github.com/wpak-ai/f90698a7a2c04a58746bdc7f4cd13378). It measured promptforge at `fb8f85cc` against `3e917d20`.
+  - The defects come from the evaluation "Runvil master STT against talktron's pinned gateway" by Will Pak, October 8, 2026 (https://gist.github.com/wpak-ai/f90698a7a2c04a58746bdc7f4cd13378). It measured runvil at `fb8f85cc` against `3e917d20`.
   - Every finding used here was re-checked against the source at `fb8f85cc`. Local `master` is 8 commits ahead of that, and none of those commits touch `crates/gateway/stt`.
 - Goals:
   - S6: no realtime session ends without an error event, a log entry and a close frame. A caption that the PCM budget cannot hold never ends a session.
@@ -59,7 +59,7 @@ The gateway's speech-to-text has six defects. An external evaluation found them 
   - Repository convention (`AGENTS.md`, Principles): error messages are concise and self-contained, and name required against actual.
   - Repository convention (`AGENTS.md`, Structural Rules): source directories are flat, a subdirectory needs three or more files, and one or two related files sit beside the parent as `foo-bar.rs` with a `#[path]` attribute.
   - Nothing is pushed. Local commits only.
-  - Work happens in the linked git worktree `c:\Users\Vinnie\cursor\promptforge2`, on its current branch `vibe2`, and no branch is created. On 2026-10-08 `vibe2` was at `a1201da73`, the same commit as local `master`, with a clean worktree, no `vibe/ACTIVE`, and an empty diff against `master` under `crates/gateway/stt`. The main checkout `c:\Users\Vinnie\cursor\promptforge` stays untouched: run no git command there.
+  - Work happens in the linked git worktree `c:\Users\Vinnie\cursor\runvil2`, on its current branch `vibe2`, and no branch is created. On 2026-10-08 `vibe2` was at `a1201da73`, the same commit as local `master`, with a clean worktree, no `vibe/ACTIVE`, and an empty diff against `master` under `crates/gateway/stt`. The main checkout `c:\Users\Vinnie\cursor\runvil` stays untouched: run no git command there.
 - Open questions: None
 
 ## Functional Specification
@@ -163,7 +163,7 @@ Every change stays inside the gateway STT crates, apart from one config doc comm
     - Pack the WAVs with a `clips.json` of `{ "id", "file", "text" }` entries into `stt-long-speech-1.zip`.
     - Start the clip selection from the evaluation's long clips: `2961-960-0010`, `3570-5695-0001`, `260-123288-0015`, `5142-36600-0001`, `3729-6852-0017` and `1320-122617-0007`. Replace any clip under 12 s or with numerals or number words in its reference.
     - Build the zip and its SHA256 in scratch space, outside the repository.
-    - The zip is published as release asset `stt-long-speech-1` on `cppalliance/promptforge`, beside the existing `whisper-lib-b4938` asset (`.github/workflows/stt-miri.yml:66`). Only a maintainer with release rights can upload it.
+    - The zip is published as release asset `stt-long-speech-1` on `cppalliance/runvil`, beside the existing `whisper-lib-b4938` asset (`.github/workflows/stt-miri.yml:66`). Only a maintainer with release rights can upload it.
 
 </implementation-contract>
 <verification-contract>
@@ -227,7 +227,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
   - Close gateway-ended sessions with WebSocket code 1011 (internal error).
   - Fix the end-of-clip word loss before the CI job, as a new Step 7. Step 5's native test found it, Step 6's guard did not remove it, and the CI job would fail without it. The user chose "Add a prerequisite step: diagnose and fix the last-window decode loss, then run Step 7", where Step 7 then meant the CI job and is now Step 8.
   - Fix it in `TakeState::decoded_text`: a final decode gets no history while a forced window is pending. A throwaway spike decoded the same production samples both ways. With the stale history the terminal windows returned 1, 1 and 8 words, and with an empty history 28, 36 and 38. With the change applied, all six clips of `realtime_long_speech` passed with no missing run.
-  - Run the work in the `promptforge2` worktree on branch `vibe2`, not in the main checkout. The user's words: "yeah lets move it to promptforge2, which is at the same commit". The worktree is at the same commit as `master`, and an earlier plan there (`mcp-client-plugin`) was closed in `020292701`, so nothing else holds it. The commits land on `vibe2`, which tracks `origin/vibe2`. They reach `master` by a later fast-forward or merge, which this plan does not perform.
+  - Run the work in the `runvil2` worktree on branch `vibe2`, not in the main checkout. The user's words: "yeah lets move it to runvil2, which is at the same commit". The worktree is at the same commit as `master`, and an earlier plan there (`mcp-client-plugin`) was closed in `020292701`, so nothing else holds it. The commits land on `vibe2`, which tracks `origin/vibe2`. They reach `master` by a later fast-forward or merge, which this plan does not perform.
 - Rejected alternatives:
   - Rejecting the batch `prompt` with a 400 error. It would break talktron's fallback outright. Revisit if a client depends on the prompt being ignored.
   - Leaving silent exits in place and only adding logs. The client still could not tell why its session ended. Revisit never.
@@ -240,7 +240,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
   - Behavior change: deployments that set `[stt] vocabulary` will now see it bias realtime captions and finals too. Until now it affected batch only (`batch.rs:131-137`).
   - The forward-only snap can repeat up to 3 words at a forced-window seam where it previously dropped them.
   - The one-third density threshold is a judgment call until the long-speech test runs. Confidence is medium, because it rests on few clips.
-  - The native long-speech test needs the fixture zip uploaded as a release asset. Until it is uploaded, a CI step would fail on download. So the workflow change is its own last work item, and it starts only after the operator confirms the upload. The test itself lands earlier, ignored by default and skipped when `PROMPTFORGE_LONG_SPEECH_CLIPS` is unset.
+  - The native long-speech test needs the fixture zip uploaded as a release asset. Until it is uploaded, a CI step would fail on download. So the workflow change is its own last work item, and it starts only after the operator confirms the upload. The test itself lands earlier, ignored by default and skipped when `RUNVIL_LONG_SPEECH_CLIPS` is unset.
   - The small.en model download is about 466 MB per uncached runner job.
   - Confidence: S6, S3 and S5 high (small changes, defects confirmed in code). S1 medium (sound mechanism, untuned threshold). S2 high on mechanics, medium on recognition gain. S4 medium (external asset and runner time).
 
@@ -258,12 +258,12 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 - Status: complete
 - Build command: `cargo build --locked` builds only the default member `crates/gateway/app` (package `gateway`, default features `local`, `web-search`, `config-ui`, `stt`). Build one crate with `cargo build --locked -p <crate>`, for example `-p gateway-stt`. Headless shape gate: `cargo check -p gateway --no-default-features` (drops `gateway-stt` entirely). A fresh clone needs `npm ci --prefix crates/workshop` and `npm ci --prefix crates/gateway/config-ui/ui` first because UI bundles build in crate build scripts (`.github/workflows/ci.yml`). Aliases in `.cargo/config.toml`: `cargo xtask` runs `build-xtask`, `cargo workshop` runs `build-workshop`. Windows links with `rust-lld` and static CRT. Toolchain is stable (`rust-toolchain.toml`).
-- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-substring>` (or `-E 'test(<regex>)'`), for example `cargo nextest run --locked -p gateway-stt --all-features take::finalization`. Native STT tests are `#[ignore]` and need fixture env vars (`PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, `PROMPTFORGE_WHISPER_AUDIO`, `PROMPTFORGE_SILERO_MODEL`, optional `PROMPTFORGE_WHISPER_BACKEND`); run them as `cargo test --locked -p <crate> --test <name> -- --ignored --test-threads=1` (`.github/workflows/stt-miri.yml`). Miri: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_` and the same for `-p gateway-stt-engine`; Miri tests are named `miri_*`. Local tools: cargo-nextest 0.9.128, cargo-deny 0.20.2, cargo-hakari 0.9.38, Node 24.
+- Focused test command pattern: `cargo nextest run --locked -p <crate> --all-features <test-name-substring>` (or `-E 'test(<regex>)'`), for example `cargo nextest run --locked -p gateway-stt --all-features take::finalization`. Native STT tests are `#[ignore]` and need fixture env vars (`RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL`, `RUNVIL_WHISPER_AUDIO`, `RUNVIL_SILERO_MODEL`, optional `RUNVIL_WHISPER_BACKEND`); run them as `cargo test --locked -p <crate> --test <name> -- --ignored --test-threads=1` (`.github/workflows/stt-miri.yml`). Miri: `cargo +nightly-2026-09-05 miri test -p gateway-stt --features test-fixtures miri_` and the same for `-p gateway-stt-engine`; Miri tests are named `miri_*`. Local tools: cargo-nextest 0.9.128, cargo-deny 0.20.2, cargo-hakari 0.9.38, Node 24.
 - Component test command pattern: `cargo nextest run --locked -p <crate> --all-features`; the STT subsystem is `-p gateway-stt -p gateway-stt-engine -p gateway-stt-backend-whisper -p gateway-whisper-ffi`, and its route tests through the gateway are `cargo nextest run --locked -p gateway --all-features realtime_stt`. `.config/nextest.toml` puts `gateway-stt` and `gateway-stt-backend-whisper` in the `heavy` test group (`threads-required = 4`) and gives `gateway` `realtime_stt::noise::` and `realtime_stt::capture::` a longer timeout. Structural and boundary checks: `cargo test -p build-xtask`.
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` (`AGENTS.md` Verification, `ci.yml`).
 - Linter command: `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`, and for the trio `CARGO_BUILD_WARNINGS=deny cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets` (PowerShell: `$env:CARGO_BUILD_WARNINGS='deny'`). Never run a standalone `cargo check --workspace` beside clippy. `.githooks/pre-push` runs the headless check, the workspace clippy, and `cargo deny --log-level error check`.
 - Formatter check command: `cargo fmt --all --check` (`rustfmt.toml` sets `style_edition = "2024"`; `.githooks/pre-commit` runs it).
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, all with `-D warnings` (`ci.yml`). Facade surface: `cargo +<pinned nightly> xtask api --check` against `crates/promptforge/public-api.txt`.
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, and `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`, all with `-D warnings` (`ci.yml`). Facade surface: `cargo +<pinned nightly> xtask api --check` against `crates/runvil/public-api.txt`.
 - Test placement and naming conventions:
   - STT unit tests sit beside their module as `<stem>-tests.rs` wired by `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (`crates/gateway/stt/engine/src/worker.rs`, `crates/gateway/stt/api/src/audio.rs`, `crates/gateway/stt/whisper-ffi/src/vad.rs`), or inside the module directory as `tests.rs`, `tests-<label>.rs`, and `<topic>_tests.rs` (`crates/gateway/stt/api/src/take/` holds `tests.rs` and `detector_tests.rs`, declared from `take.rs` as `mod tests;` and `mod detector_tests;`; `take/finalization/` holds `release_tests.rs`, `short_tests.rs`, `speech_tests.rs`).
   - `gateway-stt` integration tests are one binary at `crates/gateway/stt/api/tests/it/main.rs` with topic modules and subdirectories (`realtime_session/`, `replay/`), shared helpers in `tests/common/`, and JSON data in `tests/fixtures/` (`realtime/`, `replay/` with paired `*.snapshots.json`). `gateway-stt-engine` and `gateway-stt-backend-whisper` use one file per test binary under `tests/` (`engine_contract.rs`, `native_whisper.rs`, `native_silero.rs`), and backend-whisper keeps `tests/fixtures/ggml-tiny.en.bin` and `jfk.wav`.
@@ -273,12 +273,12 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 - Directory map:
   - `crates/gateway/` (private container): `app` (package `gateway`, HTTP surface and tests), `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and the nested `stt/` subsystem.
   - `crates/gateway/stt/`: `api` (package `gateway-stt`: `SpeechService` facade, artifacts, batch transcription, Realtime sessions under `realtime/`, segmentation under `segment/`, take state, agreement, finalization, and windowing under `take/`), `engine` (package `gateway-stt-engine`: decoder and detector traits, worker threads, startup, policy), `backend-whisper` (package `gateway-stt-backend-whisper`: Whisper model, prompt, Silero detection, warm-up), `whisper-ffi` (package `gateway-whisper-ffi`: the dynamically loaded whisper.cpp C ABI). `engine` and `whisper-ffi` carry their own `AGENTS.md`.
-  - Engine crates `crates/promptforge`, `crates/promptforge-plugin`, `crates/promptforge-internal/`; Harness crates `crates/harness`, `crates/harness-gateway-client`, `crates/harness-internal/runner`; Plugins `crates/plugin-web`, `crates/plugin-user-input`, `crates/plugin-mcp`; public gateway pair `crates/gateway-api-types`, `crates/gateway-api-discovery`; `crates/workshop/` (Workshop crates and npm UI packages); `crates/shared-*`; build crates `build-xtask`, `build-ceiling`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`; `crates/workspace-hack` (cargo-hakari).
+  - Engine crates `crates/runvil`, `crates/runvil-plugin`, `crates/runvil-internal/`; Harness crates `crates/harness`, `crates/harness-gateway-client`, `crates/harness-internal/runner`; Plugins `crates/plugin-web`, `crates/plugin-user-input`, `crates/plugin-mcp`; public gateway pair `crates/gateway-api-types`, `crates/gateway-api-discovery`; `crates/workshop/` (Workshop crates and npm UI packages); `crates/shared-*`; build crates `build-xtask`, `build-ceiling`, `build-ui`, `build-workshop`, `build-user-guide`, `build-llama-cuda`; `crates/workspace-hack` (cargo-hakari).
   - `guide/` (user guide sources), `prompts/`, `tools/`, `vibe/` (dated plan archive), `.github/workflows/` (`ci.yml`, `stt-miri.yml` with Miri and self-hosted Windows CUDA native Whisper jobs, `whisper-lib.yml`), `.githooks/`, `.config/` (`nextest.toml`, `hakari.toml`).
 - Component boundaries (enforced by `cargo test -p build-xtask`, `crates/build-xtask/src/product.rs` and `tidy.rs`):
   - STT dependency direction: `gateway-stt` depends on `gateway-stt-backend-whisper`, `gateway-stt-engine`, `gateway-config`, `gateway-local`, and `gateway-progress`; `gateway-stt-backend-whisper` depends on `gateway-stt-engine`, `gateway-whisper-ffi`, and `gateway-progress`; `gateway-stt-engine` depends only on `thiserror`, `tokio`, and `workspace-hack`; `gateway-whisper-ffi` depends on `libloading`, `thiserror`, and `tracing`.
   - `crates/gateway/stt/` is a subsystem private to the gateway family with `gateway-stt` as its only public member; only the `gateway` app (optional `stt` feature) depends on it.
-  - Gateway crates depend on no promptforge, workshop, or Harness crate; Workshop crates reach the gateway only through `gateway-api-types` and `gateway-api-discovery`. Engine crates depend on no gateway, workshop, or Harness crate. Outside crates reach the Engine only through `promptforge` and `promptforge-plugin`, and the Harness only through `harness` and `harness-gateway-client`.
+  - Gateway crates depend on no runvil, workshop, or Harness crate; Workshop crates reach the gateway only through `gateway-api-types` and `gateway-api-discovery`. Engine crates depend on no gateway, workshop, or Harness crate. Outside crates reach the Engine only through `runvil` and `runvil-plugin`, and the Harness only through `harness` and `harness-gateway-client`.
   - Unsafe code is confined to `gateway-whisper-ffi`'s FFI boundary (its `AGENTS.md`; `build-xtask` unsafe allowlist). Decode workers are stateless and blocking decoders stay on their own threads (`crates/gateway/stt/engine/AGENTS.md`).
   - The Host installs Plugins: `crates/workshop/server/src/agents.rs` installs `plugin_web`, `plugin_user_input`, and per-entry `plugin_mcp` packages.
 - Conventions summary:
@@ -392,8 +392,8 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 - Artifacts:
   - A new shared test-support module under `crates/gateway/stt/api/tests/it/` (for example `native_session.rs`, declared in `crates/gateway/stt/api/tests/it/main.rs`). It holds the session setup moved out of the private `Capture` in `crates/gateway/stt/api/tests/it/replay/native_capture.rs` (450 lines). `Capture` calls the shared module.
   - A new `crates/gateway/stt/api/tests/it/long_speech.rs` with the `#[ignore]` test `realtime_long_speech`:
-    - It reads `PROMPTFORGE_LONG_SPEECH_CLIPS`, a directory holding `clips.json` and the WAVs, and returns early when it is unset.
-    - It uses the env names `native_capture.rs` already reads: `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL` for captions (base.en) and `PROMPTFORGE_WHISPER_FINAL_MODEL` for finals (small.en).
+    - It reads `RUNVIL_LONG_SPEECH_CLIPS`, a directory holding `clips.json` and the WAVs, and returns early when it is unset.
+    - It uses the env names `native_capture.rs` already reads: `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL` for captions (base.en) and `RUNVIL_WHISPER_FINAL_MODEL` for finals (small.en).
     - It streams each clip through a production session as 100 ms appends, each followed by a 100 ms wall-clock sleep.
     - It normalizes reference and transcript: lowercase, punctuation removed, whitespace collapsed.
     - It aligns them by word edit distance and fails when any run of 5 or more consecutive reference words is missing, naming the clip id and the run.
@@ -401,8 +401,8 @@ These decisions settle the choices the evaluation left open, favoring the smalle
     - Source: LibriSpeech test-clean (CC BY 4.0) from `https://www.openslr.org/resources/12/test-clean.tar.gz`.
     - Start from `2961-960-0010`, `3570-5695-0001`, `260-123288-0015`, `5142-36600-0001`, `3729-6852-0017` and `1320-122617-0007`. Replace any clip under 12 s or whose reference has numerals or number words, keeping six clips.
     - Convert each FLAC to 16 kHz mono 16-bit WAV with ffmpeg. Write `clips.json` as `{ "id", "file", "text" }` entries. Pack everything into `stt-long-speech-1.zip` and compute its SHA256.
-    - Record the final clip ids, the asset name `stt-long-speech-1.zip` and its uppercase SHA256 in the native-tests part of `crates/gateway/stt/README.md`, next to the `PROMPTFORGE_LONG_SPEECH_CLIPS` description. Step 8 reads the hash from there.
-    - Tell the operator where the zip is, so a maintainer can upload it as release asset `stt-long-speech-1` on `cppalliance/promptforge`.
+    - Record the final clip ids, the asset name `stt-long-speech-1.zip` and its uppercase SHA256 in the native-tests part of `crates/gateway/stt/README.md`, next to the `RUNVIL_LONG_SPEECH_CLIPS` description. Step 8 reads the hash from there.
+    - Tell the operator where the zip is, so a maintainer can upload it as release asset `stt-long-speech-1` on `cppalliance/runvil`.
   - If native fixtures are available locally, run the test once on this commit and record any deletion runs as the baseline for Step 6.
 - Tests: `realtime_long_speech` compiles and is ignored by default. The existing replay tests in `crates/gateway/stt/api/tests/it/replay.rs`, including the baseline gates, still pass after the extraction. This native test is exempt from the fail-before-fix rule.
 - Verification: run the STT crate tests, and `cargo test --locked -p gateway-stt --test it -- --ignored --list` shows `realtime_long_speech`.
@@ -456,7 +456,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
   - A new integration test in the same file with a scripted final decoder that returns one word whenever `finalized()` is non-empty on a forced window and the full text otherwise. After the commit, the completed transcript still holds the words of the terminal window's new audio. It fails before the fix.
 - Verification:
   - Confirm both tests fail with the fix reverted. Run the STT crate tests (`cargo nextest run --locked -p gateway-stt -p gateway-stt-engine -p gateway-stt-backend-whisper -p gateway-whisper-ffi --all-features`) and `cargo fmt --all --check`.
-  - Run the native test on this machine, which has a CUDA build, and expect no run of 5 or more missing words on any of the six clips: `cargo test --locked -p gateway-stt --all-features --test it realtime_long_speech -- --ignored --test-threads=1`, with the output redirected to a file. Set these environment variables first: `PROMPTFORGE_WHISPER_LIBRARY` to `C:\Users\Vinnie\.promptforge\whisper.cpp\b4938-windows-x86_64-cuda\whisper.dll`, `PROMPTFORGE_WHISPER_MODEL` to `C:\Users\Vinnie\.promptforge\models\e922de510e76c373\ggml-base.en.bin`, `PROMPTFORGE_WHISPER_FINAL_MODEL` to `C:\Users\Vinnie\.promptforge\models\4ecc88617e5be84c\ggml-small.en.bin`, `PROMPTFORGE_SILERO_MODEL` to `C:\Users\Vinnie\.promptforge\models\9a828abd96a0a3ca\ggml-silero-v6.2.0.bin`, `PROMPTFORGE_WHISPER_BACKEND` to `cuda`, and `PROMPTFORGE_LONG_SPEECH_CLIPS` to the unzipped fixture directory from Step 5. That directory holds `clips.json` and the six WAV files and sits beside `stt-long-speech-1.zip` on this machine. If it is gone, unzip the zip whose SHA256 is recorded in `crates/gateway/stt/README.md`.
+  - Run the native test on this machine, which has a CUDA build, and expect no run of 5 or more missing words on any of the six clips: `cargo test --locked -p gateway-stt --all-features --test it realtime_long_speech -- --ignored --test-threads=1`, with the output redirected to a file. Set these environment variables first: `RUNVIL_WHISPER_LIBRARY` to `C:\Users\Vinnie\.runvil\whisper.cpp\b4938-windows-x86_64-cuda\whisper.dll`, `RUNVIL_WHISPER_MODEL` to `C:\Users\Vinnie\.runvil\models\e922de510e76c373\ggml-base.en.bin`, `RUNVIL_WHISPER_FINAL_MODEL` to `C:\Users\Vinnie\.runvil\models\4ecc88617e5be84c\ggml-small.en.bin`, `RUNVIL_SILERO_MODEL` to `C:\Users\Vinnie\.runvil\models\9a828abd96a0a3ca\ggml-silero-v6.2.0.bin`, `RUNVIL_WHISPER_BACKEND` to `cuda`, and `RUNVIL_LONG_SPEECH_CLIPS` to the unzipped fixture directory from Step 5. That directory holds `clips.json` and the six WAV files and sits beside `stt-long-speech-1.zip` on this machine. If it is gone, unzip the zip whose SHA256 is recorded in `crates/gateway/stt/README.md`.
 - Commit: `Stop conditioning forced final windows on unsettled history` (local only)
 
 </step-7>
@@ -466,18 +466,18 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 ### Step 8: Run the long-speech test on the CUDA runner (S4 CI) [completed]
 
 - Component: Long-speech CI job
-- Component placement: last. Do not start until the operator confirms the `stt-long-speech-1` release asset is uploaded on `cppalliance/promptforge`. Before that, the download would fail every run. It needs the zip SHA256 that Step 5 recorded in `crates/gateway/stt/README.md`.
+- Component placement: last. Do not start until the operator confirms the `stt-long-speech-1` release asset is uploaded on `cppalliance/runvil`. Before that, the download would fail every run. It needs the zip SHA256 that Step 5 recorded in `crates/gateway/stt/README.md`.
 - Piece: one piece, the workflow change.
 - Artifacts:
   - `.github/workflows/stt-miri.yml`, `native-whisper` job, "Provision pinned native fixtures" step:
-    - Download `ggml-base.en.bin` and `ggml-small.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/`, and `https://github.com/cppalliance/promptforge/releases/download/stt-long-speech-1/stt-long-speech-1.zip`.
+    - Download `ggml-base.en.bin` and `ggml-small.en.bin` from `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/`, and `https://github.com/cppalliance/runvil/releases/download/stt-long-speech-1/stt-long-speech-1.zip`.
     - Check each against a pinned uppercase SHA256, the way the existing fixtures are checked. Get the model hashes by downloading each once and running `Get-FileHash`.
-    - Expand the zip, then export `PROMPTFORGE_WHISPER_BASE_MODEL`, `PROMPTFORGE_WHISPER_SMALL_MODEL` and `PROMPTFORGE_LONG_SPEECH_DIR` through `$env:GITHUB_ENV`. Leave `PROMPTFORGE_WHISPER_MODEL` at tiny.en for the existing steps.
-    - Do not export `PROMPTFORGE_LONG_SPEECH_CLIPS` job-wide. Otherwise the existing "Test native Gateway STT integration" step, which runs every ignored `it` test with tiny.en, would run `realtime_long_speech` with the wrong models.
+    - Expand the zip, then export `RUNVIL_WHISPER_BASE_MODEL`, `RUNVIL_WHISPER_SMALL_MODEL` and `RUNVIL_LONG_SPEECH_DIR` through `$env:GITHUB_ENV`. Leave `RUNVIL_WHISPER_MODEL` at tiny.en for the existing steps.
+    - Do not export `RUNVIL_LONG_SPEECH_CLIPS` job-wide. Otherwise the existing "Test native Gateway STT integration" step, which runs every ignored `it` test with tiny.en, would run `realtime_long_speech` with the wrong models.
   - A new step, "Test native long-speech transcription", with `shell: powershell`. Inside its own `run`, it sets:
-    - `$env:PROMPTFORGE_LONG_SPEECH_CLIPS` to `$env:PROMPTFORGE_LONG_SPEECH_DIR`
-    - `$env:PROMPTFORGE_WHISPER_MODEL` to the base path
-    - `$env:PROMPTFORGE_WHISPER_FINAL_MODEL` to the small path
+    - `$env:RUNVIL_LONG_SPEECH_CLIPS` to `$env:RUNVIL_LONG_SPEECH_DIR`
+    - `$env:RUNVIL_WHISPER_MODEL` to the base path
+    - `$env:RUNVIL_WHISPER_FINAL_MODEL` to the small path
 
     It then runs `cargo test --locked -p gateway-stt --test it realtime_long_speech -- --ignored --test-threads=1`.
 - Tests: no Rust changes. The CI run on the CUDA runner is the test, and it happens when the operator pushes.
@@ -486,7 +486,7 @@ These decisions settle the choices the evaluation left open, favoring the smalle
 
 </step-8>
 
-Before the run's first commit, the session that runs the steps checks `c:\Users\Vinnie\cursor\promptforge2`. Nothing here is committed:
+Before the run's first commit, the session that runs the steps checks `c:\Users\Vinnie\cursor\runvil2`. Nothing here is committed:
 
 - Confirm `vibe2` is checked out, the worktree is clean, `a1201da73` is an ancestor of `HEAD`, and `vibe/ACTIVE` is absent. When `vibe/ACTIVE` names this plan, the run is resuming and skips this check.
 - Build output for the STT crates may be cold in this worktree. The first `cargo` run can rebuild whisper's native dependencies, so allow for that before the first test run.

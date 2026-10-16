@@ -145,13 +145,13 @@ fn the_auto_line_names_its_traits_alphabetically_with_a_bang_on_each_one_lacking
     ] {
         shared
             .auto
-            .entry("promptforge::Local")
+            .entry("runvil::Local")
             .or_default()
             .insert(name, lacks);
     }
     assert_eq!(
         shared.lines(),
-        ["auto promptforge::Local: Freeze, RefUnwindSafe, !Send, !Sync, Unpin, UnwindSafe"]
+        ["auto runvil::Local: Freeze, RefUnwindSafe, !Send, !Sync, Unpin, UnwindSafe"]
     );
 }
 
@@ -215,14 +215,14 @@ fn the_derives_line_names_its_traits_alphabetically() {
     ] {
         shared
             .derives
-            .entry("promptforge::Plain")
+            .entry("runvil::Plain")
             .or_default()
             .insert(name);
     }
     assert_eq!(
         shared.lines(),
         [
-            "derives promptforge::Plain: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, \
+            "derives runvil::Plain: Clone, Copy, Debug, Default, Deserialize, Eq, Hash, \
              Ord, PartialEq, PartialOrd, Serialize"
         ]
     );
@@ -288,7 +288,7 @@ fn every_other_impl_keeps_its_own_line() {
     );
     for name in ["Clone", "Send", "TrivialClone", "UnsafeUnpin"] {
         assert_eq!(
-            placement(Some(("promptforge_inner", name)), &plain()),
+            placement(Some(("runvil_inner", name)), &plain()),
             Placement::Own,
             "a same-named trait outside core: {name}"
         );
@@ -318,8 +318,8 @@ const INNER: &str = "//! Inner.\n\n\
     #[derive(Clone)]\n\
     pub struct Wrapper<T>(pub T);\n";
 
-const FACADE: &str = "//! Facade.\npub use promptforge_inner::Local;\n\
-    pub use promptforge_inner::Plain;\npub use promptforge_inner::Wrapper;\n";
+const FACADE: &str = "//! Facade.\npub use runvil_inner::Local;\n\
+    pub use runvil_inner::Plain;\npub use runvil_inner::Wrapper;\n";
 
 #[test]
 #[ignore = "needs the pinned nightly"]
@@ -327,27 +327,25 @@ fn the_listing_drops_markers_and_collapses_auto_and_derive_style_impls() {
     let root = workspace(INNER, FACADE);
     let listing = report(root.path()).expect("the fixture documents").listing;
     let wrapper_auto = ["Freeze", "Send", "Sync", "Unpin"].map(|name| {
-        format!(
-            "impl<T> core::marker::{name} for promptforge::Wrapper<T> where T: core::marker::{name}"
-        )
+        format!("impl<T> core::marker::{name} for runvil::Wrapper<T> where T: core::marker::{name}")
     });
     let wrapper_unwind = ["RefUnwindSafe", "UnwindSafe"].map(|name| {
         format!(
-            "impl<T> core::panic::unwind_safe::{name} for promptforge::Wrapper<T> where T: \
+            "impl<T> core::panic::unwind_safe::{name} for runvil::Wrapper<T> where T: \
              core::panic::unwind_safe::{name}"
         )
     });
     let mut expected: Vec<String> = [
-        "auto promptforge::Local: Freeze, RefUnwindSafe, !Send, !Sync, Unpin, UnwindSafe",
-        "auto promptforge::Plain: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe",
-        "derives promptforge::Plain: Clone, Copy, Debug, Default, Eq, PartialEq, Serialize",
-        "impl core::cmp::PartialEq<str> for promptforge::Plain",
-        "impl core::fmt::Display for promptforge::Plain",
-        "impl<T: core::clone::Clone> core::clone::Clone for promptforge::Wrapper<T>",
-        "pub promptforge::Wrapper::0: T",
-        "pub struct promptforge::Local(/* private fields */)",
-        "pub struct promptforge::Plain;",
-        "pub struct promptforge::Wrapper<T>(..)",
+        "auto runvil::Local: Freeze, RefUnwindSafe, !Send, !Sync, Unpin, UnwindSafe",
+        "auto runvil::Plain: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe",
+        "derives runvil::Plain: Clone, Copy, Debug, Default, Eq, PartialEq, Serialize",
+        "impl core::cmp::PartialEq<str> for runvil::Plain",
+        "impl core::fmt::Display for runvil::Plain",
+        "impl<T: core::clone::Clone> core::clone::Clone for runvil::Wrapper<T>",
+        "pub runvil::Wrapper::0: T",
+        "pub struct runvil::Local(/* private fields */)",
+        "pub struct runvil::Plain;",
+        "pub struct runvil::Wrapper<T>(..)",
     ]
     .map(str::to_owned)
     .into_iter()

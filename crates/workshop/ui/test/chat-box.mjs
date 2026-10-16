@@ -105,7 +105,7 @@ const zeroRect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, h
 dom.window.Range.prototype.getClientRects = () => [];
 dom.window.Range.prototype.getBoundingClientRect = () => zeroRect;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-chat-box-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-chat-box-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   lifecycle,

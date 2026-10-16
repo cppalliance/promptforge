@@ -1,17 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "crates/promptforge-internal/types", "crates/promptforge-internal/engine", "crates/promptforge-internal/lua", "crates/promptforge-internal/parser", "crates/promptforge-internal/vfs", "crates/promptforge-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/workshop/agents", "crates/harness-internal/runner"]
+members = ["crates/*", "crates/runvil-internal/types", "crates/runvil-internal/engine", "crates/runvil-internal/lua", "crates/runvil-internal/parser", "crates/runvil-internal/vfs", "crates/runvil-internal/model-client", "crates/gateway/app", "crates/gateway/cloud-providers", "crates/gateway/config", "crates/gateway/config-ui", "crates/gateway/local", "crates/gateway/logging", "crates/gateway/progress", "crates/gateway/protocol", "crates/gateway/routing", "crates/gateway/web-search", "crates/gateway/stt/api", "crates/gateway/stt/engine", "crates/gateway/stt/backend-whisper", "crates/gateway/stt/whisper-ffi", "crates/workshop/desktop", "crates/workshop/server", "crates/workshop/server-api", "crates/workshop/gateway", "crates/workshop/menu", "crates/workshop/protocol", "crates/workshop/registry", "crates/workshop/status", "crates/workshop/support", "crates/workshop/user-state", "crates/workshop/workspace", "crates/workshop/run-log", "crates/workshop/agents", "crates/harness-internal/runner"]
 # crates/shared-ui is not a Rust crate: it is the TypeScript+CSS package
 # the Gateway config UI consumes (the Workshop uses its fork in
 # crates/workshop/look), so the crates/* glob skips it.
-# crates/promptforge-internal, crates/gateway, crates/workshop, and
+# crates/runvil-internal, crates/gateway, crates/workshop, and
 # crates/harness-internal are manifestless containers holding their
 # families' private crates (the gateway's STT subsystem nests one level
 # deeper under crates/gateway/stt).
 # Cargo prunes excluded subtrees from member globs, so a "crates/gateway/*"
 # glob beside the exclude below would match nothing; the container crates
 # are enumerated explicitly instead.
-exclude = ["crates/shared-ui", "crates/promptforge-internal", "crates/gateway", "crates/gateway/stt", "crates/workshop", "crates/harness-internal"]
+exclude = ["crates/shared-ui", "crates/runvil-internal", "crates/gateway", "crates/gateway/stt", "crates/workshop", "crates/harness-internal"]
 # Plain `cargo build`/`cargo test` build only the gateway: it compiles on a
 # fresh macOS or Linux clone with no CUDA toolkit and no Tauri system
 # packages. The desktop app is an explicit choice:
@@ -22,19 +22,19 @@ default-members = ["crates/gateway/app"]
 version = "0.3.0"
 edition = "2024"
 # The Engine crates' floor, which CI's msrv job builds them at:
-# `promptforge-lua` calls the atomics' `try_update`, stable since 1.95.
+# `runvil-lua` calls the atomics' `try_update`, stable since 1.95.
 rust-version = "1.95"
 license = "BSL-1.0"
-repository = "https://github.com/cppalliance/promptforge"
+repository = "https://github.com/cppalliance/runvil"
 
 [workspace.dependencies]
 base64 = "0.22"
 bytes = "1"
 build-ceiling = { path = "crates/build-ceiling" }
-promptforge = { path = "crates/promptforge" }
-promptforge-engine = { path = "crates/promptforge-internal/engine" }
-promptforge-plugin = { path = "crates/promptforge-plugin" }
-promptforge-types = { path = "crates/promptforge-internal/types" }
+runvil = { path = "crates/runvil" }
+runvil-engine = { path = "crates/runvil-internal/engine" }
+runvil-plugin = { path = "crates/runvil-plugin" }
+runvil-types = { path = "crates/runvil-internal/types" }
 gateway-api-types = { path = "crates/gateway-api-types" }
 gateway-config = { path = "crates/gateway/config" }
 gateway-config-ui = { path = "crates/gateway/config-ui" }
@@ -51,12 +51,12 @@ plugin-user-input = { path = "crates/plugin-user-input" }
 plugin-web = { path = "crates/plugin-web" }
 plugin-mcp = { path = "crates/plugin-mcp" }
 gateway-routing = { path = "crates/gateway/routing" }
-promptforge-lua = { path = "crates/promptforge-internal/lua" }
-promptforge-model-client = { path = "crates/promptforge-internal/model-client" }
-promptforge-parser = { path = "crates/promptforge-internal/parser" }
+runvil-lua = { path = "crates/runvil-internal/lua" }
+runvil-model-client = { path = "crates/runvil-internal/model-client" }
+runvil-parser = { path = "crates/runvil-internal/parser" }
 gateway-progress = { path = "crates/gateway/progress" }
 gateway-stt = { path = "crates/gateway/stt/api" }
-promptforge-vfs = { path = "crates/promptforge-internal/vfs" }
+runvil-vfs = { path = "crates/runvil-internal/vfs" }
 gateway-stt-engine = { path = "crates/gateway/stt/engine" }
 gateway-stt-backend-whisper = { path = "crates/gateway/stt/backend-whisper" }
 gateway-web-search = { path = "crates/gateway/web-search" }
@@ -124,7 +124,7 @@ mlua = { version = "0.12", features = ["lua55", "vendored", "serialize", "send"]
 # already pulls in, instead of compiling two toml lines (and the 0.8 line's
 # exclusive toml_edit 0.19 and winnow 0.5 tail).
 toml = "1"
-# Parses the promptforge facade's source for build-xtask's shape check;
+# Parses the runvil facade's source for build-xtask's shape check;
 # `full` is the feature that parses items and `use` trees. 3 is the newest
 # major the lockfile already carries.
 syn = { version = "3", features = ["full"] }
@@ -296,7 +296,7 @@ exit = "deny"
 disallowed_methods = "deny"
 disallowed_types = "deny"
 disallowed_macros = "deny"
-# Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
+# Cherry-picked out of pedantic: it flags product names (Runvil, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.
 doc_markdown = "allow"
 # Cherry-picked out of pedantic: its suggested rewrite for a collection is

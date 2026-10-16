@@ -1,0 +1,301 @@
+//! The per-section frame: one section entry's owned state within a run.
+//!
+//! [`SectionContext`] is born at a section entry and dies at its teardown.
+//! It owns the section VM plus the state the block walk reads and writes -
+//! the `sys` JSON, a spawned chain's `item`, and the tool-call counts -
+//! and it holds the frame's effective reporting handles
+//! (the task-scoped event emitter and the turn counter) seeded out of the
+//! run context; a task chain's context is the spawn's fork, so the handles
+//! reach the frame and the task's nested chains through the one value.
+//! Each driver is one construct-run-teardown cycle: the constructor
+//! absorbs the VM construction and setup preamble ([`SectionContext::new`]
+//! for a walked section, [`SectionContext::new_live_h1`] for the live H1
+//! pass; the two sit in the `construct` sibling), the scheduler's chain
+//! steps run the blocks, and the frame's [`Drop`] impl is the single
+//! teardown boundary.
+//!
+//! The run-scoped inputs (bindings, models, limits, the shared tools)
+//! arrive through the [`RunState`].
+
+#[path = "section_context-construct.rs"]
+mod construct;
+
+use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
+
+use runvil_types::emitter::Emitter;
+use runvil_types::event::lifecycle;
+
+use crate::lua::{ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts};
+use crate::{Error, Result, subst};
+
+use super::context::RunState;
+
+/// The seeds a spawned task chain's first section entry receives beyond the
+/// shared Engine values: `tasks.spawn`'s `opts.item` (installed as the
+/// `item` global and the `{{ item }}` substitution source) and `opts.index`
+/// (reported as `sys.index`). Empty for every other entry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct TaskSeed {
+    /// The chain's `item` global, when the spawn gave one.
+    pub(super) item: Option<serde_json::Value>,
+    /// The chain's `sys.index`, when the spawn gave one.
+    pub(super) index: Option<u64>,
+}
+
+/// One local tool call whose handler is running in the frame's block
+/// coroutine: opened when the `tool_call` is answered with the handler,
+/// closed by the shim's `local_tool_done`, which reports under it.
+pub(super) struct LocalCall {
+    /// The local tool's alias.
+    pub(super) alias: String,
+    /// The model-issued call id, `None` for a script call.
+    pub(super) call_id: Option<String>,
+    /// The coordinates recorded at dispatch, so the result reports the
+    /// model turn the call was made in even when the handler runs model
+    /// rounds of its own.
+    pub(super) report: ScriptReport,
+}
+
+/// One section entry's owned frame within a run.
+///
+/// The frame is born at a section entry and dies at its teardown. One
+/// section entry is one frame, regardless of arrival mode (fall-through,
+/// jump, call); a jump ends the current frame and the driver builds a
+/// fresh one for the target - only `var` crosses, as call data.
+/// No derives: the VM and the trait-object handles support neither `Clone`
+/// nor `Debug`.
+pub(super) struct SectionContext {
+    /// The frame's VM: the owned section VM, `Some` from construction
+    /// until the frame's `Drop` takes it for the teardown boundary.
+    /// `SectionVm` is `runvil-lua`'s type, tested in that crate.
+    vm: Option<SectionVm>,
+    /// The section's own name, retained so `Drop` reports the teardown
+    /// boundary and the completion observation without a parameter.
+    name: String,
+    /// Armed by [`SectionContext::mark_completed`] on the success path
+    /// only, so `Drop` fires `SECTION_FINISHED` on completion (a jump or
+    /// return included) and never on an error.
+    completed: bool,
+    /// The section's `sys` JSON, enriched in place by the walk (the model
+    /// binding).
+    sys: serde_json::Value,
+    /// A spawned chain's `item` seed (a fanout arm's collection member) for
+    /// `{{ item }}` substitution; `None` on every other entry.
+    item: Option<serde_json::Value>,
+    /// The per-section tool-call counts, installed at the first
+    /// script-initiated `tools.call`.
+    counts: Option<ToolCallCounts>,
+    /// The local tool calls whose handlers are running, innermost last: a
+    /// handler that calls another local tool opens a nested entry, and
+    /// each `local_tool_done` closes the innermost.
+    local_calls: Vec<LocalCall>,
+    /// The frame's task-scoped event emitter: the chain's own, so every
+    /// report the frame makes - the teardown boundary, the completion -
+    /// is stamped with the chain's task.
+    emitter: Arc<Emitter>,
+    /// The model-turn counter this frame advances.
+    turns: Arc<AtomicU32>,
+}
+
+/// The frame's effective reporting handles for a model round: the
+/// task-scoped event emitter (which also knows whether the run captures
+/// raw model-turn bodies) and the model-turn counter.
+pub(super) struct ReportingHandles {
+    /// The frame's task-scoped event emitter.
+    pub(super) emitter: Arc<Emitter>,
+    /// The model-turn counter the frame advances.
+    pub(super) turns: Arc<AtomicU32>,
+}
+
+impl SectionContext {
+    /// Reads the section's final `var` out of the VM, so the walk rolls it
+    /// forward. Must run while the frame is live, before its drop: the read
+    /// goes through the live VM.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the VM's `var` cannot be
+    /// converted back to JSON (the write guard keeps this conversion from
+    /// failing in practice), or [`Error::Internal`] if the VM is gone.
+    pub(super) fn read_var(&self) -> Result<serde_json::Value> {
+        Ok(self.vm()?.var()?)
+    }
+
+    /// Reads the H1 pass's `argv` back as JSON while the frame is live: the
+    /// value the walk's sections inherit frozen - the derived parse, or H1's
+    /// repair. `None` reads as nil.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when H1 left `argv` as
+    /// non-JSON data, or [`Error::Internal`] if the VM is gone.
+    pub(super) fn read_argv(&self) -> Result<Option<serde_json::Value>> {
+        self.vm()?.argv_json().map_err(Error::from)
+    }
+
+    /// Arms the completion flag: the block walk completed (a jump or
+    /// return included) and the final `var` is read back, so the frame's
+    /// drop fires `SECTION_FINISHED` after the teardown pair. No error
+    /// path arms it, so an error never fires `SECTION_FINISHED`.
+    pub(super) fn mark_completed(&mut self) {
+        self.completed = true;
+    }
+
+    /// Borrows the frame's VM for the scheduler's coroutine driving (block
+    /// start, yield validation, answer resume) and model resolution.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] if the VM is gone, which only the frame's
+    /// own drop does - a live frame always holds it.
+    pub(super) fn vm(&self) -> Result<&SectionVm> {
+        self.vm.as_ref().ok_or(Error::internal(
+            "the section frame's VM lives until the frame's own drop",
+        ))
+    }
+
+    /// Installs the pending Markdown buffer as the VM's fresh read-only
+    /// lazy `prose` template before one Lua coroutine starts. The first
+    /// runtime read snapshots the section state, renders every `{{ }}`
+    /// substitution once, and memoizes the result; the buffer is the
+    /// scheduler's pending prose, empty when no Markdown accumulated.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the guard cannot be installed, or
+    /// [`Error::Internal`] if the VM is gone.
+    pub(super) fn install_lazy_prose(&self, ctx: &RunState, template: &str) -> Result<()> {
+        let template = template.to_owned();
+        let render = prose_renderer(ctx, self.item.clone());
+        self.vm()?
+            .install_lazy_prose(move |state: ProseState<'_>| render(&template, state))?;
+        Ok(())
+    }
+
+    /// The frame's effective reporting handles for the `chat` rounds the
+    /// scheduler applies on this chain (the `models.loop` shim's among
+    /// them), each seeded out of the run context (a fanout arm's fork) at
+    /// construction.
+    pub(super) fn reporting_handles(&self) -> ReportingHandles {
+        ReportingHandles {
+            emitter: Arc::clone(&self.emitter),
+            turns: Arc::clone(&self.turns),
+        }
+    }
+
+    /// The frame's tool-call counts for a script-initiated dispatch,
+    /// running the same one-time scope install the first prose block
+    /// performs (the counts and the Lua `tools.calls` table, the model
+    /// freeze, the `sys.model` enrichment), then seeding the id of any tool
+    /// the effective scope has gained since. The returned handle shares the
+    /// installed counts, so the dispatch task increments them off the
+    /// driver thread.
+    ///
+    /// # Errors
+    /// Returns the [`Error`] of the scope install or the
+    /// id seeding.
+    pub(super) fn script_call_counts(
+        &mut self,
+        ctx: &RunState,
+        effective: &[ToolBinding],
+    ) -> Result<ToolCallCounts> {
+        let Self {
+            vm, sys, counts, ..
+        } = self;
+        let Some(vm) = vm.as_ref() else {
+            return Err(Error::internal(
+                "the section frame's VM lives until the frame's own drop",
+            ));
+        };
+        install_section_scope(vm, ctx, sys, counts, effective)?;
+        let counts = counts
+            .as_ref()
+            .ok_or(Error::internal("the scope install seeds the counts"))?;
+        for binding in effective {
+            counts.ensure(&binding.id().to_string())?;
+        }
+        Ok(counts.clone())
+    }
+
+    /// Opens a local tool call whose handler the shim is about to run.
+    pub(super) fn push_local_call(&mut self, call: LocalCall) {
+        self.local_calls.push(call);
+    }
+
+    /// Closes the innermost open local tool call; `None` when none is open.
+    pub(super) fn pop_local_call(&mut self) -> Option<LocalCall> {
+        self.local_calls.pop()
+    }
+}
+
+/// The `{{ }}` renderer for one frame's prose templates, its own blocks'
+/// and the libraries `require` loads alike: each render substitutes from
+/// the run's `args` and `argv`, shared with the run rather than copied,
+/// the frame's `item`, and the section state the first read snapshots.
+fn prose_renderer(
+    ctx: &RunState,
+    item: Option<serde_json::Value>,
+) -> impl Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static {
+    let raw_args = ctx.args_shared();
+    let argv = ctx.argv_shared();
+    move |template: &str, state: ProseState<'_>| -> mlua::Result<String> {
+        let globals = |name: &str| (state.globals)(name).map_err(Error::from);
+        let sources = subst::Sources {
+            args: &raw_args,
+            argv: argv.as_deref(),
+            item: item.as_ref(),
+            var: &state.var,
+            sys: &state.sys,
+            globals: &globals,
+        };
+        subst::substitute(template, &sources).map_err(mlua::Error::external)
+    }
+}
+
+/// Installs the section's one-time tool-call counts and model resolution,
+/// gated on the counts slot: the first consumer - the section's first
+/// script-initiated `tools.call` - performs the install, and every later
+/// call is a no-op. The counts install backs the Lua `tools.calls` table;
+/// the model resolution freezes the section's binding and enriches
+/// `sys.model`.
+///
+/// # Errors
+/// Returns the [`Error`] of the counts install, the model resolution, or
+/// the `sys` re-seal.
+fn install_section_scope(
+    vm: &SectionVm,
+    ctx: &RunState,
+    sys: &mut serde_json::Value,
+    counts: &mut Option<ToolCallCounts>,
+    effective_bindings: &[ToolBinding],
+) -> Result<()> {
+    if counts.is_some() {
+        return Ok(());
+    }
+    *counts = Some(vm.install_tool_call_counts(effective_bindings)?);
+    let resolved_model = crate::lua::resolve_model_binding(ctx.models(), vm.model_runtime())?;
+    if let Some(binding) = resolved_model.as_ref() {
+        let current = vm.current_sys(sys)?;
+        let enriched = crate::lua::enrich_sys_model(&current, binding);
+        vm.re_seal_sys(&enriched)?;
+        *sys = enriched;
+    }
+    Ok(())
+}
+
+impl Drop for SectionContext {
+    fn drop(&mut self) {
+        // The single teardown boundary: every exit path - success, error,
+        // or early return - drops the frame, so the VM tears down exactly
+        // once here. `SECTION_FINISHED` follows only on the armed
+        // (completed) path; an error reports the teardown pair alone. The
+        // `let-else` is defensive: `Drop` runs once, so the VM is always
+        // here, and the destructor stays infallible.
+        let Some(vm) = self.vm.take() else {
+            return;
+        };
+        // The VM's teardown pair reports through the emitter's observer
+        // seam, so it lands in the buffer ahead of the completion below.
+        vm.teardown(self.emitter.as_ref(), &self.name);
+        if self.completed {
+            self.emitter.report(&self.name, lifecycle::SECTION_FINISHED);
+        }
+    }
+}

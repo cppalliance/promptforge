@@ -239,7 +239,7 @@ async fn flat_text_body_read_failure_is_soft() {
         .expect("a mid-stream flat-text failure must be a soft return, not a hard error");
     assert_eq!(
         outcome.trust(),
-        promptforge_plugin::OutputTrust::Untrusted,
+        runvil_plugin::OutputTrust::Untrusted,
         "a soft body-read failure must be untrusted output"
     );
     let result = outcome.text().to_owned();

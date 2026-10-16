@@ -38,7 +38,7 @@ const bundle = await esbuild.build({
   logLevel: "silent",
 });
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-agent-session-service-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-agent-session-service-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { lifecycle, Emitter, AgentSessionService } = await import(pathToFileURL(bundlePath).href);
 

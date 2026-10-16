@@ -34,7 +34,7 @@ function check(name, condition) {
 const CONTRACT = {
   name: "papergate",
   description: "Screens papers",
-  promptforge: 1,
+  runvil: 1,
   max_tool_iterations: 12,
   input: { path: "in/papers.md", description: "the papers" },
   output: { path: "out/verdicts.md", description: "the verdicts" },
@@ -84,7 +84,7 @@ const json = (body, status = 200) => ({
     "scalars narrow",
     contract.name === "papergate" &&
       contract.description === "Screens papers" &&
-      contract.promptforge === 1 &&
+      contract.runvil === 1 &&
       contract.maxToolIterations === 12,
   );
   check(
@@ -135,7 +135,7 @@ const json = (body, status = 200) => ({
     json({
       name: "bare",
       description: "",
-      promptforge: null,
+      runvil: null,
       max_tool_iterations: null,
       input: null,
       output: null,
@@ -152,7 +152,7 @@ const json = (body, status = 200) => ({
   const contract = await fetchPromptContract("bare.md", "text");
   check(
     "absent sections narrow to null",
-    contract.promptforge === null &&
+    contract.runvil === null &&
       contract.maxToolIterations === null &&
       contract.input === null &&
       contract.output === null,

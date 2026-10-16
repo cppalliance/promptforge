@@ -18,7 +18,7 @@ harness.workspace = true
 plugin-user-input.workspace = true
 # The Engine's public API: the events a conversation observes, and the
 # round ids its deltas and transcript stamp.
-promptforge.workspace = true
+runvil.workspace = true
 # Wait tokens and conversation ids are 128 bits from the OS CSPRNG:
 # unguessable by anything that has not seen the announcing frame.
 rand.workspace = true

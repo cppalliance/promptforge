@@ -72,7 +72,7 @@ async fn reopen_contents(path: &Path) -> WorkspaceContents {
 #[tokio::test]
 async fn three_grants_reopen_in_insertion_order_by_position() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("order.pfwork");
+    let path = dir.path().join("order.rvwork");
     let file = WorkspaceFile::create(&path, &empty_contents("Order"))
         .await
         .expect("creates");
@@ -94,7 +94,7 @@ async fn three_grants_reopen_in_insertion_order_by_position() {
 #[tokio::test]
 async fn removing_the_middle_grant_leaves_the_others_positions_unchanged() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("remove.pfwork");
+    let path = dir.path().join("remove.rvwork");
     let file = WorkspaceFile::create(&path, &empty_contents("Remove"))
         .await
         .expect("creates");
@@ -130,7 +130,7 @@ async fn removing_the_middle_grant_leaves_the_others_positions_unchanged() {
 #[tokio::test]
 async fn window_state_round_trips_and_overwrites() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("window.pfwork");
+    let path = dir.path().join("window.rvwork");
     let file = WorkspaceFile::create(&path, &empty_contents("Window"))
         .await
         .expect("creates");
@@ -171,8 +171,8 @@ async fn window_state_round_trips_and_overwrites() {
 #[tokio::test]
 async fn duplicate_then_mutate_leaves_the_original_and_the_copy_independent() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let original_path = dir.path().join("original.pfwork");
-    let copy_path = dir.path().join("copy.pfwork");
+    let original_path = dir.path().join("original.rvwork");
+    let copy_path = dir.path().join("copy.rvwork");
     let original = WorkspaceFile::create(&original_path, &sample_contents())
         .await
         .expect("creates");
@@ -229,7 +229,7 @@ async fn duplicate_then_mutate_leaves_the_original_and_the_copy_independent() {
     );
     assert_eq!(
         names_in(dir.path()),
-        ["copy.pfwork", "original.pfwork"],
+        ["copy.rvwork", "original.rvwork"],
         "a same-folder duplicate is exactly one more file"
     );
 }
@@ -238,8 +238,8 @@ async fn duplicate_then_mutate_leaves_the_original_and_the_copy_independent() {
 async fn a_duplicate_taken_with_uncheckpointed_writes_contains_them() {
     let source_dir = tempfile::TempDir::new().expect("tempdir");
     let target_dir = tempfile::TempDir::new().expect("tempdir");
-    let source_path = source_dir.path().join("live.pfwork");
-    let target_path = target_dir.path().join("snapshot.pfwork");
+    let source_path = source_dir.path().join("live.rvwork");
+    let target_path = target_dir.path().join("snapshot.rvwork");
     let source = WorkspaceFile::create(&source_path, &empty_contents("Live"))
         .await
         .expect("creates");
@@ -260,7 +260,7 @@ async fn a_duplicate_taken_with_uncheckpointed_writes_contains_them() {
     assert_eq!(paths_of(&contents), ["C:\\one", "C:\\two", "C:\\three"]);
     assert_eq!(
         names_in(target_dir.path()),
-        ["snapshot.pfwork"],
+        ["snapshot.rvwork"],
         "the copy is one complete file with no wal sidecar beside it"
     );
 }
@@ -269,8 +269,8 @@ async fn a_duplicate_taken_with_uncheckpointed_writes_contains_them() {
 async fn duplicate_copies_workspace_siblings_but_not_derived_or_unrelated_entries() {
     let source_dir = tempfile::TempDir::new().expect("tempdir");
     let target_dir = tempfile::TempDir::new().expect("tempdir");
-    let source_path = source_dir.path().join("world.pfwork");
-    let target_path = target_dir.path().join("world-copy.pfwork");
+    let source_path = source_dir.path().join("world.rvwork");
+    let target_path = target_dir.path().join("world-copy.rvwork");
     fs::create_dir_all(source_dir.path().join("runs").join("r1")).expect("runs dir");
     fs::write(
         source_dir.path().join("runs").join("r1").join("run.db"),
@@ -293,7 +293,7 @@ async fn duplicate_copies_workspace_siblings_but_not_derived_or_unrelated_entrie
 
     assert_eq!(
         names_in(target_dir.path()),
-        ["runs", "world-copy.pfwork"],
+        ["runs", "world-copy.rvwork"],
         "workspace siblings travel; the derived index and the user's own folders do not"
     );
     assert_eq!(
@@ -306,8 +306,8 @@ async fn duplicate_copies_workspace_siblings_but_not_derived_or_unrelated_entrie
 async fn duplicate_refuses_a_destination_folder_that_already_holds_a_sibling() {
     let source_dir = tempfile::TempDir::new().expect("tempdir");
     let target_dir = tempfile::TempDir::new().expect("tempdir");
-    let source_path = source_dir.path().join("mine.pfwork");
-    let target_path = target_dir.path().join("mine-copy.pfwork");
+    let source_path = source_dir.path().join("mine.rvwork");
+    let target_path = target_dir.path().join("mine-copy.rvwork");
     fs::create_dir(source_dir.path().join("runs")).expect("source runs dir");
     fs::write(source_dir.path().join("runs").join("mine.db"), b"mine").expect("source run");
     // The destination folder is another workspace's home: its `runs/`
@@ -342,8 +342,8 @@ async fn duplicate_refuses_a_destination_folder_that_already_holds_a_sibling() {
 #[tokio::test]
 async fn duplicate_refuses_an_existing_destination() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let source_path = dir.path().join("source.pfwork");
-    let taken = dir.path().join("taken.pfwork");
+    let source_path = dir.path().join("source.rvwork");
+    let taken = dir.path().join("taken.rvwork");
     fs::write(&taken, b"already here").expect("placeholder writes");
     let source = WorkspaceFile::create(&source_path, &empty_contents("Source"))
         .await
@@ -368,7 +368,7 @@ async fn duplicate_refuses_an_existing_destination() {
 #[tokio::test]
 async fn a_closed_actor_answers_a_further_add_grant_with_closed() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("closed.pfwork");
+    let path = dir.path().join("closed.rvwork");
     let file = WorkspaceFile::create(&path, &empty_contents("Closed"))
         .await
         .expect("creates");
@@ -393,7 +393,7 @@ async fn a_closed_actor_answers_a_further_add_grant_with_closed() {
 #[tokio::test]
 async fn dropping_every_handle_closes_the_actor_and_the_file() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let path = dir.path().join("dropped.pfwork");
+    let path = dir.path().join("dropped.rvwork");
     let file = WorkspaceFile::create(&path, &empty_contents("Dropped"))
         .await
         .expect("creates");
@@ -408,7 +408,7 @@ async fn dropping_every_handle_closes_the_actor_and_the_file() {
     // The actor drains and closes on its own task; give it a bounded
     // moment to checkpoint and remove the sidecar.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while names_in(dir.path()) != ["dropped.pfwork"] {
+    while names_in(dir.path()) != ["dropped.rvwork"] {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the actor did not close the file after every handle dropped: {:?}",

@@ -12,11 +12,11 @@ use super::write_config;
 #[test]
 fn version_and_help_never_rotate_the_log() {
     let temp = tempfile::tempdir().unwrap();
-    let logs = temp.path().join(".promptforge").join("logs");
+    let logs = temp.path().join(".runvil").join("logs");
     std::fs::create_dir_all(&logs).expect("create the logs dir");
     std::fs::write(logs.join("gateway.log"), "the running gateway's log").expect("seed the log");
     for flag in ["--version", "--help"] {
-        let status = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+        let status = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
             .arg(flag)
             .env("USERPROFILE", temp.path())
             .env("HOME", temp.path())
@@ -45,13 +45,13 @@ fn version_and_help_never_rotate_the_log() {
 #[test]
 fn diagnostics_reports_without_serving_or_mutating() {
     let temp = tempfile::tempdir().unwrap();
-    let logs = temp.path().join(".promptforge").join("logs");
+    let logs = temp.path().join(".runvil").join("logs");
     std::fs::create_dir_all(&logs).expect("create the logs dir");
     std::fs::write(logs.join("gateway.log"), "the running gateway's log").expect("seed the log");
-    let config = temp.path().join(".promptforge").join("gateway.toml");
+    let config = temp.path().join(".runvil").join("gateway.toml");
     std::fs::write(&config, "config-version = 0\n").expect("seed the profile config");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("diagnostics")
         .env("USERPROFILE", temp.path())
         .env("HOME", temp.path())
@@ -67,7 +67,7 @@ fn diagnostics_reports_without_serving_or_mutating() {
     let report: Value = serde_json::from_str(&stdout).expect("the report is JSON");
     assert_eq!(
         report["state_dir"].as_str().map(std::path::Path::new),
-        Some(temp.path().join(".promptforge").as_path()),
+        Some(temp.path().join(".runvil").as_path()),
         "the report names the state dir: {stdout}"
     );
     assert_eq!(
@@ -109,7 +109,7 @@ fn diagnostics_reports_without_serving_or_mutating() {
         "diagnostics rotated no log"
     );
     assert!(
-        !temp.path().join(".promptforge/run/gateway.json").exists(),
+        !temp.path().join(".runvil/run/gateway.json").exists(),
         "diagnostics created no gateway discovery file"
     );
 }
@@ -126,13 +126,9 @@ fn diagnostics_reports_a_running_gateway_without_rotating_its_log() {
          [[profile]]\nname = \"main\"\nmodels = []\n"
             .to_string(),
     );
-    let logs = temp.path().join(".promptforge").join("logs");
-    let connection = temp
-        .path()
-        .join(".promptforge")
-        .join("run")
-        .join("gateway.json");
-    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let logs = temp.path().join(".runvil").join("logs");
+    let connection = temp.path().join(".runvil").join("run").join("gateway.json");
+    let mut first = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&path)
         .arg("--profile")
@@ -155,7 +151,7 @@ fn diagnostics_reports_a_running_gateway_without_rotating_its_log() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("diagnostics")
         .arg("--config")
         .arg(&path)
@@ -203,7 +199,7 @@ fn diagnostics_reports_a_running_gateway_without_rotating_its_log() {
 fn a_fatal_boot_error_lands_in_the_log_with_its_chain() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("no-such-config.toml");
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_promptforge-gateway"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_runvil-gateway"))
         .arg("--config")
         .arg(&missing)
         .arg("--no-tray")
@@ -220,13 +216,8 @@ fn a_fatal_boot_error_lands_in_the_log_with_its_chain() {
         output.status
     );
 
-    let log = std::fs::read_to_string(
-        temp.path()
-            .join(".promptforge")
-            .join("logs")
-            .join("gateway.log"),
-    )
-    .expect("the fatal outcome drained to the log file");
+    let log = std::fs::read_to_string(temp.path().join(".runvil").join("logs").join("gateway.log"))
+        .expect("the fatal outcome drained to the log file");
     assert_eq!(
         log.matches("error:").count(),
         1,

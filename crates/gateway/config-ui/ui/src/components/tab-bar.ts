@@ -88,7 +88,7 @@ export function createTabBar(options: TabBarOptions): TabBar {
   element.className = "tab-bar";
 
   if (options.showMedallion) {
-    const medallion = programIcon(24, "PromptForge");
+    const medallion = programIcon(24, "Runvil");
     medallion.className = "tab-medallion";
     element.append(medallion);
   }

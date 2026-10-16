@@ -16,8 +16,8 @@ function targetNames(target) {
   }
   const extension = target.split("-").includes("windows") ? ".exe" : "";
   return {
-    binary: `promptforge-gateway${extension}`,
-    sidecar: `promptforge-gateway-${target}${extension}`,
+    binary: `runvil-gateway${extension}`,
+    sidecar: `runvil-gateway-${target}${extension}`,
   };
 }
 

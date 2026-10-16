@@ -9,10 +9,10 @@ use serde::Deserialize;
 
 use super::Family;
 
-const LIVE_ENV: &str = "PROMPTFORGE_LIVE_CHAT_TEMPLATES";
-const SERVER_ENV: &str = "PROMPTFORGE_LLAMA_SERVER";
-const MODELS_ENV: &str = "PROMPTFORGE_CHAT_TEMPLATE_MODELS";
-const API_KEY: &str = "promptforge-chat-template-live";
+const LIVE_ENV: &str = "RUNVIL_LIVE_CHAT_TEMPLATES";
+const SERVER_ENV: &str = "RUNVIL_LLAMA_SERVER";
+const MODELS_ENV: &str = "RUNVIL_CHAT_TEMPLATE_MODELS";
+const API_KEY: &str = "runvil-chat-template-live";
 const START_TIMEOUT: Duration = Duration::from_mins(20);
 static LIVE_SERIAL: Mutex<()> = Mutex::new(());
 
@@ -62,11 +62,11 @@ fn free_port() -> u16 {
 
 fn load_inputs(family: Family) -> LiveInputs {
     let server = PathBuf::from(
-        std::env::var_os(SERVER_ENV).expect("PROMPTFORGE_LLAMA_SERVER must name the staged binary"),
+        std::env::var_os(SERVER_ENV).expect("RUNVIL_LLAMA_SERVER must name the staged binary"),
     );
     let model_directory = PathBuf::from(
         std::env::var_os(MODELS_ENV)
-            .expect("PROMPTFORGE_CHAT_TEMPLATE_MODELS must name the fixture directory"),
+            .expect("RUNVIL_CHAT_TEMPLATE_MODELS must name the fixture directory"),
     );
     let stem = family.canonical_name();
     let model = model_directory.join(format!("{stem}.gguf"));
@@ -263,7 +263,7 @@ fn run_live(family: Family) {
 macro_rules! live_case {
     ($name:ident, $family:expr) => {
         #[test]
-        #[ignore = "requires staged b10082 llama-server, twelve family GGUF fixtures, and self-hosted CUDA; set PROMPTFORGE_LIVE_CHAT_TEMPLATES=1 to opt in"]
+        #[ignore = "requires staged b10082 llama-server, twelve family GGUF fixtures, and self-hosted CUDA; set RUNVIL_LIVE_CHAT_TEMPLATES=1 to opt in"]
         fn $name() {
             run_live($family);
         }

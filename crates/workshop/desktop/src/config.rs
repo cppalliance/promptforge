@@ -24,11 +24,11 @@ const DESKTOP_BIND: &str = "127.0.0.1:0";
 /// Loads the desktop app's workshop-server configuration.
 ///
 /// A `workshop.toml` found in the search order - beside the executable,
-/// then the current directory, then the user profile's `.promptforge`
+/// then the current directory, then the user profile's `.runvil`
 /// directory - supplies the `[gateway]` connection and the path
 /// settings; the listener settings are forced to the desktop app's own. With
 /// no file, the default config anchors its state in the profile's
-/// `.promptforge` directory and leaves the gateway to endpoint
+/// `.runvil` directory and leaves the gateway to endpoint
 /// resolution, which attaches through the gateway discovery
 /// file or fails plainly.
 ///
@@ -79,9 +79,9 @@ fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|path| path.is_file()).cloned()
 }
 
-/// The profile directory: `<home>/.promptforge`.
+/// The profile directory: `<home>/.runvil`.
 fn profile_dir(home: &Path) -> PathBuf {
-    home.join(".promptforge")
+    home.join(".runvil")
 }
 
 /// Forces the listener settings the desktop app owns onto a loaded config: the
@@ -146,7 +146,7 @@ mod tests {
             vec![
                 PathBuf::from("exe-dir/workshop.toml"),
                 PathBuf::from("cwd-dir/workshop.toml"),
-                PathBuf::from("home-dir/.promptforge/workshop.toml"),
+                PathBuf::from("home-dir/.runvil/workshop.toml"),
             ]
         );
     }

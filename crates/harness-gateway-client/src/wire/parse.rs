@@ -13,18 +13,18 @@
 //! Each parsed call is built with [`ToolCall::from_parts`], so the Engine's
 //! neutral checks (blank id, blank name, non-object arguments) run on every
 //! decoded call; the duplicate-id check runs when the read loop builds the
-//! [`Completion`](promptforge::model::Completion) from the batch. Either
+//! [`Completion`](runvil::model::Completion) from the batch. Either
 //! refusal of decoded parts is reported as a `MalformedResponse`.
 //!
 //! Beside the strict turn parse, [`response_metadata`] leniently parses the
 //! body's call metadata - the serving `model`, `usage` token accounting,
 //! llama.cpp's `timings` extension, and vLLM's `metrics` extension - into the
-//! canonical `promptforge::metrics` vocabulary. Metadata never fails a
+//! canonical `runvil::metrics` vocabulary. Metadata never fails a
 //! completion: a malformed section degrades to `None` with a returned
 //! diagnostic naming it.
 
-use promptforge::metrics::{CallMetrics, LlamaTimings, Usage, VllmMetrics};
-use promptforge::model::{CompletionError, CompletionErrorKind, CompletionResult, ToolCall};
+use runvil::metrics::{CallMetrics, LlamaTimings, Usage, VllmMetrics};
+use runvil::model::{CompletionError, CompletionErrorKind, CompletionResult, ToolCall};
 use serde::Deserialize;
 use serde_json::Value;
 

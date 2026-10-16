@@ -80,7 +80,7 @@ impl ksni::Tray for SniTray {
     const MENU_ON_ACTIVATE: bool = true;
 
     fn id(&self) -> String {
-        "promptforge-gateway".to_owned()
+        "runvil-gateway".to_owned()
     }
 
     fn title(&self) -> String {

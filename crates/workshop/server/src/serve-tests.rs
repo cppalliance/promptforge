@@ -97,7 +97,7 @@ async fn spawn_reopens_the_pointed_workspace_before_readiness() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("mine.pfwork");
+    let file = home.path().join("mine.rvwork");
     let granted = point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
 
     let server = spawn_with_grace(test_config("127.0.0.1:0", state_dir.path()), SHUTDOWN_GRACE)
@@ -342,7 +342,7 @@ async fn a_bind_conflict_leaves_the_pointed_workspace_unopened() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("mine.pfwork");
+    let file = home.path().join("mine.rvwork");
     point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
 
     let config = test_config(&address.to_string(), state_dir.path());
@@ -365,10 +365,10 @@ async fn a_non_loopback_bind_fails_spawn_before_state_is_composed() {
     let state_dir = tempfile::TempDir::new().expect("tempdir");
     let home = tempfile::TempDir::new().expect("tempdir");
     let root = tempfile::TempDir::new().expect("tempdir");
-    let file = home.path().join("mine.pfwork");
+    let file = home.path().join("mine.rvwork");
     point_at_authored_workspace(state_dir.path(), &file, root.path()).await;
     // Residue the boot sweep would remove if state were composed.
-    let orphan = state_dir.path().join("workshop-state.json.42-7.pf-tmp");
+    let orphan = state_dir.path().join("workshop-state.json.42-7.rv-tmp");
     std::fs::write(&orphan, "partial").expect("the simulated crash residue writes");
 
     let config = test_config("0.0.0.0:0", state_dir.path());

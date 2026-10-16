@@ -72,7 +72,7 @@ fn sample_values() -> [(&'static str, serde_json::Value); 3] {
 
 /// A workspace backed by a fresh file under `home`.
 async fn file_backed(home: &tempfile::TempDir) -> (Workspace, std::path::PathBuf) {
-    let path = home.path().join("mine.pfwork");
+    let path = home.path().join("mine.rvwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
     (workspace, path)

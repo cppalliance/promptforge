@@ -1,4 +1,4 @@
-//! Runtime-loaded safe bindings for PromptForge's pinned whisper.cpp API.
+//! Runtime-loaded safe bindings for Runvil's pinned whisper.cpp API.
 //!
 //! [`WhisperLibrary`] opens the packaged shared library and resolves the C
 //! symbols. Contexts and states keep that library loaded through reference
@@ -98,7 +98,7 @@ mod tests {
     }
 
     fn jfk_samples() -> Vec<f32> {
-        let mut reader = hound::WavReader::open(native_fixture("PROMPTFORGE_WHISPER_AUDIO"))
+        let mut reader = hound::WavReader::open(native_fixture("RUNVIL_WHISPER_AUDIO"))
             .expect("JFK fixture opens");
         let spec = reader.spec();
         assert_eq!(spec.sample_rate, 16_000, "fixture must be 16 kHz");
@@ -148,20 +148,20 @@ mod tests {
 
     #[test]
     fn pinned_b4938_parameter_layout_matches_the_64_bit_c_abi() {
-        assert_eq!(usize::BITS, 64, "PromptForge ships only 64-bit targets");
+        assert_eq!(usize::BITS, 64, "Runvil ships only 64-bit targets");
         assert_eq!(std::mem::size_of::<raw::ContextParams>(), 48);
         assert_eq!(std::mem::size_of::<raw::FullParams>(), 304);
         assert_eq!(std::mem::align_of::<raw::FullParams>(), 8);
     }
 
-    // Offsets of every member PromptForge writes, from `struct
+    // Offsets of every member Runvil writes, from `struct
     // whisper_full_params` in the b4938 whisper.h under the 64-bit C ABI.
     const _: () = {
         use std::mem::offset_of;
 
         use raw::FullParams as P;
 
-        assert!(usize::BITS == 64, "PromptForge ships only 64-bit targets");
+        assert!(usize::BITS == 64, "Runvil ships only 64-bit targets");
         assert!(offset_of!(P, n_threads) == 4);
         assert!(offset_of!(P, translate) == 20);
         assert!(offset_of!(P, no_context) == 21);
@@ -205,11 +205,11 @@ mod tests {
     };
 
     #[test]
-    #[ignore = "requires PROMPTFORGE_WHISPER_LIBRARY to name a packaged runtime"]
+    #[ignore = "requires RUNVIL_WHISPER_LIBRARY to name a packaged runtime"]
     fn packaged_runtime_loads_and_reports_its_backend() {
-        let path = std::env::var_os("PROMPTFORGE_WHISPER_LIBRARY")
+        let path = std::env::var_os("RUNVIL_WHISPER_LIBRARY")
             .map(PathBuf::from)
-            .expect("PROMPTFORGE_WHISPER_LIBRARY is set");
+            .expect("RUNVIL_WHISPER_LIBRARY is set");
         let library = WhisperLibrary::load(&path).expect("packaged whisper runtime loads");
         // `WhisperLibrary::load` resolves `whisper_log_set` eagerly, so the
         // load above proves the pinned b4938 library exports it; installing
@@ -228,10 +228,10 @@ mod tests {
     #[test]
     #[ignore = "requires packaged whisper and model fixtures"]
     fn packaged_runtime_receives_the_flash_attention_setting_at_context_init() {
-        let library = WhisperLibrary::load(&native_fixture("PROMPTFORGE_WHISPER_LIBRARY"))
+        let library = WhisperLibrary::load(&native_fixture("RUNVIL_WHISPER_LIBRARY"))
             .expect("packaged whisper runtime loads");
         library.set_log_callback();
-        let model = native_fixture("PROMPTFORGE_WHISPER_MODEL");
+        let model = native_fixture("RUNVIL_WHISPER_MODEL");
         let log = CapturedLog::default();
         // whisper.cpp exposes no context-parameter getter, so its init log is
         // the only place the value it received is observable.
@@ -278,9 +278,9 @@ mod tests {
     #[test]
     #[ignore = "requires packaged whisper, model, and audio fixtures"]
     fn packaged_runtime_reports_token_probabilities_and_spans() {
-        let library = WhisperLibrary::load(&native_fixture("PROMPTFORGE_WHISPER_LIBRARY"))
+        let library = WhisperLibrary::load(&native_fixture("RUNVIL_WHISPER_LIBRARY"))
             .expect("packaged whisper runtime loads");
-        let context = WhisperContext::new(&library, &native_fixture("PROMPTFORGE_WHISPER_MODEL"))
+        let context = WhisperContext::new(&library, &native_fixture("RUNVIL_WHISPER_MODEL"))
             .expect("tiny model loads");
         let mut state = context.create_state().expect("decoding state allocates");
         let samples = jfk_samples();

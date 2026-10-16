@@ -132,11 +132,11 @@ pub(crate) fn menu_spec(
 
 /// The workshop executable's file name beside the gateway's.
 #[cfg(target_os = "windows")]
-const WORKSHOP_EXE_NAME: &str = "promptforge-workshop.exe";
+const WORKSHOP_EXE_NAME: &str = "runvil-workshop.exe";
 
 /// The workshop executable's file name beside the gateway's.
 #[cfg(not(target_os = "windows"))]
-const WORKSHOP_EXE_NAME: &str = "promptforge-workshop";
+const WORKSHOP_EXE_NAME: &str = "runvil-workshop";
 
 /// Probes for the workshop executable beside the gateway's own
 /// executable. The installer lays both in one directory, so presence

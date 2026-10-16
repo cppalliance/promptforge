@@ -1,6 +1,6 @@
 ---
 name: prompt-fixtures-logging
-overview: Add correlated observer traces and constrained Lua logging, remove unused author prompt versions, and create the unpublished promptforge-core-tests crate that owns prompt fixtures plus cached real-model tests through llama-server. Execute in seven reviewed commit steps, with each commit fixed and amended before continuing.
+overview: Add correlated observer traces and constrained Lua logging, remove unused author prompt versions, and create the unpublished runvil-core-tests crate that owns prompt fixtures plus cached real-model tests through llama-server. Execute in seven reviewed commit steps, with each commit fixed and amended before continuing.
 todos:
   - id: observer-execution-id
     content: Add execution IDs to all observer reports
@@ -12,7 +12,7 @@ todos:
     content: Remove unused prompt version metadata
     status: completed
   - id: core-tests-crate
-    content: Create the promptforge-core-tests fixtures
+    content: Create the runvil-core-tests fixtures
     status: completed
   - id: execution-fixtures
     content: Add offline execution prompt fixtures
@@ -32,10 +32,10 @@ isProject: false
 
 - Observer reports gain a stable execution ID: `observe(execution, section, detail)`.
 - Lua gains constrained `log(message)` routed through the observer; direct `print` is disabled.
-- The unused author-facing YAML `version:` field is removed everywhere, while required `promptforge:` engine-version behavior remains unchanged.
-- A new unpublished `promptforge-core-tests` crate owns readable prompt fixtures and an explicit real-model test executable.
+- The unused author-facing YAML `version:` field is removed everywhere, while required `runvil:` engine-version behavior remains unchanged.
+- A new unpublished `runvil-core-tests` crate owns readable prompt fixtures and an explicit real-model test executable.
 - Existing inline tests remain authoritative for narrow grammar, sandbox, and tool-loop edge cases. File fixtures cover complete author-shaped prompt stories.
-- The real-model path talks directly to a pinned local `llama-server`; `promptforge-gateway` is not part of this test layer.
+- The real-model path talks directly to a pinned local `llama-server`; `runvil-gateway` is not part of this test layer.
 
 ## Resolution 2: Components in dependency order
 
@@ -68,13 +68,13 @@ isProject: false
 ### Version removal
 
 - Remove `Frontmatter::version`, catalog and run-result version fields, version constructor arguments, MCP JSON `version` properties, and author-version documentation.
-- Keep `Frontmatter::promptforge`, `promptforge_version`, `UnsupportedVersion`, CLI detection, catalog detection, and runtime engine-major gating unchanged.
+- Keep `Frontmatter::runvil`, `runvil_version`, `UnsupportedVersion`, CLI detection, catalog detection, and runtime engine-major gating unchanged.
 - Existing YAML `version:` becomes an ignored unknown key, but all repository prompts and fixtures remove it.
 
 ### Prompt files
 
 ```text
-crates/promptforge-core-tests/
+crates/runvil-core-tests/
   Cargo.toml
   src/
     main.rs
@@ -98,21 +98,21 @@ crates/promptforge-core-tests/
       real-tool-call.md
 ```
 
-- Move the user-created [`promptforge-core/tests/valid/1.md`](C:/Users/Vinnie/src/cursor/promptforge/crates/promptforge-core/tests/valid/1.md) to `promptforge-core-tests/prompts/valid/minimal.md` and use it as the canonical minimum prompt after version removal.
+- Move the user-created [`runvil-core/tests/valid/1.md`](C:/Users/Vinnie/src/cursor/runvil/crates/runvil-core/tests/valid/1.md) to `runvil-core-tests/prompts/valid/minimal.md` and use it as the canonical minimum prompt after version removal.
 - Register each fixture explicitly with `include_str!`; do not add directory discovery, TOML manifests, generated loaders, or build scripts.
 - Valid cases assert parsed structure. Invalid cases assert the error variant and a stable message fragment. Execution cases assert result, store effects, and exact `(execution, section, detail)` checkpoints without a live network or model.
 - Keep current inline tests for exact fence near-misses, individual malformed fields, instruction budgets, mock gateway wire behavior, and picker policy.
 
 ### Real-model testing
 
-- Add an unpublished workspace binary crate named `promptforge-core-tests`.
+- Add an unpublished workspace binary crate named `runvil-core-tests`.
 - Ordinary `cargo test` for this crate runs only offline fixture and artifact-provisioning unit tests and never downloads or launches anything.
-- `cargo run -p promptforge-core-tests` is the explicit real-model command.
+- `cargo run -p runvil-core-tests` is the explicit real-model command.
 - Cache artifacts under repository-root `.model-cache/`, which is gitignored and survives repeated test runs.
 - Pin official CPU-only llama.cpp release assets per supported platform, store URL plus SHA-256 in code, download to `.part`, verify, extract, and atomically rename.
 - Pin the official `Qwen/Qwen3-0.6B-GGUF` file `Qwen3-0.6B-Q8_0.gguf`, size 639 MB, SHA-256 `9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031`.
 - Start `llama-server` directly on loopback with Jinja tool templates, temperature zero, thinking disabled, a 4096-token context, and a small generation limit. Select a free port, poll readiness with a deadline, capture diagnostics, and guarantee child termination on success, failure, panic, and Ctrl-C.
-- Point `GatewayClient` directly at llama-server. Do not start or route through `promptforge-gateway`.
+- Point `GatewayClient` directly at llama-server. Do not start or route through `runvil-gateway`.
 - Real-model assertions are behavioral: nonempty text, expected alias call, schema-valid arguments, tool result continuation, final completion, epilog visibility, and turn-budget compliance. Do not assert exact prose.
 
 ## Data flow
@@ -127,7 +127,7 @@ flowchart LR
     Bind --> Observer
     Run --> Observer
     LuaLog[LuaLog] --> Observer
-    CoreTests[PromptForgeCoreTests] --> LlamaServer[LlamaServer]
+    CoreTests[RunvilCoreTests] --> LlamaServer[LlamaServer]
     LlamaServer --> Qwen[QwenModel]
     LlamaServer --> Run
 ```
@@ -153,13 +153,13 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 
 3. **Remove author prompt versions**
    - Remove `Frontmatter::version`, `Entry::version`, `RunResult::version`, registry/runner plumbing, list and run JSON fields, constructor parameters, golden tool descriptions, fixtures, and shipped prompt keys.
-   - Retain and regression-test every `promptforge:` detection and engine-major gate.
+   - Retain and regression-test every `runvil:` detection and engine-major gate.
    - Update parser, catalog, result, registry, server, CLI, MCP, README, STATUS, and design documentation.
    - Complete when author `version` has no Rust or wire representation and every engine-version test still passes.
 
 4. **Create the core-tests crate and prompt-file fixtures**
-   - Add unpublished workspace member `crates/promptforge-core-tests` with an explicit binary entry point and offline unit tests.
-   - Move `promptforge-core/tests/valid/1.md` to `promptforge-core-tests/prompts/valid/minimal.md`.
+   - Add unpublished workspace member `crates/runvil-core-tests` with an explicit binary entry point and offline unit tests.
+   - Move `runvil-core/tests/valid/1.md` to `runvil-core-tests/prompts/valid/minimal.md`.
    - Register fixtures explicitly with `include_str!`.
    - Add representative valid and invalid prompt documents and table-driven public-API assertions.
    - Do not duplicate narrow inline parser tests; remove an inline test only when the file fixture covers the same complete behavior and assertions.
@@ -183,7 +183,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 7. **Run real-model text and tool-call scenarios**
    - Add a llama-server process guard with free-port selection, readiness deadline, captured stdout/stderr, and guaranteed teardown.
    - Add one real text-completion fixture and one simple single-string tool-call fixture, followed by tool result and final answer.
-   - Run PromptForge directly against llama-server through `GatewayClient`, with no promptforge-gateway process.
+   - Run Runvil directly against llama-server through `GatewayClient`, with no runvil-gateway process.
    - Assert behavioral outcomes rather than exact prose, use deterministic server settings, and print actionable diagnostics on failure.
    - Finalize `design-core.md`, core-tests crate documentation, README, STATUS, cache instructions, pinned artifact provenance, and test-count claims; keep `design-core-orig.md` byte-for-byte unchanged.
    - Complete when the explicit model-test command succeeds twice, with the second run using only cached artifacts, and the full offline workspace verification suite remains green.
@@ -199,7 +199,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 - Fixtures cannot become canonical before `version` removal because `tests/valid/1.md` intentionally represents the final minimum grammar.
 - No step depends on chat-only information; all syntax, limits, privacy rules, layout, and exclusions are written above.
 - The real-model executable remains isolated from normal workspace tests, so the plan introduces no live-model dependency into core or ordinary `cargo test`.
-- The plan introduces no second observer, logging sink, manifest language, generated loader, directory discovery mechanism, embedded inference runtime, or promptforge-gateway dependency.
+- The plan introduces no second observer, logging sink, manifest language, generated loader, directory discovery mechanism, embedded inference runtime, or runvil-gateway dependency.
 
 ## Parallelism
 
@@ -230,14 +230,14 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 - **Hybrid test layout:** revise if fixture files begin duplicating small parser edge cases rather than improving author-level readability.
 - **Separate core-tests crate:** revise if the crate acquires reusable production behavior rather than test-only orchestration.
 - **llama-server sidecar:** revise if process management proves less reliable than a maintained in-process runtime without requiring core changes.
-- **Qwen3 0.6B Q8 baseline:** revise if repeated PromptForge fixtures show flaky tool-call structure; the measured fallback is Qwen3.5 0.8B Q4.
+- **Qwen3 0.6B Q8 baseline:** revise if repeated Runvil fixtures show flaky tool-call structure; the measured fallback is Qwen3.5 0.8B Q4.
 
 ## Project-specific review
 
 <project-review>
 1. Does the commit implement only its numbered step?
 2. Does every behavior have a regression test that fails without it?
-3. Is `promptforge:` Engine gating unchanged and fully tested?
+3. Is `runvil:` Engine gating unchanged and fully tested?
 4. Is author `version` absent after step 3 without removing unrelated protocol or package versions?
 5. Does every observer report carry the correct execution ID without changing execution decisions?
 6. Does observer synchronization remain inside each concrete observer, with no core-global logging mutex?
@@ -250,7 +250,7 @@ Each step is implemented by a subagent, committed, reviewed in a fresh context, 
 13. Is `design-core.md` current for the behavior in this commit?
 14. Is `design-core-orig.md` byte-for-byte unchanged?
 15. Are downloaded llama-server and model artifacts official, pinned by URL and SHA-256, staged atomically, and cached only under `.model-cache/`?
-16. Does the model test talk directly to llama-server without starting promptforge-gateway?
+16. Does the model test talk directly to llama-server without starting runvil-gateway?
 17. Does every spawned process terminate on all exit paths and produce bounded diagnostics?
 18. Do real-model tests assert behavior rather than exact generated prose?
 19. Do formatting, strict Clippy, workspace tests, doctests, and warning-denied documentation pass?

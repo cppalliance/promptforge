@@ -12,7 +12,7 @@ use std::sync::Arc;
 use harness::record::{
     Record, RecordKind, RecorderFuture, RunId, RunMeta, RunOutcome, RunRecorder,
 };
-use promptforge::event::Event;
+use runvil::event::Event;
 
 use crate::conversation::Conversation;
 

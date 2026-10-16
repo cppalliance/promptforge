@@ -30,19 +30,19 @@ isProject: false
 
 ## Part 1: CI repair (one commit)
 
-All three failures trace to the family reorg (`32e4cf05`) and feature unification (`dc76380d`), not to the decomposition commits. Evidence: [the failing run](https://github.com/cppalliance/promptforge/actions/runs/35255351895) job logs.
+All three failures trace to the family reorg (`32e4cf05`) and feature unification (`dc76380d`), not to the decomposition commits. Evidence: [the failing run](https://github.com/cppalliance/runvil/actions/runs/35255351895) job logs.
 
 ### 1a. Stale package name in ci.yml
-- [ci.yml:222](c:\Users\Vinnie\cursor\promptforge\.github\workflows\ci.yml) and [ci.yml:288](c:\Users\Vinnie\cursor\promptforge\.github\workflows\ci.yml): `-p shared-gateway-discovery` -> `-p gateway-api-discovery` (the reorg renamed the package; the sweep missed the workflow file).
+- [ci.yml:222](c:\Users\Vinnie\cursor\runvil\.github\workflows\ci.yml) and [ci.yml:288](c:\Users\Vinnie\cursor\runvil\.github\workflows\ci.yml): `-p shared-gateway-discovery` -> `-p gateway-api-discovery` (the reorg renamed the package; the sweep missed the workflow file).
 - The Windows `check-workshop` copy of this step passed only because it runs under default pwsh, which does not stop on native command failure - the stale command failed silently and the step's exit code came from the last (passing) command. Add `shell: bash` to both "Test Gateway process ownership races" steps (bash exists on windows-latest) so the masking stops.
 
 ### 1b. shared-vfs zero-dependency rule vs workspace-hack
-- [crates/shared-vfs/Cargo.toml](c:\Users\Vinnie\cursor\promptforge\crates\shared-vfs\Cargo.toml) gained `workspace-hack.workspace = true` from the hakari commit; the load-bearing manifest test ([lib.rs:51](c:\Users\Vinnie\cursor\promptforge\crates\shared-vfs\src\lib.rs)) pins zero dependencies and the crate comment says never weaken it.
-- Fix the manifest, not the test: remove the workspace-hack line from shared-vfs and exclude shared-vfs from hakari management in [.config/hakari.toml](c:\Users\Vinnie\cursor\promptforge\.config\hakari.toml) (`final-excludes`; verify the exact cargo-hakari config key at execution). shared-vfs has no third-party deps, so feature unification loses nothing.
+- [crates/shared-vfs/Cargo.toml](c:\Users\Vinnie\cursor\runvil\crates\shared-vfs\Cargo.toml) gained `workspace-hack.workspace = true` from the hakari commit; the load-bearing manifest test ([lib.rs:51](c:\Users\Vinnie\cursor\runvil\crates\shared-vfs\src\lib.rs)) pins zero dependencies and the crate comment says never weaken it.
+- Fix the manifest, not the test: remove the workspace-hack line from shared-vfs and exclude shared-vfs from hakari management in [.config/hakari.toml](c:\Users\Vinnie\cursor\runvil\.config\hakari.toml) (`final-excludes`; verify the exact cargo-hakari config key at execution). shared-vfs has no third-party deps, so feature unification loses nothing.
 - Check whether any workflow step runs `cargo hakari verify` and confirm it passes with the exclusion.
 
 ### 1c. Stale STT fixture paths in UI tests
-- Four files in [crates/workshop-server/ui/test/](c:\Users\Vinnie\cursor\promptforge\crates\workshop-server\ui\test) - `stt-stream.mjs:13`, `agent-stt.mjs:22`, `realtime-wire-fixtures.mjs:26`, `pcm-worklet.mjs:14` - join `../../..` + `gateway-stt/tests/fixtures/...`. The reorg moved that tree to `crates/gateway/stt/api/tests/fixtures/` (verified on disk). Replace the `"gateway-stt"` segment with `"gateway", "stt", "api"` in each path.join.
+- Four files in [crates/workshop-server/ui/test/](c:\Users\Vinnie\cursor\runvil\crates\workshop-server\ui\test) - `stt-stream.mjs:13`, `agent-stt.mjs:22`, `realtime-wire-fixtures.mjs:26`, `pcm-worklet.mjs:14` - join `../../..` + `gateway-stt/tests/fixtures/...`. The reorg moved that tree to `crates/gateway/stt/api/tests/fixtures/` (verified on disk). Replace the `"gateway-stt"` segment with `"gateway", "stt", "api"` in each path.join.
 
 ### Part 1 verification
 - `cargo test -p shared-vfs` (manifest test green)
@@ -55,7 +55,7 @@ All three failures trace to the family reorg (`32e4cf05`) and feature unificatio
 
 The scatter is ~25 production `state.live.read()/write()` sites across 15 files. Two designs were rejected: a guard-holding extractor (holds a read lock for whole requests, blocking config applies during long streams) and a snapshot-struct extractor (a new centralized concept with staleness semantics to teach; `LocalRuntime` is not `Clone`, so the snapshot would be partial anyway). The fix is the decentralized idiom the crate already has - `web_search()`, `cache_dir()`, `tray_model_status()` - extended:
 
-- New focused accessors on `AppState` in [lib.rs](c:\Users\Vinnie\cursor\promptforge\crates\gateway\app\src\lib.rs), each a one-line read under the guard: `routing() -> Arc<Routing>`, `config() -> Arc<Config>`, `profile_name() -> Option<String>`, `model_allowlist() -> Option<Vec<String>>`, `is_loading(name) -> bool`, `local_children() -> usize`.
+- New focused accessors on `AppState` in [lib.rs](c:\Users\Vinnie\cursor\runvil\crates\gateway\app\src\lib.rs), each a one-line read under the guard: `routing() -> Arc<Routing>`, `config() -> Arc<Config>`, `profile_name() -> Option<String>`, `model_allowlist() -> Option<Vec<String>>`, `is_loading(name) -> bool`, `local_children() -> usize`.
 - Convert single-field read sites to the accessors: config_pending.rs, config_apply.rs's read-only spots, and the one-field reads in route handlers.
 - Keep one scoped `let live = state.live.read().await;` where a handler reads several fields atomically (admin/status.rs, relay.rs's `resolve_routed_model`, models.rs, speech.rs's `audio_voices`): the guard is the correct tool there, and splitting it into separate accessor calls would let a config apply land mid-read.
 - Keep direct guards for: writers (`config_apply`, `boot_load`, `commands`), the auth hot path (`check_auth`, handoff's key read), and non-route machinery (`runner.rs`).

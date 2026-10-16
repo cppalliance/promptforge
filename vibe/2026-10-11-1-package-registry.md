@@ -1,12 +1,12 @@
 ---
 name: package registry and plugin kinds
-overview: Add a string-keyed PackageRegistry to the Harness so a Host lists its Plugins and installs them by package name, and name three Plugin kinds, with promptforge/subagents built in as the one Engine-native package under a reserved name. tasks stays part of the language, in every prompt, and is not a Plugin. The native reuses the existing Package type and install path as a Plugin with no tools, so the run snapshot doesn't change. What subagents does doesn't change here.
+overview: Add a string-keyed PackageRegistry to the Harness so a Host lists its Plugins and installs them by package name, and name three Plugin kinds, with runvil/subagents built in as the one Engine-native package under a reserved name. tasks stays part of the language, in every prompt, and is not a Plugin. The native reuses the existing Package type and install path as a Plugin with no tools, so the run snapshot doesn't change. What subagents does doesn't change here.
 todos:
   - id: descriptions
-    content: "Step 1: Package::description field and builder in promptforge-plugin; descriptions on the web, user-input, and mcp packages"
+    content: "Step 1: Package::description field and builder in runvil-plugin; descriptions on the web, user-input, and mcp packages"
     status: completed
   - id: registry
-    content: "Step 2: new runner packages.rs: PackageRegistry (new and Default hold the native, add, list yielding (&Package, PluginKind)), PluginKind { Native, Linked }, and the private native Package constant for promptforge/subagents with its tool-less Plugin; two guards: a doc comment on the stub saying built-in behavior lives in the Engine and the stub never gains tools, and a packages-tests.rs test that every native builds a Plugin with no tools, no prelude, and no needs"
+    content: "Step 2: new runner packages.rs: PackageRegistry (new and Default hold the native, add, list yielding (&Package, PluginKind)), PluginKind { Native, Linked }, and the private native Package constant for runvil/subagents with its tool-less Plugin; two guards: a doc comment on the stub saying built-in behavior lives in the Engine and the stub never gains tools, and a packages-tests.rs test that every native builds a Plugin with no tools, no prelude, and no needs"
     status: completed
   - id: install
     content: "Step 2: HostContext::new(packages, services) takes the registry by value; install takes a package name; InstallError gains DuplicatePackage, UnknownPackage, and ReservedName, and InvalidPackage moves from install to add"
@@ -30,7 +30,7 @@ isProject: false
 
 ### Context for a fresh reader
 
-- Repository: `c:\Users\Vinnie\cursor\promptforge` (git). Every path in this plan is relative to it.
+- Repository: `c:\Users\Vinnie\cursor\runvil` (git). Every path in this plan is relative to it.
 - Baseline: commit `e7c376a04` ("Tidy up vibe/ plans"). Line numbers are from that commit, so search by name if they have moved.
 - Terms defined in `AGENTS.md`:
   - The Engine runs prompts and performs no I/O itself.
@@ -38,12 +38,12 @@ isProject: false
   - The Host is the application (Workshop, or a command-line Host) that gives the Harness its model broker, timer, recorder, and installed Plugins.
   - A Plugin is a package of tools installed under a local name such as `web`, whose tools sit under that name (`web/fetch`).
 - Terms this plan adds:
-  - *package*: a Plugin crate's `Package` constant (a `vendor/name` name, prelude, needs, and `construct`), such as `plugin_web::PACKAGE`, named `promptforge/web`.
+  - *package*: a Plugin crate's `Package` constant (a `vendor/name` name, prelude, needs, and `construct`), such as `plugin_web::PACKAGE`, named `runvil/web`.
   - *linked Plugin*: a `plugin-*` crate's package, which the Host adds to the registry.
-  - *native Plugin*, or *the native*: `promptforge/subagents`, built into every registry. Its future behavior and tools live in the Engine.
+  - *native Plugin*, or *the native*: `runvil/subagents`, built into every registry. Its future behavior and tools live in the Engine.
   - *the stub*: the native's Plugin object, which offers no tools and whose `call` is unreachable.
 - Why the stub's `call` is unreachable: today a tool call travels in three hops.
-  1. The Engine's scheduler issues an `Effect::ToolCall` (`crates/promptforge-internal/engine/src/execute/scheduler/tool_call.rs`, lines 221-234).
+  1. The Engine's scheduler issues an `Effect::ToolCall` (`crates/runvil-internal/engine/src/execute/scheduler/tool_call.rs`, lines 221-234).
   2. The Harness's effect loop performs it through `HostRunContext::call` (`crates/harness-internal/runner/src/effect_loop.rs`, lines 340-353).
   3. `HostRunContext::call` reaches a Plugin's `call` only for a tool id in that Plugin's own list (`crates/harness-internal/runner/src/host-run.rs`, lines 156-195).
 
@@ -62,7 +62,7 @@ isProject: false
 
 ## Product Requirements
 
-Hosts install Plugins by passing a compile-time `Package` constant, so nothing can list the available Plugins, install one by name, or pass it settings from a screen. This plan adds a `PackageRegistry` in the Harness that a Host builds once at startup, lists, and installs from by package-name string. It also names three Plugin kinds and builds `promptforge/subagents` into every registry as the one Engine-native package, under a reserved name. `tasks` stays part of the language, in every prompt as it is today, and is not a Plugin. What `subagents` does is unchanged here.
+Hosts install Plugins by passing a compile-time `Package` constant, so nothing can list the available Plugins, install one by name, or pass it settings from a screen. This plan adds a `PackageRegistry` in the Harness that a Host builds once at startup, lists, and installs from by package-name string. It also names three Plugin kinds and builds `runvil/subagents` into every registry as the one Engine-native package, under a reserved name. `tasks` stays part of the language, in every prompt as it is today, and is not a Plugin. What `subagents` does is unchanged here.
 
 - Problem and users:
   - Hosts (Workshop, a command-line Host) call `HostContext::install(package: Package, ...)` with a constant such as `plugin_web::PACKAGE`. No list exists for a user interface, and nothing can install by name.
@@ -80,14 +80,14 @@ Hosts install Plugins by passing a compile-time `Package` constant, so nothing c
   - Workshop installs every Plugin by name, including the native.
   - `registry.list()` yields the native with `PluginKind::Native` and each added package with `PluginKind::Linked`, each with its description.
   - Each mistake fails with a named error:
-    - `install` with an unknown name: `UnknownPackage`. This includes `promptforge/tasks`, since `tasks` is not a package.
+    - `install` with an unknown name: `UnknownPackage`. This includes `runvil/tasks`, since `tasks` is not a package.
     - `install` misusing the native's name: `ReservedName`
     - `add` with a name already present, the native's name included: `DuplicatePackage`
     - `add` with a malformed name: `InvalidPackage`
   - Nothing in the run snapshot (`host-run.rs`) changes, and nothing about `tasks` changes.
   - Every exit gate passes.
 - Constraints:
-  - Engine crates don't depend on `promptforge-plugin`, and Harness crates name only `promptforge`, `promptforge-plugin`, and `workspace-hack` outside their family. So the registry lives in the runner, and the Engine learns nothing about the native in this plan.
+  - Engine crates don't depend on `runvil-plugin`, and Harness crates name only `runvil`, `runvil-plugin`, and `workspace-hack` outside their family. So the registry lives in the runner, and the Engine learns nothing about the native in this plan.
   - Every `.rs` file stays under 500 lines, and source directories stay flat. `host.rs` already has its two siblings (`host-run.rs`, `host-tests.rs` at 388 lines), so the registry is its own module.
   - Plugin docs say installed, snapshotted, or declared, never activated.
   - `unwrap_used` and `expect_used` are denied outside tests, and `missing_debug_implementations` warns, which is fatal under the gate.
@@ -96,16 +96,16 @@ Hosts install Plugins by passing a compile-time `Package` constant, so nothing c
 ## Functional Specification
 
 ```rust
-let mut packages = PackageRegistry::new();      // promptforge/subagents is built in
+let mut packages = PackageRegistry::new();      // runvil/subagents is built in
 packages.add(plugin_web::PACKAGE)?;             // linked packages, typed
 for (package, kind) in packages.list() { /* package.name, package.description, package.needs */ }
 let mut host = HostContext::new(packages, services);
-host.install("promptforge/web", None, Value::Null)?;
-host.install("promptforge/subagents", None, Value::Null)?;
+host.install("runvil/web", None, Value::Null)?;
+host.install("runvil/subagents", None, Value::Null)?;
 ```
 
 - Registry:
-  - `new()` (and `Default`) holds `promptforge/subagents` as `PluginKind::Native`.
+  - `new()` (and `Default`) holds `runvil/subagents` as `PluginKind::Native`.
   - `add` refuses a name that isn't a valid `vendor/name` pair (`InvalidPackage`) and a name already present (`DuplicatePackage`). The native is present from the start, so `add` also refuses its name.
   - `list()` yields `(&Package, PluginKind)` in package-name order.
 - Install:
@@ -137,7 +137,7 @@ flowchart LR
 ```
 
 ```rust
-// crates/promptforge-plugin/src/plugin.rs
+// crates/runvil-plugin/src/plugin.rs
 pub struct Package { /* name, prelude, needs, construct */ pub description: &'static str } // "" from new()
 impl Package { pub const fn description(self, description: &'static str) -> Package; }
 
@@ -164,7 +164,7 @@ pub enum PluginKind {
 }            // Library { path } lands with dynamic loading
 
 // private to packages.rs: the native, whose behavior lives in the Engine
-const NATIVE: [Package; 1] = [Package::new("promptforge/subagents", native)
+const NATIVE: [Package; 1] = [Package::new("runvil/subagents", native)
     .description("Lets the model start, wait for, and cancel subagents")];
 fn native(name: &PluginId, config: Value, services: &HostServices) -> Result<Arc<dyn Plugin>, ToolError>; // Ok(Arc::new(Native))
 struct Native;                                                             // tools() is empty; call() returns an error; never gains tools
@@ -194,10 +194,10 @@ pub enum InstallError {
 
 `NATIVE` stays an array of one, so the registry seeds it and the guard test loops over it the same way they would for a second native.
 
-Paths are relative to the `promptforge` repository. Line numbers are as of `e7c376a04`.
+Paths are relative to the `runvil` repository. Line numbers are as of `e7c376a04`.
 
 - Step 1, package descriptions:
-  - [crates/promptforge-plugin/src/plugin.rs](crates/promptforge-plugin/src/plugin.rs):
+  - [crates/runvil-plugin/src/plugin.rs](crates/runvil-plugin/src/plugin.rs):
     - add the `description` field on `Package` (lines 114-142), set to `""` in `new` (lines 152-166)
     - add the `description` builder beside `prelude` and `needs`
     - show it in `Debug`, and add `.description(...)` to the `text` example in the doc comment (lines 107-111)
@@ -215,7 +215,7 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
     - It must never offer tools, carry a prelude, or need services.
     - Its `call` is unreachable, because the run snapshot routes a call only to a tool in a Plugin's own list.
   - Registry behavior:
-    - `Default` seeds each `NATIVE` entry through `package_name`, inserting it as `PluginKind::Native` with its default local name. `expect` is denied, so a name that failed to parse would be skipped, not unwrapped. The integration test that lists `promptforge/subagents` pins that it parses.
+    - `Default` seeds each `NATIVE` entry through `package_name`, inserting it as `PluginKind::Native` with its default local name. `expect` is denied, so a name that failed to parse would be skipped, not unwrapped. The integration test that lists `runvil/subagents` pins that it parses.
     - `new` returns `PackageRegistry::default()`. Clippy's `new_without_default` requires the `Default` impl.
     - `add` runs three checks in order:
       1. Parse the name with `package_name`, or fail with `InvalidPackage { package: package.name }`.
@@ -238,14 +238,14 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
     - The module doc (lines 1-15) says the context is built once at startup over a [`PackageRegistry`], and that a Host installs a package by the name the registry holds, under a local name. The rest of the doc (construct runs once, the readiness wait, the per-run snapshot) stays. The `new` and `install` docs say the same: `new` takes the registry, and `install`'s `# Errors` lists `UnknownPackage`, `ReservedName`, and `NameTaken`.
   - [runner lib.rs](crates/harness-internal/runner/src/lib.rs):
     - Declare `mod packages;`, and re-export `PackageRegistry` and `PluginKind` beside the line-42 `pub use host::{HostContext, InstallError};`.
-    - Add a bullet to the crate doc's `## Invariants` (lines 13-25), which Harness crates must carry: a Host installs a Plugin only by a package name its `PackageRegistry` holds. The registry holds the native `promptforge/subagents` from the start and refuses a duplicate name, and install refuses the native's local name to every other package. So no other Plugin can take `subagents`.
+    - Add a bullet to the crate doc's `## Invariants` (lines 13-25), which Harness crates must carry: a Host installs a Plugin only by a package name its `PackageRegistry` holds. The registry holds the native `runvil/subagents` from the start and refuses a duplicate name, and install refuses the native's local name to every other package. So no other Plugin can take `subagents`.
   - [crates/harness/src/lib.rs](crates/harness/src/lib.rs):
     - Re-export `PackageRegistry` and `PluginKind` in `pub mod plugin` (lines 25-34).
     - The crate doc's first sentence (lines 3-4) becomes: a Host adds its Plugin packages to a [`plugin::PackageRegistry`], builds one [`plugin::HostContext`] over it, and installs Plugins by package name.
     - The `plugin` module doc (lines 26-28) adds "the registry a Host lists and installs packages from".
   - [crates/workshop/server/src/agents.rs](crates/workshop/server/src/agents.rs), `with_plugins` (lines 140-179):
     - Build `PackageRegistry::new()`, add the web, user-input, and mcp constants (warning on error), and build `HostContext::new(packages, services)`.
-    - Install `plugin_web::PACKAGE.name`, `plugin_user_input::PACKAGE.name`, `"promptforge/subagents"`, and `plugin_mcp::PACKAGE.name` per server.
+    - Install `plugin_web::PACKAGE.name`, `plugin_user_input::PACKAGE.name`, `"runvil/subagents"`, and `plugin_mcp::PACKAGE.name` per server.
     - Its signature stays, so the callers in `agents/tests.rs` don't change.
     - Name the local `packages`, since `registry` there is the gateway `workshop_registry::Registry`.
     - The install order stays web, then user-input (whose returned name still builds the ask tool id), then the native, then each MCP server. A refused native install is logged with `tracing::warn!`, like the others, and the server still starts.
@@ -269,8 +269,8 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - Docs:
     - [AGENTS.md](AGENTS.md) line 12, the whole Plugin definition, becomes the following. It keeps today's last three sentences word for word, and it must pass the docs-claims scan: Plugin capitalized, and installed, snapshotted, or declared, never activated.
 
-      > **Plugin**: a package of tools a Host adds to its package registry and installs into a `HostContext` by package name, such as `promptforge/web`, under a local name the Host chooses, such as `web`. Every tool it offers sits under that name (`web/fetch`). A Plugin is linked (a `plugin-*` crate implementing `promptforge-plugin`), library (loaded from a dynamic library; not built yet), or Engine-native (`promptforge/subagents`, implemented in the Engine under the fixed name `subagents`, which no other Plugin may take). Linked and library Plugins use only the `promptforge-plugin` API. Every run receives every usable Plugin's tools: those of each installed Plugin that built and whose per-run services the run has. Declaring a Plugin under `plugins:` in a prompt's frontmatter installs its Lua prelude and makes it required, and the prompt's Lua decides what the model sees. A Plugin has no other name: never capability, pack, or addon.
-    - The `Package` doc in [crates/promptforge-plugin/src/plugin.rs](crates/promptforge-plugin/src/plugin.rs) (lines 102-103, "Passing it to the Harness's install is also what links the Plugin crate into the Host") becomes "Adding it to the Harness's package registry is also what links the Plugin crate into the Host." The field docs for `name` and `construct` stay accurate.
+      > **Plugin**: a package of tools a Host adds to its package registry and installs into a `HostContext` by package name, such as `runvil/web`, under a local name the Host chooses, such as `web`. Every tool it offers sits under that name (`web/fetch`). A Plugin is linked (a `plugin-*` crate implementing `runvil-plugin`), library (loaded from a dynamic library; not built yet), or Engine-native (`runvil/subagents`, implemented in the Engine under the fixed name `subagents`, which no other Plugin may take). Linked and library Plugins use only the `runvil-plugin` API. Every run receives every usable Plugin's tools: those of each installed Plugin that built and whose per-run services the run has. Declaring a Plugin under `plugins:` in a prompt's frontmatter installs its Lua prelude and makes it required, and the prompt's Lua decides what the model sees. A Plugin has no other name: never capability, pack, or addon.
+    - The `Package` doc in [crates/runvil-plugin/src/plugin.rs](crates/runvil-plugin/src/plugin.rs) (lines 102-103, "Passing it to the Harness's install is also what links the Plugin crate into the Host") becomes "Adding it to the Harness's package registry is also what links the Plugin crate into the Host." The field docs for `name` and `construct` stay accurate.
 - Deferred to the `tasks` and `subagents` overhaul, which adds the subagent tools:
   - `subagents` is model-facing, so it behaves like a linked Plugin. When the Host installs it, its tools are in every run: in `tools.required()` when the prompt declares `subagents`, in `tools.extras()` when it doesn't, and the prompt's Lua offers them with `tools.offer`. When the Host doesn't install it, no run has them.
   - So each run must tell the Engine which natives the Host installed. How it does that is the overhaul's decision. The Engine still answers the calls in its scheduler, so they never become effects.
@@ -285,15 +285,15 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
 - Unit, in the new `crates/harness-internal/runner/src/packages-tests.rs`: `natives_offer_no_tools_prelude_or_needs` loops over every entry in `NATIVE`. Each one's `construct`, called with the default local name `super::package_name` returns for it (`unwrap` is allowed in tests), `Value::Null`, and `HostServices::new()`, builds a Plugin whose `tools()` is empty, and the entry has no `prelude` and no `needs`. It loops over the constant, not one name, so a native added later is covered too. This is the guard that fails if anyone gives the stub tools.
 - Integration, in a new `crates/harness-internal/runner/tests/it/packages.rs` with `mod packages;` in `main.rs` (beside `mod prepare;`). Everything it tests is public, and `host-tests.rs` (388 lines) has little room. Linked test packages come from `prepare.rs`'s existing `pub(crate) const fn echo_package(name, prelude)`, for example `echo_package("acme/web", None)`. A package with needs is built with `Package::new(...).needs(...)`, as `prepare-host-services.rs` does. The test names below are suggestions in the house style.
   - Registry:
-    - `the_registry_lists_the_native_and_each_added_package_in_name_order`: `PackageRegistry::new().list()` yields exactly `promptforge/subagents` with `PluginKind::Native` and a non-empty description. After `add(echo_package("acme/web", None))`, it yields `acme/web` (`PluginKind::Linked`) before `promptforge/subagents`. A package added with needs lists those needs.
-    - `add_refuses_a_duplicate_package_including_the_native`: a second `acme/web` and a package named `promptforge/subagents` are both `DuplicatePackage`.
+    - `the_registry_lists_the_native_and_each_added_package_in_name_order`: `PackageRegistry::new().list()` yields exactly `runvil/subagents` with `PluginKind::Native` and a non-empty description. After `add(echo_package("acme/web", None))`, it yields `acme/web` (`PluginKind::Linked`) before `runvil/subagents`. A package added with needs lists those needs.
+    - `add_refuses_a_duplicate_package_including_the_native`: a second `acme/web` and a package named `runvil/subagents` are both `DuplicatePackage`.
     - `add_refuses_a_package_name_that_is_not_a_vendor_name_pair`: the six names of today's install test at `host-tests.rs` lines 142-158 (`web`, `acme/web/extra`, `/web`, `acme/`, `Acme/web`, `acme/Web`) are each `InvalidPackage`. That install test is deleted, because `install` no longer parses names.
   - Install:
-    - `install_refuses_a_package_the_registry_does_not_hold`: `acme/missing` is `UnknownPackage`, and so is `promptforge/tasks`, which pins that `tasks` is not a package.
-    - `no_other_package_can_take_the_native_name`: `acme/subagents` with no name, and `acme/web` named `subagents`, are `ReservedName`, and so is `promptforge/subagents` named `other`. The test also checks the `ReservedName` message text once.
-    - `the_native_installs_once_under_its_own_name`: `promptforge/subagents` with no name returns `subagents`, and a second install is `NameTaken`.
+    - `install_refuses_a_package_the_registry_does_not_hold`: `acme/missing` is `UnknownPackage`, and so is `runvil/tasks`, which pins that `tasks` is not a package.
+    - `no_other_package_can_take_the_native_name`: `acme/subagents` with no name, and `acme/web` named `subagents`, are `ReservedName`, and so is `runvil/subagents` named `other`. The test also checks the `ReservedName` message text once.
+    - `the_native_installs_once_under_its_own_name`: `runvil/subagents` with no name returns `subagents`, and a second install is `NameTaken`.
 - Unit, in `host-tests.rs`, using its existing `prompt()` and `catalog_ids` helpers and `begin_run`:
-  - `a_declared_native_is_met_when_installed_and_missing_when_not`: with `promptforge/subagents` installed, a prompt with `plugins:\n  - subagents\n` reports no missing requirement. Without that install, `requirements.missing_required` holds `subagents`.
+  - `a_declared_native_is_met_when_installed_and_missing_when_not`: with `runvil/subagents` installed, a prompt with `plugins:\n  - subagents\n` reports no missing requirement. Without that install, `requirements.missing_required` holds `subagents`.
   - `an_installed_native_adds_no_catalog_tool_and_no_prelude`: `catalog_ids` is unchanged by installing the native, and `run.preludes(&prompt)` is empty for a prompt declaring `subagents`.
 
   The existing tests switch to `host(packages)` and `host_with(services, packages)` as described under Step 2.
@@ -303,8 +303,8 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - both clippy runs with `CARGO_BUILD_WARNINGS=deny`
   - `cargo fmt --all --check`
-  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p promptforge --no-deps`, both with `RUSTDOCFLAGS="-D warnings"`
-  - `cargo +nightly-2026-09-05 xtask api --check`, which should pass unchanged, since the `promptforge` facade doesn't change
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api` and `cargo doc -p runvil --no-deps`, both with `RUSTDOCFLAGS="-D warnings"`
+  - `cargo +nightly-2026-09-05 xtask api --check`, which should pass unchanged, since the `runvil` facade doesn't change
   - `cargo test -p build-xtask`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
 
@@ -324,7 +324,7 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - There are three kinds, and only the native reaches Engine internals. User: "1 and 2 strictly follow the normalized plugin API and do not get special access to engine implementation, while 3 is the special one."
   - The native installs like any package, by string, and its name is reserved. User: "it needs to be impossible for another [...] plugin to take the name".
   - No separate crate for the native Plugin. User: "but we aren't creating a plugin-tasks crate are we?"
-  - The registry lives in the Harness runner, and the Engine never sees it. Rationale: it holds `Package` values from `promptforge-plugin`, which Engine crates may not depend on, and installing is already the Harness's job.
+  - The registry lives in the Harness runner, and the Engine never sees it. Rationale: it holds `Package` values from `runvil-plugin`, which Engine crates may not depend on, and installing is already the Harness's job.
   - The API is compressed to what this plan's behavior reads, reusing existing structures. User: "see if there are any structures that can be reused instead of creating new ones. Preserve the functionality, see if you can compress the API."
 - Defaults chosen in planning, open to override:
   - The native is a private `Package` constant in the runner, whose `construct` builds a Plugin with no tools. So install, readiness, and the snapshot treat it like any Plugin. Its behavior and tools will live in the Engine.
@@ -338,12 +338,12 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - Workshop keeps no separate registry handle until a user interface reads one.
 - Rejected alternatives:
   - Keeping `tasks` as a native Plugin that the Host installs and a prompt declares. Reason: no use case for an optional `tasks` table, and gating it would add a declaration to about 50 test files and prompts for nothing.
-  - A closed `NativePlugin` enum, with `Installed::Native` and `RunPlugin::Native` arms across install, readiness, snapshot, catalog, preludes, requirements, and offering, plus a `promptforge` facade export and a `local_name()` with no infallible way to build a `PluginId`. Reason: special cases with no reader in this plan. How the Engine learns which natives are installed is decided by the `tasks` and `subagents` overhaul, which is the first reader.
+  - A closed `NativePlugin` enum, with `Installed::Native` and `RunPlugin::Native` arms across install, readiness, snapshot, catalog, preludes, requirements, and offering, plus a `runvil` facade export and a `local_name()` with no infallible way to build a `PluginId`. Reason: special cases with no reader in this plan. How the Engine learns which natives are installed is decided by the `tasks` and `subagents` overhaul, which is the first reader.
   - A `PackageEntry` type with four getters. Reason: `Package` already carries the name, description, and needs.
   - A separate `RegistryError` with `InvalidPackage`, `DuplicatePackage`, and `NativePackage`. Reason: `InstallError` already holds `InvalidPackage`, and a seeded native name is just a duplicate.
   - Folding the registry into `HostContext`. Reason: the registry is loaded once and outlives each selection a Host installs, and later folder loads add entries to it.
   - `Arc<PackageRegistry>` in `HostContext::new`. Reason: the context reads it only while installing. A `Clone` can come when a Host first builds a second selection.
-  - Keeping `install(package: Package)` beside a registry lookup. Reason: anyone can build a `Package` named `promptforge/subagents`. Resolving names only through the registry is what keeps the native's name unforgeable.
+  - Keeping `install(package: Package)` beside a registry lookup. Reason: anyone can build a `Package` named `runvil/subagents`. Resolving names only through the registry is what keeps the native's name unforgeable.
   - A Host-side method or run option to switch `subagents` on; installing by constant, or by string for the native only; installing a library by file path; listing libraries from a manifest, lazy activation, or scanning them in a separate process.
 - Risks:
   - String installs move a typo from compile time to startup. Typed `add`, the Workshop test, and named errors limit it.
@@ -387,24 +387,24 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - Supply chain: `cargo deny check`, `cargo audit`, and `cargo hakari verify`.
 - Formatter check command: `cargo fmt --all --check`, with `style_edition = "2024"`. The pre-commit hook runs it.
 - Docs command:
-  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p promptforge --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p promptforge-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`, all with `RUSTDOCFLAGS="-D warnings"`. The facade docs build with default features on purpose.
-  - The facade surface check: `cargo +nightly-2026-09-05 xtask api --check` against `crates/promptforge/public-api.txt`, and `--bless` regenerates the listing. The nightly is pinned in `crates/build-xtask/src/api/toolchain.rs`. Its fixtures run with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
-  - The documentation site: `cargo xtask site`, which needs `PROMPTFORGE_DOCS` naming a `promptforge-docs` checkout and an mdBook binary (`MDBOOK`, default `mdbook`).
+  - `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, `cargo doc -p runvil --no-deps`, `cargo doc -p harness --no-deps`, `cargo doc --locked --no-deps --all-features -p runvil-engine --document-private-items`, and `cargo doc --locked --no-deps -p workshop-server --document-private-items`, all with `RUSTDOCFLAGS="-D warnings"`. The facade docs build with default features on purpose.
+  - The facade surface check: `cargo +nightly-2026-09-05 xtask api --check` against `crates/runvil/public-api.txt`, and `--bless` regenerates the listing. The nightly is pinned in `crates/build-xtask/src/api/toolchain.rs`. Its fixtures run with `cargo +nightly-2026-09-05 nextest run --locked -p build-xtask --run-ignored only`.
+  - The documentation site: `cargo xtask site`, which needs `RUNVIL_DOCS` naming a `runvil-docs` checkout and an mdBook binary (`MDBOOK`, default `mdbook`).
 - Test placement and naming conventions:
-  - Unit tests sit in a sibling file wired with `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;`. A module whose tests reach three files keeps them in a `tests/` subdirectory beside it, one file per topic, as in `crates/promptforge-internal/engine/src/execute/tests/`. A few `build-*` crates, `gateway-api-types`, and `gateway-api-discovery` still hold inline `mod tests { }` blocks.
-  - Integration tests compile as one binary per crate: from `tests/it/main.rs` in most crates, and from `tests/suite/main.rs` in `harness` and `promptforge`. Each topic is one module file, and shared helpers go in `support.rs` or a `support/` directory.
+  - Unit tests sit in a sibling file wired with `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;`. A module whose tests reach three files keeps them in a `tests/` subdirectory beside it, one file per topic, as in `crates/runvil-internal/engine/src/execute/tests/`. A few `build-*` crates, `gateway-api-types`, and `gateway-api-discovery` still hold inline `mod tests { }` blocks.
+  - Integration tests compile as one binary per crate: from `tests/it/main.rs` in most crates, and from `tests/suite/main.rs` in `harness` and `runvil`. Each topic is one module file, and shared helpers go in `support.rs` or a `support/` directory.
   - A few crates keep standalone test files directly in `tests/`: `gateway-stt-engine`, `gateway-stt-backend-whisper`, `gateway-cloud-providers`, and `build-workshop`.
   - Test names are snake_case sentences stating the behavior, such as `a_call_without_the_per_run_service_it_needs_fails`.
   - Doctests are banned. `build-xtask`'s `no_doctests` check fails any doc comment holding a code block rustdoc would compile, so examples use `text`, `json`, or `toml` fences.
   - Nightly-only `build-xtask` fixtures and the native whisper tests are `#[ignore]`d. `.config/nextest.toml` puts the STT crates in a `heavy` test group.
 - Directory map:
-  - `crates/`: all 52 crates. The top level holds the public and shared layer: the `promptforge` facade, `promptforge-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, the `plugin-*` crates (`plugin-web`, `plugin-user-input`, `plugin-mcp`), `shared-error-source`, `shared-loopback`, the `build-*` tooling, and `workspace-hack`.
-  - `crates/promptforge-internal/`: the Engine's private crates `types`, `engine`, `lua`, `parser`, `vfs`, and `model-client`.
+  - `crates/`: all 52 crates. The top level holds the public and shared layer: the `runvil` facade, `runvil-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`, the `plugin-*` crates (`plugin-web`, `plugin-user-input`, `plugin-mcp`), `shared-error-source`, `shared-loopback`, the `build-*` tooling, and `workspace-hack`.
+  - `crates/runvil-internal/`: the Engine's private crates `types`, `engine`, `lua`, `parser`, `vfs`, and `model-client`.
   - `crates/harness-internal/runner`: the Harness's private per-run runner and effect loop.
   - `crates/gateway/`: the gateway's private crates `app`, `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, and `web-search`, plus the `stt/` subsystem (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
   - `crates/workshop/`: Workshop's crates `desktop` (package `workshop`), `server`, `server-api`, `agents`, `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, and `workspace`, plus the npm workspace packages `ui`, `look`, and `platform`.
   - `crates/shared-ui`: a TypeScript and CSS package the gateway config UI consumes, not a Rust crate.
-  - `guide/`: mdBook `book.toml` files for the gateway, language, and Workshop books, the shared page chrome, and the landing page style. The chapters live in the separate `promptforge-docs` checkout.
+  - `guide/`: mdBook `book.toml` files for the gateway, language, and Workshop books, the shared page chrome, and the landing page style. The chapters live in the separate `runvil-docs` checkout.
   - `prompts/`: example prompt files. `images/`: README art.
   - `tools/`: Node scripts for staging the gateway sidecar and a live TTS check, each with a `.test.mjs`.
   - `vibe/`: plan records, recent ones at the top level and older ones filed by month.
@@ -412,11 +412,11 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `.config/`: `nextest.toml` and `hakari.toml`. `.cargo/config.toml`: the `xtask` and `workshop` aliases and the Windows `rust-lld` linker with the static CRT. `.githooks/`: pre-commit (format) and pre-push (wording scan, headless check, clippy, deny), with `core.hooksPath` set to it. `.cursor/rules/`: the Workshop architecture and SPA rules.
   - Untracked: `local/` (operator config, profiles, and fixtures), `cabinet/`, `target/`, and `target-msrv/`.
 - Component boundaries, which `cargo test -p build-xtask` enforces across normal, dev, and build dependencies:
-  - The Engine (`promptforge*`) depends on no gateway, Workshop, Harness, or Plugin crate. Outside crates reach it only through `promptforge` and `promptforge-plugin`, the only two crates that may enter `promptforge-internal/`.
-  - The Harness (`harness*`) names only `promptforge`, `promptforge-plugin`, and `workspace-hack` outside its family, and no shared or `build-*` crate. The exception is `harness-gateway-client`, which depends on `plugin-web` to implement its `SearchProvider`. Outside crates reach the Harness only through `harness` and `harness-gateway-client`, and only `harness` may enter `harness-internal/`. The chain runs `harness-gateway-client` on `harness`, `harness` on `harness-runner`, and `harness-runner` on `promptforge` and `promptforge-plugin`.
-  - Plugin crates depend only on `promptforge-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. No Engine, gateway, or Harness crate except `harness-gateway-client` names a Plugin crate. Today `workshop-server` and `workshop-agents` are the other dependents.
+  - The Engine (`runvil*`) depends on no gateway, Workshop, Harness, or Plugin crate. Outside crates reach it only through `runvil` and `runvil-plugin`, the only two crates that may enter `runvil-internal/`.
+  - The Harness (`harness*`) names only `runvil`, `runvil-plugin`, and `workspace-hack` outside its family, and no shared or `build-*` crate. The exception is `harness-gateway-client`, which depends on `plugin-web` to implement its `SearchProvider`. Outside crates reach the Harness only through `harness` and `harness-gateway-client`, and only `harness` may enter `harness-internal/`. The chain runs `harness-gateway-client` on `harness`, `harness` on `harness-runner`, and `harness-runner` on `runvil` and `runvil-plugin`.
+  - Plugin crates depend only on `runvil-plugin`, `shared-*` crates, `workspace-hack`, and outside libraries. No Engine, gateway, or Harness crate except `harness-gateway-client` names a Plugin crate. Today `workshop-server` and `workshop-agents` are the other dependents.
   - The gateway (`gateway*`) depends on no Engine, Workshop, Harness, or Plugin crate. Outside crates reach it only through `gateway-api-types` and `gateway-api-discovery`. Inside the family, only `gateway-stt` is visible outside `gateway/stt/`.
-  - Workshop is a Host. It reaches the gateway only through that public pair, the Engine only through `promptforge` and `promptforge-plugin`, and the Harness only through `harness` and `harness-gateway-client`. Its tiers depend one way: the server on features (`agents`, `workspace`, `user-state`, `run-log`), features on services (`menu`, `gateway`, `status`), and services on vocabulary (`protocol`, `registry`, `support`). Same-tier crates meet only through `workshop-protocol` wire types and `workshop-registry` slots. The desktop app names only `workshop-server-api`, which names only `workshop-server`.
+  - Workshop is a Host. It reaches the gateway only through that public pair, the Engine only through `runvil` and `runvil-plugin`, and the Harness only through `harness` and `harness-gateway-client`. Its tiers depend one way: the server on features (`agents`, `workspace`, `user-state`, `run-log`), features on services (`menu`, `gateway`, `status`), and services on vocabulary (`protocol`, `registry`, `support`). Same-tier crates meet only through `workshop-protocol` wire types and `workshop-registry` slots. The desktop app names only `workshop-server-api`, which names only `workshop-server`.
   - `shared-*` crates depend on no product crate. `build-*` crates are tooling and may depend into any container.
 - Conventions summary:
   - Engine, Harness, Host, and Plugin are capitalized with one meaning each. Engine crates say "the caller" and never mention the Host. `docs-claims.mjs` enforces what a scan can see.
@@ -442,8 +442,8 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
 ### Step 1: Describe each Plugin package [completed]
 
 - Component: `none`
-- Work item: `descriptions`, detailed in the Technical Design's Step 1 list. Additive only: nothing reads `Package::description` yet, and the field is public, so it raises no dead-code warning. The `promptforge` facade does not list `Package`, so `crates/promptforge/public-api.txt` stays unchanged.
-- `crates/promptforge-plugin/src/plugin.rs`:
+- Work item: `descriptions`, detailed in the Technical Design's Step 1 list. Additive only: nothing reads `Package::description` yet, and the field is public, so it raises no dead-code warning. The `runvil` facade does not list `Package`, so `crates/runvil/public-api.txt` stays unchanged.
+- `crates/runvil-plugin/src/plugin.rs`:
   - `Package` gains `pub description: &'static str`, which `Package::new` sets to `""`.
   - `Package::description(self, description: &'static str) -> Package`, a `const fn` builder beside `prelude` and `needs`.
   - `Package`'s `Debug` shows the new field, and the doc comment's `text` example adds `.description(...)`.
@@ -451,12 +451,12 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `plugin_web::PACKAGE` in `crates/plugin-web/src/web.rs`
   - `plugin_user_input::PACKAGE` in `crates/plugin-user-input/src/lib.rs`
   - `plugin_mcp::PACKAGE` in `crates/plugin-mcp/src/lib.rs`
-- Tests: none new. The existing `promptforge-plugin` and Plugin crate tests pass.
+- Tests: none new. The existing `runvil-plugin` and Plugin crate tests pass.
 - Verify:
-  - `cargo nextest run --locked -p promptforge-plugin -p plugin-web -p plugin-user-input -p plugin-mcp --all-features`
+  - `cargo nextest run --locked -p runvil-plugin -p plugin-web -p plugin-user-input -p plugin-mcp --all-features`
   - the Project Survey's first clippy run, with `CARGO_BUILD_WARNINGS=deny`
   - `cargo fmt --all --check`
-- Commit: one `promptforge` commit, `Describe each Plugin package`.
+- Commit: one `runvil` commit, `Describe each Plugin package`.
 
 </step-1>
 
@@ -469,7 +469,7 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
 - New `crates/harness-internal/runner/src/packages.rs`:
   - `pub struct PackageRegistry` over `BTreeMap<&'static str, (Package, PluginKind, PluginId)>`, with `Default` (seeds each `NATIVE` entry through `package_name`, skipping one that fails to parse because `expect` is denied), `new`, `add`, `list`, and the `pub(crate)` `entry` and `reserves`
   - `#[non_exhaustive] pub enum PluginKind { Native, Linked }`
-  - the private `const NATIVE: [Package; 1]` for `promptforge/subagents`, carrying the plan's one constraint comment; the `native` construct function with its `#[expect(...)]`; and the private `struct Native`, whose `tools()` is empty and whose `call` returns `ToolError::message`
+  - the private `const NATIVE: [Package; 1]` for `runvil/subagents`, carrying the plan's one constraint comment; the `native` construct function with its `#[expect(...)]`; and the private `struct Native`, whose `tools()` is empty and whose `call` returns `ToolError::message`
   - `pub(crate) fn package_name`, moved from `host.rs`
   - the `packages-tests.rs` sibling, wired with `#[cfg(test)] #[path = "packages-tests.rs"] mod tests;`
 - `crates/harness-internal/runner/src/host.rs`:
@@ -481,7 +481,7 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `crates/harness-internal/runner/src/lib.rs`: `mod packages;`, `pub use packages::{PackageRegistry, PluginKind};` beside the `host` re-export, and the new `## Invariants` bullet
   - `crates/harness/src/lib.rs`: `PackageRegistry` and `PluginKind` in `pub mod plugin`, the crate doc's first sentence, and the `plugin` module doc
 - Hosts:
-  - `crates/workshop/server/src/agents.rs` `with_plugins`: builds a local `packages` registry from the web, user-input, and mcp constants, then installs web, user-input, `"promptforge/subagents"`, and each MCP server by name, in that order, logging each refusal with `tracing::warn!`. Its signature stays. Its doc comment and the module doc name the native.
+  - `crates/workshop/server/src/agents.rs` `with_plugins`: builds a local `packages` registry from the web, user-input, and mcp constants, then installs web, user-input, `"runvil/subagents"`, and each MCP server by name, in that order, logging each refusal with `tracing::warn!`. Its signature stays. Its doc comment and the module doc name the native.
   - `crates/harness/examples/run-prompt.rs`: `HostContext::new(PackageRegistry::new(), HostServices::new())`
 - Test call sites. Each builds its context over a registry of the packages it installs, then installs by `package.name`. Paths are under `crates/`:
   - `harness-internal/runner/src/host-tests.rs`: `host(packages: &[Package])` and `host_with(services, packages)`, which every existing test switches to. Delete the install-time invalid-name test (lines 142-158); its six names move to the `add` test below.
@@ -496,23 +496,23 @@ Paths are relative to the `promptforge` repository. Line numbers are as of `e7c3
   - `workshop/agents/tests/it/support.rs` (line 63) and `workshop/agents/src/input-tests.rs` (line 270): add `plugin_user_input::PACKAGE`, then install `plugin_user_input::PACKAGE.name`
 - Docs:
   - `AGENTS.md` line 12: the Plugin definition becomes the Technical Design's quoted text, word for word.
-  - `crates/promptforge-plugin/src/plugin.rs`: the `Package` doc's linking sentence becomes "Adding it to the Harness's package registry is also what links the Plugin crate into the Host."
+  - `crates/runvil-plugin/src/plugin.rs`: the `Package` doc's linking sentence becomes "Adding it to the Harness's package registry is also what links the Plugin crate into the Host."
 - Tests, named as in the Testing Plan:
   - `packages-tests.rs`: `natives_offer_no_tools_prelude_or_needs`, looping over `NATIVE`
   - new `crates/harness-internal/runner/tests/it/packages.rs`, declared with `mod packages;` beside `mod prepare;` in `main.rs`: the three registry tests and the three install tests, built from `echo_package`, which together cover every case below:
-    - `PackageRegistry::new().list()` yields exactly `promptforge/subagents` as `PluginKind::Native` with a non-empty description. After adding `acme/web`, it yields `acme/web` (`PluginKind::Linked`) before `promptforge/subagents`. A package added with needs lists those needs.
-    - `add`: a second `acme/web` and a package named `promptforge/subagents` are both `DuplicatePackage`. The six names `web`, `acme/web/extra`, `/web`, `acme/`, `Acme/web`, and `acme/Web` are each `InvalidPackage`.
-    - `install`: `acme/missing` and `promptforge/tasks` are both `UnknownPackage`; the second pins that `tasks` is not a package.
-    - `install`: `acme/subagents` with no name, `acme/web` named `subagents`, and `promptforge/subagents` named `other` are each `ReservedName`, and the test checks the `ReservedName` message text once.
-    - `install`: `promptforge/subagents` with no name returns `subagents`, and a second install is `NameTaken`.
+    - `PackageRegistry::new().list()` yields exactly `runvil/subagents` as `PluginKind::Native` with a non-empty description. After adding `acme/web`, it yields `acme/web` (`PluginKind::Linked`) before `runvil/subagents`. A package added with needs lists those needs.
+    - `add`: a second `acme/web` and a package named `runvil/subagents` are both `DuplicatePackage`. The six names `web`, `acme/web/extra`, `/web`, `acme/`, `Acme/web`, and `acme/Web` are each `InvalidPackage`.
+    - `install`: `acme/missing` and `runvil/tasks` are both `UnknownPackage`; the second pins that `tasks` is not a package.
+    - `install`: `acme/subagents` with no name, `acme/web` named `subagents`, and `runvil/subagents` named `other` are each `ReservedName`, and the test checks the `ReservedName` message text once.
+    - `install`: `runvil/subagents` with no name returns `subagents`, and a second install is `NameTaken`.
   - `host-tests.rs`: `a_declared_native_is_met_when_installed_and_missing_when_not` and `an_installed_native_adds_no_catalog_tool_and_no_prelude`
   - `crates/workshop/server/src/agents/tests.rs`: `a_prompt_declaring_subagents_prepares_on_the_servers_installed_plugins`
   - Every existing install, snapshot, preparation, and `tasks` test passes with only its call site changed.
-- Verify, from the `promptforge` root after this step's edits; fixes land in this step's commit:
+- Verify, from the `runvil` root after this step's edits; fixes land in this step's commit:
   - every exit criterion in the Testing Plan
   - `rg -n "HostContext::new\(HostServices|HostContext::new\(services\)|HostContext::new\(wide\)" crates` prints nothing
-  - `git diff --stat e7c376a04 -- crates/harness-internal/runner/src/host-run.rs crates/promptforge-internal` prints nothing, so the run snapshot, the Engine, the `tasks` table, and `RESERVED_NAMES` are unchanged
-- Commit: one `promptforge` commit, `Install Plugins by name from a package registry`.
+  - `git diff --stat e7c376a04 -- crates/harness-internal/runner/src/host-run.rs crates/runvil-internal` prints nothing, so the run snapshot, the Engine, the `tasks` table, and `RESERVED_NAMES` are unchanged
+- Commit: one `runvil` commit, `Install Plugins by name from a package registry`.
 
 </step-2>
 

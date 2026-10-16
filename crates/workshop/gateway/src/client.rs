@@ -1,4 +1,4 @@
-//! HTTP client for the PromptForge gateway's OpenAI-compatible API.
+//! HTTP client for the Runvil gateway's OpenAI-compatible API.
 //!
 //! [`GatewayClient`] wraps `reqwest` with bearer authentication and returns
 //! responses as raw bytes so the workshop routes can relay them to the

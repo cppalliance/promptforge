@@ -10,15 +10,15 @@ use harness::plugin::{HostContext, HostServices, PackageRegistry};
 use harness::record::{MemoryRecorder, RunOutcome};
 use harness::vfs::VfsRef;
 use harness::{BoxFuture, Harness, HostSnapshot, InferenceBroker, RunRequest, Timer};
-use promptforge::effect::Round;
-use promptforge::model::{
+use runvil::effect::Round;
+use runvil::model::{
     Completion, CompletionError, CompletionErrorKind, CompletionOptions, Message, ModelBinding,
     ModelCatalog, ToolSchema,
 };
 
 /// Reads the line in `name.txt` and writes its greeting to `reply.txt`.
 const GREET: &str = concat!(
-    "---\nname: greet\ndescription: Greets the operator by name\npromptforge: 0\n",
+    "---\nname: greet\ndescription: Greets the operator by name\nrunvil: 0\n",
     "input: { path: name.txt, description: The operator's name }\n",
     "output: { path: reply.txt, description: The greeting }\n",
     "---\n\n# Greet\n\n## Answer\n\n```lua\n",

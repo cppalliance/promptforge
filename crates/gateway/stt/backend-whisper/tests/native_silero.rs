@@ -1,7 +1,7 @@
 //! Native characterization of the Silero speech detector. The tests read
-//! `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_SILERO_MODEL`,
-//! `PROMPTFORGE_WHISPER_AUDIO` with its scripted line file beside it as
-//! `<stem>-lines.json`, and `PROMPTFORGE_NOISE_CLIPS`, a directory of 16 kHz
+//! `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_SILERO_MODEL`,
+//! `RUNVIL_WHISPER_AUDIO` with its scripted line file beside it as
+//! `<stem>-lines.json`, and `RUNVIL_NOISE_CLIPS`, a directory of 16 kHz
 //! mono noise clips without speech. Run them on both `jfk.wav` and
 //! `dictation-01.wav`.
 
@@ -45,7 +45,7 @@ fn native_fixture(variable: &str) -> PathBuf {
 }
 
 fn library() -> WhisperLibrary {
-    let library = WhisperLibrary::load(&native_fixture("PROMPTFORGE_WHISPER_LIBRARY"))
+    let library = WhisperLibrary::load(&native_fixture("RUNVIL_WHISPER_LIBRARY"))
         .expect("packaged whisper runtime loads");
     library.set_log_callback();
     library
@@ -54,7 +54,7 @@ fn library() -> WhisperLibrary {
 /// whisper.cpp can throw a C++ exception across the FFI boundary on a
 /// malformed model, so the digest is checked before every load.
 fn detector(library: &WhisperLibrary) -> SileroDetector {
-    let path = native_fixture("PROMPTFORGE_SILERO_MODEL");
+    let path = native_fixture("RUNVIL_SILERO_MODEL");
     let bytes = std::fs::read(&path).expect("Silero model reads");
     let mut digest = String::with_capacity(64);
     for byte in Sha256::digest(&bytes) {
@@ -155,7 +155,7 @@ fn ms(range: &Range<usize>) -> Range<usize> {
 fn speech_decisions_cover_every_line_and_stay_out_of_long_pauses() {
     let library = library();
     let mut detector = detector(&library);
-    let audio = native_fixture("PROMPTFORGE_WHISPER_AUDIO");
+    let audio = native_fixture("RUNVIL_WHISPER_AUDIO");
     let lines = lines(&audio);
     let samples = samples(&audio);
     let runs = speech_runs(&decisions(&mut detector, &samples));
@@ -204,7 +204,7 @@ fn speech_decisions_cover_every_line_and_stay_out_of_long_pauses() {
 #[test]
 #[ignore = "requires packaged whisper, Silero model, and noise clip fixtures"]
 fn noise_clips_hold_no_speech_decision() {
-    let directory = native_fixture("PROMPTFORGE_NOISE_CLIPS");
+    let directory = native_fixture("RUNVIL_NOISE_CLIPS");
     let mut clips = std::fs::read_dir(&directory)
         .unwrap_or_else(|error| panic!("{} reads: {error}", directory.display()))
         .map(|entry| entry.expect("a noise clip entry reads").path())

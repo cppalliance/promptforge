@@ -21,7 +21,7 @@ todos:
     content: Add tests for store seeding, frontmatter parsing, validation rules, and round-trip file IO
     status: completed
   - id: user-guide
-    content: Update promptforge user guide with input/output documentation and examples
+    content: Update runvil user guide with input/output documentation and examples
     status: completed
   - id: design-doc
     content: Update design-mcp-server.md and design-core.md with input/output file design
@@ -36,7 +36,7 @@ isProject: false
 The run pipeline is:
 
 1. MCP `run_prompt` receives `{ prompt: "name", args: "raw string" }`
-2. Runner creates a fresh empty `StoreRef::memory()` ([runner.rs:273](promptforge/crates/promptforge-mcp-server/src/server/runner.rs))
+2. Runner creates a fresh empty `StoreRef::memory()` ([runner.rs:273](runvil/crates/runvil-mcp-server/src/server/runner.rs))
 3. `execute::run()` takes `store: &StoreRef` and threads it through all sections
 4. Lua code accesses files via `store.write()`, `store.read()`, etc.
 5. Run completes, returns a string; the store is dropped (contents lost)
@@ -53,7 +53,7 @@ Add optional top-level `input` and `output` keys to `Frontmatter`. Single-file f
 ---
 name: papergate
 description: Analyze a WG21 paper and produce a gating report
-promptforge: 1
+runvil: 1
 input:
   path: paper.md
   description: The paper markdown to analyze
@@ -186,31 +186,31 @@ impl StoreRef {
 ## Key Files to Modify
 
 **Core:**
-- `promptforge/crates/promptforge-core/src/parser/build.rs` - extend `Frontmatter` with `input`/`output` fields
-- `promptforge/crates/promptforge-core/src/store/mem.rs` - add `MemStore::with_files`
-- `promptforge/crates/promptforge-core/src/store.rs` - add `StoreRef::with_files`
+- `runvil/crates/runvil-core/src/parser/build.rs` - extend `Frontmatter` with `input`/`output` fields
+- `runvil/crates/runvil-core/src/store/mem.rs` - add `MemStore::with_files`
+- `runvil/crates/runvil-core/src/store.rs` - add `StoreRef::with_files`
 
 **MCP server:**
-- `promptforge/crates/promptforge-mcp-server/src/tools.rs` - add `input_file`, `input_text`, `output_file` to schema
-- `promptforge/crates/promptforge-mcp-server/src/server/runner.rs` - seed store, extract output, write to disk
-- `promptforge/crates/promptforge-mcp-server/src/server.rs` - validate mutual exclusion, pass new params to runner
-- `promptforge/crates/promptforge-mcp-server/src/server/listing.rs` - include input/output metadata in `list_prompts` result
-- `promptforge/crates/promptforge-mcp-server/src/result.rs` - extend `RunResult` to carry output content/path
+- `runvil/crates/runvil-mcp-server/src/tools.rs` - add `input_file`, `input_text`, `output_file` to schema
+- `runvil/crates/runvil-mcp-server/src/server/runner.rs` - seed store, extract output, write to disk
+- `runvil/crates/runvil-mcp-server/src/server.rs` - validate mutual exclusion, pass new params to runner
+- `runvil/crates/runvil-mcp-server/src/server/listing.rs` - include input/output metadata in `list_prompts` result
+- `runvil/crates/runvil-mcp-server/src/result.rs` - extend `RunResult` to carry output content/path
 
 **Tests:**
-- `promptforge/crates/promptforge-core/src/store/tests.rs` - `with_files` constructor tests
-- `promptforge/crates/promptforge-core/src/parser/build.rs` - frontmatter parsing tests for `input`/`output`
-- `promptforge/crates/promptforge-mcp-server/src/server/tests.rs` - round-trip integration tests
+- `runvil/crates/runvil-core/src/store/tests.rs` - `with_files` constructor tests
+- `runvil/crates/runvil-core/src/parser/build.rs` - frontmatter parsing tests for `input`/`output`
+- `runvil/crates/runvil-mcp-server/src/server/tests.rs` - round-trip integration tests
 
 **Design docs (update existing, do not create new files):**
-- `promptforge/crates/promptforge-core/design-core.md` - document store seeding from caller, input/output frontmatter
-- `promptforge/crates/promptforge-mcp-server/design-mcp-server.md` - document input_file/input_text/output_file handling, validation rules
+- `runvil/crates/runvil-core/design-core.md` - document store seeding from caller, input/output frontmatter
+- `runvil/crates/runvil-mcp-server/design-mcp-server.md` - document input_file/input_text/output_file handling, validation rules
 
 **User guide:**
-- `promptforge/guide/src/store.md` - document pre-populated stores
-- `promptforge/guide/src/prompt-files.md` - document `input:`/`output:` frontmatter
-- `promptforge/guide/src/mcp-server.md` - document `input_file`/`input_text`/`output_file` params
-- `promptforge/guide/src/getting-started.md` - add a file IO example
+- `runvil/guide/src/store.md` - document pre-populated stores
+- `runvil/guide/src/prompt-files.md` - document `input:`/`output:` frontmatter
+- `runvil/guide/src/mcp-server.md` - document `input_file`/`input_text`/`output_file` params
+- `runvil/guide/src/getting-started.md` - add a file IO example
 
 ## Execution References
 

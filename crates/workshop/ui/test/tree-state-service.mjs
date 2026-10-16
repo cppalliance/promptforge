@@ -354,7 +354,7 @@ function gatedFetch(listings) {
   check("an event with a detail that is not a record drops the roots listing", service.listing("") === undefined);
 
   service.cacheListing("", stale);
-  target.dispatchEvent(new CustomEvent("promptforge:something-else"));
+  target.dispatchEvent(new CustomEvent("runvil:something-else"));
   check("an unrelated event leaves the roots listing", service.listing("") === stale);
 
   // A load in flight started against the old grants: a plain change drops it, a current one keeps it.

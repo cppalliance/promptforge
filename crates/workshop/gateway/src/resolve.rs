@@ -159,7 +159,7 @@ impl ResolveError {
             .unwrap_or_default();
         Self {
             detail: format!(
-                "{note}; start promptforge-gateway or set [gateway] base_url and api_key in workshop.toml"
+                "{note}; start runvil-gateway or set [gateway] base_url and api_key in workshop.toml"
             ),
             stale,
         }
@@ -280,7 +280,7 @@ pub fn report(gateway: &ResolvedGateway, push: &Push) {
 }
 
 /// Whether the config names a gateway itself: a non-empty `base_url` is
-/// explicit, an empty one (unset, or an unset `${PROMPTFORGE_GATEWAY_URL}`
+/// explicit, an empty one (unset, or an unset `${RUNVIL_GATEWAY_URL}`
 /// interpolation) is not. The explicit fallback exists for the gateways
 /// discovery cannot see - a LAN gateway; a local gateway writes a
 /// gateway discovery file, which discovery finds first.

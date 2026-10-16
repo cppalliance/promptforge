@@ -15,10 +15,10 @@ use super::supervisor::{RecoveryCandidate, RecoveryOwnership, launch_and_attach_
 
 /// The sibling executable the desktop app launches, beside its own.
 #[cfg(windows)]
-pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway.exe";
+pub(super) const GATEWAY_EXE_NAME: &str = "runvil-gateway.exe";
 /// The sibling executable the desktop app launches, beside its own.
 #[cfg(not(windows))]
-pub(super) const GATEWAY_EXE_NAME: &str = "promptforge-gateway";
+pub(super) const GATEWAY_EXE_NAME: &str = "runvil-gateway";
 
 #[cfg(windows)]
 const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -144,7 +144,7 @@ pub(super) fn sibling_gateway(exe_dir: &Path) -> Option<PathBuf> {
 pub(super) fn no_gateway_error() -> anyhow::Error {
     anyhow::anyhow!(
         "no gateway configured or running; install the Gateway component so \
-         promptforge-gateway sits beside the workshop executable, or set \
+         runvil-gateway sits beside the workshop executable, or set \
          gateway.base_url and gateway.api_key in workshop.toml to attach to \
          a gateway over the network"
     )

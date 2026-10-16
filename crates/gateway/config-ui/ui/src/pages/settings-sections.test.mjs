@@ -347,14 +347,14 @@ test("a Storage save PUTs the global shadow with the new cache_dir", async () =>
   navigate(dom, "#/settings/system");
   await settle();
   const input = root.querySelector(".field-row[data-key='cache_dir'] input");
-  changeValue(dom, input, "D:/pf-cache");
+  changeValue(dom, input, "D:/rv-cache");
   await settle();
   root.querySelector(".card-save").click();
   await settle();
 
   const bodies = putBodies(stub, "/admin/config");
   assert.equal(bodies.length, 1, "the save PUTs /admin/config once");
-  assert.equal(bodies[0].local.cache_dir, "D:/pf-cache");
+  assert.equal(bodies[0].local.cache_dir, "D:/rv-cache");
   assert.equal(bodies[0].dominion.length, 1, "the keyed arrays stay in the payload");
 });
 
@@ -364,7 +364,7 @@ test("every settings save sends the complete single-file configuration", async (
 
   navigate(dom, "#/settings/system");
   await settle();
-  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/pf-cache");
+  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/rv-cache");
   await settle();
   root.querySelector(".card-save").click();
   await settle();
@@ -390,7 +390,7 @@ test("one global section save does not erase another staged section", async () =
 
   navigate(dom, "#/settings/system");
   await settle();
-  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/pf-cache");
+  changeValue(dom, root.querySelector(".field-row[data-key='cache_dir'] input"), "D:/rv-cache");
   await settle();
   root.querySelector(".card-save").click();
   await settle();

@@ -2,7 +2,7 @@
 
 use std::num::NonZeroU32;
 
-use promptforge::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use runvil::model::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use serde::Deserialize;
 
 use crate::failure::{malformed, transport_failure};

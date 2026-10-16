@@ -1,7 +1,7 @@
 //! Environment loading, the bearer on the wire, and the credential and
 //! endpoint guards.
 
-use promptforge::model::Message;
+use runvil::model::Message;
 
 use super::*;
 use crate::config::SecretError;
@@ -9,7 +9,7 @@ use crate::config::SecretError;
 #[test]
 fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
     let err = from_env_with(|name| {
-        if name == "PROMPTFORGE_GATEWAY_URL" {
+        if name == "RUNVIL_GATEWAY_URL" {
             Err(GatewayConfigError::InvalidEnv(name.to_owned()))
         } else {
             Ok(Some("tok".to_owned()))
@@ -17,26 +17,26 @@ fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
     })
     .expect_err("a non-Unicode variable must be surfaced, not treated as missing");
     assert!(
-        matches!(err, GatewayConfigError::InvalidEnv(ref name) if name == "PROMPTFORGE_GATEWAY_URL"),
+        matches!(err, GatewayConfigError::InvalidEnv(ref name) if name == "RUNVIL_GATEWAY_URL"),
         "expected an explicit InvalidEnv error, got {err:?}"
     );
     assert_eq!(
         err.to_string(),
-        "environment variable is set but not valid Unicode: PROMPTFORGE_GATEWAY_URL"
+        "environment variable is set but not valid Unicode: RUNVIL_GATEWAY_URL"
     );
 }
 
 #[test]
 fn from_env_missing_gateway_url() {
-    let err = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "tok")]))
+    let err = from_env_with(lookup_from(&[("RUNVIL_GATEWAY_API_KEY", "tok")]))
         .expect_err("missing URL must fail");
     assert_eq!(
         err.to_string(),
-        "missing environment variable: PROMPTFORGE_GATEWAY_URL"
+        "missing environment variable: RUNVIL_GATEWAY_URL"
     );
     assert!(matches!(
         err,
-        GatewayConfigError::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_URL"
+        GatewayConfigError::MissingEnv(name) if name == "RUNVIL_GATEWAY_URL"
     ));
 }
 
@@ -46,22 +46,19 @@ fn from_env_missing_gateway_key() {
     // there; an empty value is the same as no value. Only the exact name
     // `localhost` is loopback: a name that merely contains it is not.
     for key_pairs in [
-        vec![("PROMPTFORGE_GATEWAY_URL", "http://192.168.1.20:8081/v1")],
+        vec![("RUNVIL_GATEWAY_URL", "http://192.168.1.20:8081/v1")],
         vec![
-            ("PROMPTFORGE_GATEWAY_URL", "http://192.168.1.20:8081/v1"),
-            ("PROMPTFORGE_GATEWAY_API_KEY", ""),
+            ("RUNVIL_GATEWAY_URL", "http://192.168.1.20:8081/v1"),
+            ("RUNVIL_GATEWAY_API_KEY", ""),
         ],
-        vec![("PROMPTFORGE_GATEWAY_URL", "https://gateway.example.com/v1")],
-        vec![(
-            "PROMPTFORGE_GATEWAY_URL",
-            "http://localhost.evil.com:8081/v1",
-        )],
-        vec![("PROMPTFORGE_GATEWAY_URL", "http://notlocalhost:8081/v1")],
+        vec![("RUNVIL_GATEWAY_URL", "https://gateway.example.com/v1")],
+        vec![("RUNVIL_GATEWAY_URL", "http://localhost.evil.com:8081/v1")],
+        vec![("RUNVIL_GATEWAY_URL", "http://notlocalhost:8081/v1")],
     ] {
         let err = from_env_with(lookup_from(&key_pairs))
             .expect_err("missing key against a non-loopback gateway must fail");
         assert!(
-            matches!(err, GatewayConfigError::MissingEnv(ref name) if name == "PROMPTFORGE_GATEWAY_API_KEY"),
+            matches!(err, GatewayConfigError::MissingEnv(ref name) if name == "RUNVIL_GATEWAY_API_KEY"),
             "expected MissingEnv for {key_pairs:?}, got {err:?}"
         );
     }
@@ -80,22 +77,22 @@ fn from_env_missing_gateway_key_is_fine_for_a_loopback_gateway() {
         "http://localhost:8081/v1",
         "http://LOCALHOST:8081/v1",
     ] {
-        let client = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_URL", url)]))
+        let client = from_env_with(lookup_from(&[("RUNVIL_GATEWAY_URL", url)]))
             .unwrap_or_else(|err| panic!("a loopback URL needs no key, got {err:?} for {url}"));
         assert!(
             !client.has_key(),
             "the client built for {url} must leave the key unset"
         );
         let empty_key = from_env_with(lookup_from(&[
-            ("PROMPTFORGE_GATEWAY_URL", url),
-            ("PROMPTFORGE_GATEWAY_API_KEY", ""),
+            ("RUNVIL_GATEWAY_URL", url),
+            ("RUNVIL_GATEWAY_API_KEY", ""),
         ]))
         .unwrap_or_else(|err| panic!("an empty key on loopback is unset, got {err:?} for {url}"));
         assert!(!empty_key.has_key());
     }
     let keyed = from_env_with(lookup_from(&[
-        ("PROMPTFORGE_GATEWAY_URL", "http://127.0.0.1:8081/v1"),
-        ("PROMPTFORGE_GATEWAY_API_KEY", "tok"),
+        ("RUNVIL_GATEWAY_URL", "http://127.0.0.1:8081/v1"),
+        ("RUNVIL_GATEWAY_API_KEY", "tok"),
     ]))
     .expect("a loopback URL with a key builds");
     assert!(

@@ -19,8 +19,8 @@ use harness_runner::environment::HostSnapshot;
 use harness_runner::files::OutputError;
 use harness_runner::recorder::{Record, RecorderFuture, RunMeta, RunRecorder};
 use harness_runner::{Harness, RunControl, RunRequest};
-use promptforge::vfs::VfsRef;
-use promptforge_plugin::ServiceKey;
+use runvil::vfs::VfsRef;
+use runvil_plugin::ServiceKey;
 use tokio::sync::{Notify, watch};
 
 use crate::scripted::{MODEL, ScriptedBroker};
@@ -57,17 +57,17 @@ const STARTUPS: ServiceKey<BTreeMap<String, Arc<Startup>>> = ServiceKey::new("te
 const SLOW: Package = Package::new("tests/slow", construct_starting);
 
 /// A prompt declaring `slow` and calling its tool once by id.
-const CALLS_SLOW: &str = "---\nname: calls-slow\ndescription: d\npromptforge: 0\n\
+const CALLS_SLOW: &str = "---\nname: calls-slow\ndescription: d\nrunvil: 0\n\
     plugins:\n  - slow\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn tools.call('slow/echo', { value = 'hi' })\n```\n";
 
 /// A prompt declaring `slow` and calling nothing.
-const DECLARES_SLOW: &str = "---\nname: declares-slow\ndescription: d\npromptforge: 0\n\
+const DECLARES_SLOW: &str = "---\nname: declares-slow\ndescription: d\nrunvil: 0\n\
     plugins:\n  - slow\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'ran'\n```\n";
 
 /// A Plugin-free prompt returning how many undeclared tools the run
 /// offers.
-const COUNTS_OFFERED: &str = "---\nname: counts\ndescription: d\npromptforge: 0\n---\n\n\
+const COUNTS_OFFERED: &str = "---\nname: counts\ndescription: d\nrunvil: 0\n---\n\n\
     # Title\n\n## Only\n\n```lua\nreturn #tools.extras() .. ' offered'\n```\n";
 
 /// A Plugin whose tools wait on the test's [`Startup`].
@@ -303,7 +303,7 @@ async fn an_undeclared_plugin_whose_ready_fails_leaves_the_run_going_without_its
 
 #[tokio::test]
 async fn an_undeclared_plugin_whose_ready_fails_raises_its_reason_when_the_prompt_offers_it() {
-    let offers_slow = "---\nname: offers-slow\ndescription: d\npromptforge: 0\n---\n\n\
+    let offers_slow = "---\nname: offers-slow\ndescription: d\nrunvil: 0\n---\n\n\
         # Title\n\n## Only\n\n```lua\nplugins.offer('slow')\nreturn 'offered'\n```\n";
     let (host, _moves, _startup) = slow_host(Phase::Failed("the fixture server is down"));
     let outcome = drive_over(offers_slow, host).await;
@@ -321,14 +321,13 @@ async fn an_undeclared_plugin_whose_ready_fails_raises_its_reason_when_the_promp
 
 #[tokio::test]
 async fn an_undeclared_installed_native_with_no_tools_has_an_object_the_prompt_can_offer() {
-    let reads_stub = "---\nname: reads-stub\ndescription: d\npromptforge: 0\n---\n\n\
+    let reads_stub = "---\nname: reads-stub\ndescription: d\nrunvil: 0\n---\n\n\
         # Title\n\n## Only\n\n```lua\n\
         local stub = plugins.get('subagents')\n\
         plugins.offer('subagents')\n\
         return stub.name .. ':' .. #stub.tools\n```\n";
     let mut host = HostContext::new(registry(&[]), HostServices::new());
-    host.install("promptforge/subagents", None, Value::Null)
-        .unwrap();
+    host.install("runvil/subagents", None, Value::Null).unwrap();
     assert_eq!(
         completed(drive_over(reads_stub, host).await),
         "subagents:0",

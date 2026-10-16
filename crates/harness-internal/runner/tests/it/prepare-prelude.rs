@@ -17,7 +17,7 @@ const SPEAKER_PRELUDE: &str = "local plugin = ...\n\
 /// A prompt declaring the speaker, binding none of its tools, and calling
 /// its prelude from two sections; the second also tries to replace the
 /// prelude's function and reports whether the table refused.
-const SPEAKS: &str = "---\nname: speaks\ndescription: d\npromptforge: 0\n\
+const SPEAKS: &str = "---\nname: speaks\ndescription: d\nrunvil: 0\n\
     plugins:\n  - speaker\n---\n\n# Title\n\n\
     ## First\n\n```lua\nspeaker.say('one')\n```\n\n\
     ## Second\n\n```lua\n\
@@ -84,7 +84,7 @@ async fn preludes_install_in_the_prompts_declaration_order_not_the_install_order
     for package in packages {
         host.install(package.name, None, Value::Null).unwrap();
     }
-    let declares_second_first = "---\nname: order\ndescription: d\npromptforge: 0\n\
+    let declares_second_first = "---\nname: order\ndescription: d\nrunvil: 0\n\
         plugins:\n  - second\n  - first\n---\n\n# Title\n\n## Only\n\n```lua\nreturn 'ran'\n```\n";
     let outcome = drive_over(declares_second_first, host).await;
     let RunOutcome::Failed { kind, message } = outcome else {

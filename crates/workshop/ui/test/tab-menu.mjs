@@ -129,7 +129,7 @@ globalThis.CustomEvent = window.CustomEvent;
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-tab-menu-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-tab-menu-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const {
   createDockview,

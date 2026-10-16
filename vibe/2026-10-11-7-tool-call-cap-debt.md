@@ -3,7 +3,7 @@ name: Tool-call cap debt
 overview: "Remove the one debt the tool-call-cap work added: the public Plugin contract still says only a cancel drops a stop-surviving call, but a withdrawal now drops it while the run goes on. Make Plugin::call the single statement of when the Harness drops a call, point the other public copies at it, and pin the changed occasion with one behavior test. Two doc ride-alongs join the same pass: a Plugin::call rule against waiting on another call of the same run (D1-14), and 'in flight or waiting' in RunControl::stop_round (D1-16)."
 todos:
   - id: d1-1-docs
-    content: "D1-1: make Plugin::call's # Invariants the full drop-occasion list; point the promptforge-plugin crate doc and plugin-user-input (lines 33, 72-73) at it; make ToolDescriptor::survives_stop's field doc accurate. D1-14: add the no-waiting-on-another-call bullet to the same # Invariants. D1-16: 'in flight or waiting' in RunControl::stop_round (harness-control.rs line 51)"
+    content: "D1-1: make Plugin::call's # Invariants the full drop-occasion list; point the runvil-plugin crate doc and plugin-user-input (lines 33, 72-73) at it; make ToolDescriptor::survives_stop's field doc accurate. D1-14: add the no-waiting-on-another-call bullet to the same # Invariants. D1-16: 'in flight or waiting' in RunControl::stop_round (harness-control.rs line 51)"
     status: completed
   - id: d1-1-pin
     content: "D1-1: add cancelling_a_task_drops_its_question_to_the_operator to tests/it/harness-stop-cap.rs, holding Main's after round until the question is torn down"
@@ -21,7 +21,7 @@ isProject: false
 ## Product Requirements
 
 - Scope and target work:
-  - Repository: `c:\Users\Vinnie\cursor\promptforge`, branch `master`. Paths are relative to it, and line numbers were read at `9cdef9389`; search by name if they have moved.
+  - Repository: `c:\Users\Vinnie\cursor\runvil`, branch `master`. Paths are relative to it, and line numbers were read at `9cdef9389`; search by name if they have moved.
   - Target: the three commits whose trailer is `Plan: vibe/2026-10-11-6-tool-call-cap.md`:
     - `1f7f88dd7` Report the tool calls each step withdraws
     - `1b8184f7d` Run at most the cap of tool calls, oldest first
@@ -38,7 +38,7 @@ isProject: false
 - Non-goals:
   - No change to Harness or Engine behavior. A withdrawal keeps dropping stop-surviving calls.
   - No change to Stop, the cap, or what a stopped round returns.
-  - No edit to `../promptforge-docs`.
+  - No edit to `../runvil-docs`.
   - No deadlock detection for calls that wait on each other (D1-14 is a documented rule, not a mechanism).
   - The other rejected candidates stay as they are (Debt Inventory).
 - Success criteria:
@@ -61,10 +61,10 @@ isProject: false
     - Evidence, at `9cdef9389`:
       - `Reach::takes` (`crates/harness-internal/runner/src/effect_loop-flight.rs` lines 60-70) accepts any listed id for `Reach::Withdrawn` and ignores `survives_stop`. `Flights::abort` (lines 261-285) aborts each matching call in flight and drops each matching waiting call.
       - The Driver calls `drop_in_flight(Reach::Withdrawn(&withdrawn))` on every step that is not decided (`effect_loop.rs` lines 208-212), so the run goes on after the drop.
-      - The Engine lists every tool call that `abort_effect` orphans (`crates/promptforge-internal/engine/src/execute/scheduler/chain.rs` lines 297-307). That covers `tasks.cancel` (`cancel_task` to `abort_subtree`, `waits.rs` line 343), an owner ending with live tasks (`settle_owned_tasks` to `abandon_owned_tasks` to `abort_subtree`, `task_end.rs` lines 94-109 and 189), and an ancestor's abort (`abort_subtree`, `chain.rs` line 258). Script `tools.call` and model batches share the one `Continuation::ToolCall`, so `input.ask()` is listed too.
+      - The Engine lists every tool call that `abort_effect` orphans (`crates/runvil-internal/engine/src/execute/scheduler/chain.rs` lines 297-307). That covers `tasks.cancel` (`cancel_task` to `abort_subtree`, `waits.rs` line 343), an owner ending with live tasks (`settle_owned_tasks` to `abandon_owned_tasks` to `abort_subtree`, `task_end.rs` lines 94-109 and 189), and an ancestor's abort (`abort_subtree`, `chain.rs` line 258). Script `tools.call` and model batches share the one `Continuation::ToolCall`, so `input.ask()` is listed too.
       - The ask tool sets `survives_stop(true)` (`crates/plugin-user-input/src/ask.rs` line 40).
       - Unchanged contract text:
-        - `crates/promptforge-plugin/src/plugin.rs` lines 84-86: "The Harness drops the returned future on a stop or a cancel, unless the tool's descriptor sets `survives_stop`, in which case only a cancel drops it."
+        - `crates/runvil-plugin/src/plugin.rs` lines 84-86: "The Harness drops the returned future on a stop or a cancel, unless the tool's descriptor sets `survives_stop`, in which case only a cancel drops it."
         - `crates/plugin-user-input/src/lib.rs` line 33, and again at lines 72-73 under `## Invariants`: "only a cancel drops it."
     - Relationship to target work: the design record required "A withdrawn call never starts, and one already running is dropped", but it never listed the Plugin-facing docs among the files to update, and neither target commit touched them.
     - Impact:
@@ -116,7 +116,7 @@ isProject: false
 
 Documentation in five files plus one behavior test; no Harness, Engine, or Plugin behavior changes. The drop-occasion list moves to a single home, because these copies were written for two occasions (stop and cancel) and fell behind as occasions grew: a decided run without a cancel, waiting calls, and now a withdrawal.
 
-- [crates/promptforge-plugin/src/plugin.rs](crates/promptforge-plugin/src/plugin.rs), the `# Invariants` bullet on `Plugin::call` (lines 84-86), becomes the full list. Suggested wording:
+- [crates/runvil-plugin/src/plugin.rs](crates/runvil-plugin/src/plugin.rs), the `# Invariants` bullet on `Plugin::call` (lines 84-86), becomes the full list. Suggested wording:
 
 ```text
 - `call` is cancellation-aware. The Harness drops the returned future on
@@ -137,13 +137,13 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
 ```
 
 - [crates/harness-internal/runner/src/harness-control.rs](crates/harness-internal/runner/src/harness-control.rs), for D1-16: in `RunControl::stop_round`'s doc, line 51 "A stop reaches only the effects in flight when the loop that drives the run sees it" becomes "A stop reaches only the effects in flight or waiting when the loop that drives the run sees it". Nothing else in that doc changes.
-- [crates/promptforge-plugin/src/lib.rs](crates/promptforge-plugin/src/lib.rs), the crate-level bullet (lines 54-56), stops restating the list, for example: "[`Plugin::call`] is cancellation-aware: its future may be dropped before it finishes, on the occasions its invariants list."
+- [crates/runvil-plugin/src/lib.rs](crates/runvil-plugin/src/lib.rs), the crate-level bullet (lines 54-56), stops restating the list, for example: "[`Plugin::call`] is cancellation-aware: its future may be dropped before it finishes, on the occasions its invariants list."
 - [crates/plugin-user-input/src/lib.rs](crates/plugin-user-input/src/lib.rs):
-  - The overview sentence (line 33) becomes, for example: "The ask tool's descriptor survives stops: a stop leaves the question open. The other occasions [`Plugin::call`](promptforge_plugin::Plugin::call) lists drop it, the early end of the task that asked included."
+  - The overview sentence (line 33) becomes, for example: "The ask tool's descriptor survives stops: a stop leaves the question open. The other occasions [`Plugin::call`](runvil_plugin::Plugin::call) lists drop it, the early end of the task that asked included."
   - The `## Invariants` bullet (lines 72-73) becomes, for example: "The ask tool's descriptor sets `survives_stop`, so a stop leaves the operator's question open; every other occasion `Plugin::call` lists drops it."
-- [crates/promptforge-internal/types/src/tools/descriptor.rs](crates/promptforge-internal/types/src/tools/descriptor.rs), the `survives_stop` field doc (lines 35-39), keeps its own sentence, made accurate:
+- [crates/runvil-internal/types/src/tools/descriptor.rs](crates/runvil-internal/types/src/tools/descriptor.rs), the `survives_stop` field doc (lines 35-39), keeps its own sentence, made accurate:
   - Suggested: "A stop cancels every other call in flight and lets the run go on; the run's end and the early end of the task that made the call still end this one."
-  - It can't link to `Plugin::call`, because `promptforge-types` doesn't depend on `promptforge-plugin`.
+  - It can't link to `Plugin::call`, because `runvil-types` doesn't depend on `runvil-plugin`.
   - It is an Engine crate doc, so it names neither the Host nor how the Harness works (root `AGENTS.md`).
 - [crates/harness-internal/runner/tests/it/harness-stop-cap.rs](crates/harness-internal/runner/tests/it/harness-stop-cap.rs) (177 lines) gains `cancelling_a_task_drops_its_question_to_the_operator`, through `Harness::run`:
   - Host and broker:
@@ -179,7 +179,7 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
 - Contract check, D1-16: read the edited sentence against `act_on_stop` and `abort(Reach::AllButSurvivors)`. A stop seen by the loop takes the waiting calls that don't survive stops as well as those in flight, and nothing started after the loop saw it.
 - Docs and wording, D1-1:
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`. Rustdoc's `broken_intra_doc_links` denies, so this checks the new `Plugin::call` links.
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`.
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps`.
   - `node --test crates/workshop/ui/test/docs-claims.mjs`, which scans `## Invariants` wording and the Engine wording rule.
   - `Remove-Item Env:CARGO_BUILD_WARNINGS -ErrorAction SilentlyContinue; cargo +nightly-2026-09-05 xtask api --check`, because `ToolDescriptor` is facade surface. Clear the variable first: if `CARGO_BUILD_WARNINGS='deny'` is still set from a clippy run, nightly cargo's `workspace-hack` manifest warnings become fatal.
 - Regression, unchanged behavior: every existing test passes untouched. That includes `tests/it/effect_loop-cap.rs`, `tests/it/harness-stop.rs`, `crates/plugin-user-input/tests/it/ask.rs`, and the Workshop `server/tests/it/agents/turns.rs` ("a stop cancels no question").
@@ -187,7 +187,7 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
   - The Workshop crates, with the gateway sidecar staged:
-    - Stage it: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`.
+    - Stage it: `cargo build --locked -p gateway --no-default-features`, then `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`.
     - Run `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api` and `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`.
     - Always run `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc` afterward.
   - `cargo fmt --all --check`
@@ -202,10 +202,10 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
 - Reversible decisions and consequences:
   - Fix the documents, not the behavior. The tool-call-cap design record already decided that "A withdrawn call never starts, and one already running is dropped". The documents are catching up, and undoing the edit would be another doc edit, so this is not treated as a hard-to-reverse public-interface change.
   - Give the occasion list one home, `Plugin::call`'s `# Invariants`.
-    - The `promptforge-plugin` crate doc and `plugin-user-input` keep only their own fact (a stop leaves the question open) and point to `Plugin::call`.
+    - The `runvil-plugin` crate doc and `plugin-user-input` keep only their own fact (a stop leaves the question open) and point to `Plugin::call`.
     - The consequence is that one edit covers the next drop occasion.
     - The record shows the cost of the old way: D1-1, D1-19, and X1 are three copies that fell behind the same list.
-  - `ToolDescriptor::survives_stop` keeps its own accurate sentence, because `promptforge-types` can't depend on `promptforge-plugin`.
+  - `ToolDescriptor::survives_stop` keeps its own accurate sentence, because `runvil-types` can't depend on `runvil-plugin`.
   - Pin the changed occasion with a behavior test, in `harness-stop-cap.rs` (177 lines) rather than `effect_loop-cap.rs` (461 lines). It uses the real fixture ask tool, so it pins exactly what the operator-question docs promise.
   - D1-19's case is covered by the accurate wording, with no work item of its own.
   - D1-14 is a documented rule, not a Harness mechanism. No tool in the tree waits on another call of the same run, and the Harness can't see what a call waits on.
@@ -222,12 +222,12 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
   - Detecting or breaking waits between calls of one run inside the Harness (D1-14). Reason: no tool in the tree does it, and the Harness can't see what a call waits on.
 - Assumptions and risks:
   - The impact on Plugins outside this repository is inferred, not observed. The user said earlier that no one depends on the public formats yet.
-  - The `../promptforge-docs` book was not examined for further copies of the contract.
+  - The `../runvil-docs` book was not examined for further copies of the contract.
   - Two rejections, D1-11 and D1-12, rest on `futures-util`'s documented `FuturesUnordered` behavior. The pinned source was not re-read.
 
 ### Deferred and Out of Scope
 
-- Copies of the drop contract in `../promptforge-docs`. Revisit at the next docs sync.
+- Copies of the drop contract in `../runvil-docs`. Revisit at the next docs sync.
 - D1-15, a stronger task-cancel test in `effect_loop-cap.rs`, where the main chain keeps working after the cancel so the run's end can't hide a missed drop. Revisit the next time that file changes.
 - D1-17, splitting `crates/harness-internal/runner/src/effect_loop.rs` (499 lines) before its next change. Revisit with the next Driver change.
 - D1-2, `#[non_exhaustive]` on `Step::Pending`. That choice predates the target. Revisit before the facade's first stable release.
@@ -244,26 +244,26 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
 - Full-suite test command: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`, then `node --test crates/workshop/ui/test/docs-claims.mjs`. The workspace run includes `build-xtask`, which holds the boundary and structural checks.
 - Linter command: `CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`, then `CARGO_BUILD_WARNINGS=deny cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`, plus `cargo check -p gateway --no-default-features` for the headless build shape. On PowerShell set `$env:CARGO_BUILD_WARNINGS='deny'` first. Never run a standalone `cargo check --workspace`.
 - Formatter check command: `cargo fmt --all --check` (rustfmt `style_edition = "2024"`).
-- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `RUSTDOCFLAGS="-D warnings" cargo doc -p promptforge --no-deps` for the facade with default features. When the `promptforge` facade's public surface changes, also run `cargo +<nightly pinned in crates/build-xtask/src/api/toolchain.rs> xtask api --check`, which compares against `crates/promptforge/public-api.txt`.
+- Docs command: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`, plus `RUSTDOCFLAGS="-D warnings" cargo doc -p runvil --no-deps` for the facade with default features. When the `runvil` facade's public surface changes, also run `cargo +<nightly pinned in crates/build-xtask/src/api/toolchain.rs> xtask api --check`, which compares against `crates/runvil/public-api.txt`.
 - Test placement and naming conventions:
-  - Unit tests live in a sibling file wired from the module as `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (for example `effect.rs` beside `effect-tests.rs`). A module with three or more test files uses a `tests/` subdirectory instead (for example `promptforge-internal/vfs/src/handle/tests/`). Some older files keep an inline `mod tests { }`.
-  - Integration tests compile as one binary per crate: `tests/suite/main.rs` for the `promptforge` and `harness` facades, `tests/it/main.rs` for the gateway app, workshop server, and `plugin-mcp`. Each topic is a `mod` file; shared helpers sit in `support.rs` or `common/`. Prompt fixtures live under `tests/prompts/` (`valid`, `invalid`, `execution`).
+  - Unit tests live in a sibling file wired from the module as `#[cfg(test)] #[path = "<stem>-tests.rs"] mod tests;` (for example `effect.rs` beside `effect-tests.rs`). A module with three or more test files uses a `tests/` subdirectory instead (for example `runvil-internal/vfs/src/handle/tests/`). Some older files keep an inline `mod tests { }`.
+  - Integration tests compile as one binary per crate: `tests/suite/main.rs` for the `runvil` and `harness` facades, `tests/it/main.rs` for the gateway app, workshop server, and `plugin-mcp`. Each topic is a `mod` file; shared helpers sit in `support.rs` or `common/`. Prompt fixtures live under `tests/prompts/` (`valid`, `invalid`, `execution`).
   - Test functions are snake_case sentences stating the behavior, such as `a_run_cancelled_before_it_begins_ends_cancelled_and_is_never_recorded`; a `test_` prefix is rare.
-  - Test-only hooks sit behind a `test-fixtures` Cargo feature (gateway and workshop crates) or `test-support` (Engine crates and `promptforge-plugin`); `build-xtask` checks they do not leak into normal builds.
+  - Test-only hooks sit behind a `test-fixtures` Cargo feature (gateway and workshop crates) or `test-support` (Engine crates and `runvil-plugin`); `build-xtask` checks they do not leak into normal builds.
   - JS tests are `*.test.mjs` beside the source or `*.mjs` under `test/`, run by `node --test`.
 - Directory map:
-  - `crates/`: all code. Top-level public crates (`promptforge`, `promptforge-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`), Plugins (`plugin-web`, `plugin-mcp`, `plugin-user-input`), shared utilities (`shared-error-source`, `shared-loopback`, and `shared-ui`, a TypeScript and CSS package rather than a crate), tooling (`build-xtask` for structural checks and `cargo xtask`, `build-workshop` behind the `cargo workshop` alias, `build-ui`, `build-user-guide`, `build-ceiling`, `build-llama-cuda`), and `workspace-hack` for cargo-hakari.
-  - `crates/promptforge-internal/`: private Engine crates `types`, `parser`, `lua`, `engine`, `vfs`, `model-client`.
+  - `crates/`: all code. Top-level public crates (`runvil`, `runvil-plugin`, `harness`, `harness-gateway-client`, `gateway-api-types`, `gateway-api-discovery`), Plugins (`plugin-web`, `plugin-mcp`, `plugin-user-input`), shared utilities (`shared-error-source`, `shared-loopback`, and `shared-ui`, a TypeScript and CSS package rather than a crate), tooling (`build-xtask` for structural checks and `cargo xtask`, `build-workshop` behind the `cargo workshop` alias, `build-ui`, `build-user-guide`, `build-ceiling`, `build-llama-cuda`), and `workspace-hack` for cargo-hakari.
+  - `crates/runvil-internal/`: private Engine crates `types`, `parser`, `lua`, `engine`, `vfs`, `model-client`.
   - `crates/harness-internal/runner`: the private Harness crate `harness-runner`.
-  - `crates/gateway/`: private gateway crates; `app` is the `promptforge-gateway` binary, beside `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `cloud-providers`, `web-search`, and the `stt/` speech subsystem whose public member is `api` (`gateway-stt`).
+  - `crates/gateway/`: private gateway crates; `app` is the `runvil-gateway` binary, beside `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `cloud-providers`, `web-search`, and the `stt/` speech subsystem whose public member is `api` (`gateway-stt`).
   - `crates/workshop/`: the Workshop Host; `desktop` (Tauri app, package `workshop`), `server` and `server-api`, tier crates `agents`, `gateway`, `menu`, `protocol`, `registry`, `run-log`, `status`, `support`, `user-state`, `workspace`, and the npm workspaces `ui`, `look`, `platform`.
   - `guide/`: user guide and docs site sources. `prompts/`: example prompts. `tools/`: Node scripts for gateway sidecar staging and live TTS checks, each with a `.test.mjs`. `vibe/`: dated plan and run records. `local/`: gitignored machine-local gateway config and fixtures.
   - `.github/workflows/`: CI, release, and nightly jobs. `.githooks/`: pre-commit runs fmt; pre-push runs docs-claims, the headless check, workspace clippy, and cargo-deny. `.config/`: nextest and hakari config. `.cursor/rules/`: Workshop architecture and SPA rules.
 - Component boundaries (enforced by `cargo test -p build-xtask`):
-  - Engine crates (`promptforge*`) depend on no gateway, workshop, Harness, or Plugin crate. Other families reach the Engine only through `promptforge` and `promptforge-plugin`; `crates/promptforge-internal/` is private to those two.
-  - Harness crates (`harness*`) depend outside their family only on `promptforge`, `promptforge-plugin`, and `workspace-hack`. Others reach the Harness only through `harness` and `harness-gateway-client`; `harness-runner` is private to `harness`.
-  - Plugin crates depend only on `promptforge-plugin`, `shared-*`, and outside libraries. The only product crate allowed to depend on a Plugin is `harness-gateway-client`, which implements `plugin-web`'s `SearchProvider`.
-  - Gateway crates depend on no promptforge, workshop, or Harness crate. Their container crates are private to the family, and Workshop sees the gateway only through `gateway-api-types` and `gateway-api-discovery`.
+  - Engine crates (`runvil*`) depend on no gateway, workshop, Harness, or Plugin crate. Other families reach the Engine only through `runvil` and `runvil-plugin`; `crates/runvil-internal/` is private to those two.
+  - Harness crates (`harness*`) depend outside their family only on `runvil`, `runvil-plugin`, and `workspace-hack`. Others reach the Harness only through `harness` and `harness-gateway-client`; `harness-runner` is private to `harness`.
+  - Plugin crates depend only on `runvil-plugin`, `shared-*`, and outside libraries. The only product crate allowed to depend on a Plugin is `harness-gateway-client`, which implements `plugin-web`'s `SearchProvider`.
+  - Gateway crates depend on no runvil, workshop, or Harness crate. Their container crates are private to the family, and Workshop sees the gateway only through `gateway-api-types` and `gateway-api-discovery`.
   - Workshop tiers flow one way: server, then features, then services, then vocabulary. Same-tier crates do not depend on each other, except `workshop-registry` on `workshop-protocol`. Each workshop crate root names its tier. The desktop app depends only on `workshop-server-api`, which depends only on `workshop-server`.
   - `shared-*` crates depend on no product crate.
 - Conventions summary:
@@ -288,21 +288,21 @@ Documentation in five files plus one behavior test; no Harness, Engine, or Plugi
 - Component: `none`
 - Tests:
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
   - `Remove-Item Env:CARGO_BUILD_WARNINGS -ErrorAction SilentlyContinue; cargo +nightly-2026-09-05 xtask api --check`
   - `git grep -n "only a cancel" -- . ':(exclude)vibe'`, which must print nothing (exit code 1)
 
-This step changes documentation only. It covers D1-1's contract text plus the two ride-alongs, D1-14 and D1-16. No Harness, Engine, or Plugin behavior changes: a withdrawal keeps dropping stop-surviving calls, and Stop, the cap, and what a stopped round returns stay as they are. Don't edit `../promptforge-docs`, and don't make `Reach::Withdrawn` spare stop-surviving calls. Line numbers are at `9cdef9389`; search by name if they have moved.
+This step changes documentation only. It covers D1-1's contract text plus the two ride-alongs, D1-14 and D1-16. No Harness, Engine, or Plugin behavior changes: a withdrawal keeps dropping stop-surviving calls, and Stop, the cap, and what a stopped round returns stay as they are. Don't edit `../runvil-docs`, and don't make `Reach::Withdrawn` spare stop-surviving calls. Line numbers are at `9cdef9389`; search by name if they have moved.
 
-- `crates/promptforge-plugin/src/plugin.rs`, `Plugin::call`'s `# Invariants`:
+- `crates/runvil-plugin/src/plugin.rs`, `Plugin::call`'s `# Invariants`:
   - Replace the cancellation-aware bullet (lines 84-86, ending "in which case only a cancel drops it") with the full drop-occasion list, using the Technical Design's suggested wording. It must name every occasion: a stop; the run's end, a cancel included; and the early end of the task that made the call (the task is cancelled, its owner ends, or an ancestor is aborted). It must say that only a stop spares a call whose tool's descriptor sets `survives_stop`, and that the run goes on after a stop or a task's early end.
   - Add a D1-14 bullet to the same `# Invariants`: a call must not wait for another call of the same run to finish. The reason is that the Harness runs a bounded number of a run's tool calls at once and holds the rest, so a call that waits on one held behind it can stall the run until a stop or a cancel. Name no number, because the cap is the Harness's to set.
-- `crates/promptforge-plugin/src/lib.rs`, the crate-level "[`Plugin::call`] is cancellation-aware" bullet (lines 54-56): stop restating the occasions and point at `Plugin::call`'s invariants, as the Technical Design suggests.
+- `crates/runvil-plugin/src/lib.rs`, the crate-level "[`Plugin::call`] is cancellation-aware" bullet (lines 54-56): stop restating the occasions and point at `Plugin::call`'s invariants, as the Technical Design suggests.
 - `crates/plugin-user-input/src/lib.rs`:
-  - The overview sentence (line 33): keep only this crate's own fact, that a stop leaves the question open, and say every other occasion [`Plugin::call`](promptforge_plugin::Plugin::call) lists drops it, the early end of the task that asked included.
+  - The overview sentence (line 33): keep only this crate's own fact, that a stop leaves the question open, and say every other occasion [`Plugin::call`](runvil_plugin::Plugin::call) lists drops it, the early end of the task that asked included.
   - The `## Invariants` bullet (lines 72-73): the ask tool's descriptor sets `survives_stop`, so a stop leaves the operator's question open; every other occasion `Plugin::call` lists drops it.
-- `crates/promptforge-internal/types/src/tools/descriptor.rs`, the `survives_stop` field doc (lines 35-39): replace "a cancel still ends this one" with an accurate sentence of its own, for example "A stop cancels every other call in flight and lets the run go on; the run's end and the early end of the task that made the call still end this one." Don't link to `Plugin::call`, because `promptforge-types` doesn't depend on `promptforge-plugin`. This is an Engine crate doc, so it names neither the Host nor how the Harness works. Leave the `survives_stop` builder method's doc (lines 69-70) as it is.
+- `crates/runvil-internal/types/src/tools/descriptor.rs`, the `survives_stop` field doc (lines 35-39): replace "a cancel still ends this one" with an accurate sentence of its own, for example "A stop cancels every other call in flight and lets the run go on; the run's end and the early end of the task that made the call still end this one." Don't link to `Plugin::call`, because `runvil-types` doesn't depend on `runvil-plugin`. This is an Engine crate doc, so it names neither the Host nor how the Harness works. Leave the `survives_stop` builder method's doc (lines 69-70) as it is.
 - `crates/harness-internal/runner/src/harness-control.rs`, `RunControl::stop_round`'s doc, line 51: "A stop reaches only the effects in flight when the loop that drives the run sees it" becomes "A stop reaches only the effects in flight or waiting when the loop that drives the run sees it". Nothing else in that doc changes.
 - Leave the internal `ToolPerformer::survives_stop` doc (`crates/harness-internal/runner/src/performers.rs`) and the `InputBroker` example sentence unchanged. Neither says "only", and neither misleads.
 - Every `.rs` file stays at or under 500 lines; each crate's build script fails a file over 500.
@@ -327,14 +327,14 @@ Acceptance:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features`
   - `cargo build --locked -p gateway --no-default-features`
-  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/promptforge-gateway.exe`
+  - `node tools/stage-gateway-sidecar.mjs stage --target x86_64-pc-windows-msvc --source target/debug/runvil-gateway.exe`
   - `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`
   - `$env:CARGO_BUILD_WARNINGS='deny'; cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets`
   - `node tools/stage-gateway-sidecar.mjs remove --target x86_64-pc-windows-msvc`, always, even when a Workshop command fails
   - `cargo fmt --all --check`
   - `cargo test -p build-xtask`
   - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`
-  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p promptforge --no-deps`
+  - `$env:RUSTDOCFLAGS='-D warnings'; cargo doc -p runvil --no-deps`
   - `node --test crates/workshop/ui/test/docs-claims.mjs`
   - `Remove-Item Env:CARGO_BUILD_WARNINGS -ErrorAction SilentlyContinue; cargo +nightly-2026-09-05 xtask api --check`
   - `git grep -n "only a cancel" -- . ':(exclude)vibe'`, which must print nothing (exit code 1)

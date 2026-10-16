@@ -2,7 +2,7 @@
 //! third-party error a public error surface would otherwise name.
 //!
 //! This crate depends on no workspace crate, which is what lets the
-//! workshop and gateway families both use it without a cross-family edge. Harness crates may not depend on it, because `promptforge` is
+//! workshop and gateway families both use it without a cross-family edge. Harness crates may not depend on it, because `runvil` is
 //! their only outside dependency.
 //!
 //! `#[error(transparent)]` delegates both `Display` and `source()` to the

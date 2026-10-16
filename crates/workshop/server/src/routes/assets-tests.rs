@@ -80,8 +80,8 @@ async fn every_asset_forces_revalidation() {
         "/style.css",
         "/app.css",
         "/pcm-worklet.js",
-        "/icons/promptforge-icon.png",
-        "/icons/promptforge-icon@2x.png",
+        "/icons/runvil-icon.png",
+        "/icons/runvil-icon@2x.png",
     ] {
         let (state, _state_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
@@ -124,12 +124,12 @@ async fn pcm_worklet_is_served_as_javascript() {
 
 #[tokio::test]
 async fn program_icon_is_served_as_png() {
-    assert_ui_asset("/icons/promptforge-icon.png", "image/png").await;
+    assert_ui_asset("/icons/runvil-icon.png", "image/png").await;
 }
 
 #[tokio::test]
 async fn program_icon_2x_is_served_as_png() {
-    assert_ui_asset("/icons/promptforge-icon@2x.png", "image/png").await;
+    assert_ui_asset("/icons/runvil-icon@2x.png", "image/png").await;
 }
 
 /// The code-split chunks have content-hashed names, so the test discovers

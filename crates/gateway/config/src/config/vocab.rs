@@ -45,11 +45,11 @@ pub enum QueuePolicy {
 #[non_exhaustive]
 pub enum LlamaBackend {
     /// Picks from the machine's GPUs: a Blackwell (compute capability 12.x) gets
-    /// the PromptForge CUDA build, any other NVIDIA GPU gets the upstream
+    /// the Runvil CUDA build, any other NVIDIA GPU gets the upstream
     /// CUDA build, and anything else gets Vulkan.
     #[default]
     Auto,
-    /// The PromptForge Blackwell build (`llama-cuda-blackwell` release).
+    /// The Runvil Blackwell build (`llama-cuda-blackwell` release).
     CudaBlackwell,
     /// The upstream llama.cpp CUDA 13 build.
     Cuda,

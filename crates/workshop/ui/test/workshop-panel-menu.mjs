@@ -116,7 +116,7 @@ const statusBar = {
 };
 
 let workspaceChanges = 0;
-window.addEventListener("promptforge:workspace-changed", () => {
+window.addEventListener("runvil:workspace-changed", () => {
   workspaceChanges += 1;
 });
 
@@ -426,7 +426,7 @@ panelA.dispose();
 
   const savedEntries = rootsListing.entries;
   rootsListing.entries = [];
-  window.dispatchEvent(new window.CustomEvent("promptforge:workspace-changed"));
+  window.dispatchEvent(new window.CustomEvent("runvil:workspace-changed"));
   await flush();
   const empty = panelF.element.querySelector(".ws-workshop-tree__empty");
   check(
@@ -449,7 +449,7 @@ panelA.dispose();
   await flush();
 
   rootsListing.entries = savedEntries;
-  window.dispatchEvent(new window.CustomEvent("promptforge:workspace-changed"));
+  window.dispatchEvent(new window.CustomEvent("runvil:workspace-changed"));
   await flush();
   check("granting a root clears the empty state", panelF.element.querySelector(".ws-workshop-tree__empty") === null);
   panelF.dispose();

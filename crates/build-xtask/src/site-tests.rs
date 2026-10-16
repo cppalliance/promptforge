@@ -234,7 +234,7 @@ fn every_book_page_is_checked_and_named_in_the_error() {
 fn rustdoc_pages_are_not_checked() {
     let site = tempfile::tempdir().expect("tempdir");
     write_page(site.path(), "index.html", "");
-    write_page(site.path(), "promptforge/index.html", &page(&["gone.html"]));
+    write_page(site.path(), "runvil/index.html", &page(&["gone.html"]));
     write_page(
         site.path(),
         "harness/harness/index.html",
@@ -242,12 +242,12 @@ fn rustdoc_pages_are_not_checked() {
     );
     write_page(
         site.path(),
-        "gateway/promptforge/page.html",
+        "gateway/runvil/page.html",
         &page(&["gone.html"]),
     );
     let error = check_links(site.path(), false).expect_err("only the book page is read");
     assert!(error.contains("has 1 broken links"), "{error}");
-    assert!(error.contains("gateway/promptforge/page.html"), "{error}");
+    assert!(error.contains("gateway/runvil/page.html"), "{error}");
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn a_books_404_page_is_not_checked() {
         site.path(),
         "gateway/404.html",
         &format!(
-            "<base href=\"/promptforge/gateway/\">\n{}",
+            "<base href=\"/runvil/gateway/\">\n{}",
             page(&["print.html"])
         ),
     );
@@ -284,10 +284,10 @@ fn external_mail_and_fragment_links_are_ignored() {
 fn books_only_skips_only_the_rustdoc_folders() {
     let site = site_with(&[]);
     let html = page(&[
-        "promptforge/index.html",
+        "runvil/index.html",
         "harness/index.html",
         "gateway/index.html",
-        "promptforge-extra/index.html",
+        "runvil-extra/index.html",
     ]);
     assert_eq!(
         broken_links(site.path(), "index.html", &html, false).len(),
@@ -296,16 +296,13 @@ fn books_only_skips_only_the_rustdoc_folders() {
     let broken = broken_links(site.path(), "index.html", &html, true);
     assert_eq!(broken.len(), 2, "{broken:?}");
     assert!(broken[0].contains("gateway/index.html"), "{broken:?}");
-    assert!(
-        broken[1].contains("promptforge-extra/index.html"),
-        "{broken:?}"
-    );
+    assert!(broken[1].contains("runvil-extra/index.html"), "{broken:?}");
 }
 
 #[test]
 fn books_only_skips_a_book_pages_link_into_the_rustdoc_folders() {
     let site = site_with(&[]);
-    let html = page(&["../promptforge/index.html", "../harness/index.html"]);
+    let html = page(&["../runvil/index.html", "../harness/index.html"]);
     assert_eq!(
         broken_links(site.path(), "gateway/index.html", &html, false).len(),
         2
@@ -337,7 +334,7 @@ fn the_crate_page_uses_the_underscored_crate_name() {
         "gateway_api_types/index.html"
     );
     assert_eq!(crate_page("harness"), "harness/index.html");
-    assert_eq!(crate_page("promptforge"), "promptforge/index.html");
+    assert_eq!(crate_page("runvil"), "runvil/index.html");
 }
 
 #[test]
@@ -429,21 +426,21 @@ fn every_guide_book_config_gives_its_landing_title_and_description() {
 }
 
 #[test]
-fn the_site_without_promptforge_docs_fails_naming_it_before_building() {
+fn the_site_without_runvil_docs_fails_naming_it_before_building() {
     for unset in [None, Some(OsStr::new(""))] {
         let root = tempfile::tempdir().expect("tempdir");
-        let error = site(root.path(), unset, &[]).expect_err("PROMPTFORGE_DOCS is unset");
-        assert!(error.contains("PROMPTFORGE_DOCS"), "{unset:?}: {error}");
+        let error = site(root.path(), unset, &[]).expect_err("RUNVIL_DOCS is unset");
+        assert!(error.contains("RUNVIL_DOCS"), "{unset:?}: {error}");
         assert!(!root.path().join("target").exists(), "{unset:?}");
     }
 }
 
 #[test]
-fn the_site_with_a_missing_docs_root_fails_naming_promptforge_docs_and_the_path() {
+fn the_site_with_a_missing_docs_root_fails_naming_runvil_docs_and_the_path() {
     let root = tempfile::tempdir().expect("tempdir");
     let missing = root.path().join("no-such-docs");
     let error = site(root.path(), Some(missing.as_os_str()), &[]).expect_err("missing docs root");
-    assert!(error.contains("PROMPTFORGE_DOCS"), "{error}");
+    assert!(error.contains("RUNVIL_DOCS"), "{error}");
     assert!(error.contains(&missing.display().to_string()), "{error}");
     assert!(!root.path().join("target").exists());
 }
@@ -451,15 +448,11 @@ fn the_site_with_a_missing_docs_root_fails_naming_promptforge_docs_and_the_path(
 #[test]
 fn the_stage_outputs_files_land_in_the_site_root_without_the_book_trees() {
     let staged = site_with(&["gateway/src/01-start.md", "gateway/book.toml"]);
-    write_page(
-        staged.path(),
-        "promptforge-gateway-guide.md",
-        "# The Gateway\n",
-    );
+    write_page(staged.path(), "runvil-gateway-guide.md", "# The Gateway\n");
     let site = tempfile::tempdir().expect("tempdir");
     copy_files(staged.path(), site.path()).expect("copy");
     assert_eq!(
-        read(&site.path().join("promptforge-gateway-guide.md")),
+        read(&site.path().join("runvil-gateway-guide.md")),
         "# The Gateway\n"
     );
     assert!(!site.path().join("gateway").exists());
@@ -477,9 +470,9 @@ fn the_redirect_sends_only_to_the_crate_page() {
 
 #[test]
 fn a_child_that_cannot_start_is_named() {
-    let error = run_child(&mut Command::new("promptforge-no-such-program"))
+    let error = run_child(&mut Command::new("runvil-no-such-program"))
         .expect_err("the program does not exist");
-    assert!(error.contains("promptforge-no-such-program"), "{error}");
+    assert!(error.contains("runvil-no-such-program"), "{error}");
 }
 
 #[test]

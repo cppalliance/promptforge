@@ -17,9 +17,9 @@ mod readiness;
 mod upstream_lifecycle;
 mod upstream_send;
 
-const TEST_PORT: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_PORT";
-const TEST_MODEL_ALIAS: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_MODEL_ALIAS";
-const TEST_API_KEY: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_API_KEY";
+const TEST_PORT: &str = "RUNVIL_GATEWAY_TEST_LLAMA_PORT";
+const TEST_MODEL_ALIAS: &str = "RUNVIL_GATEWAY_TEST_LLAMA_MODEL_ALIAS";
+const TEST_API_KEY: &str = "RUNVIL_GATEWAY_TEST_LLAMA_API_KEY";
 const TEST_POLICY: StartupPolicy = StartupPolicy {
     attempts: 2,
     deadline: Duration::from_secs(5),
@@ -159,8 +159,8 @@ fn respond(mut stream: TcpStream, model_alias: &str, required_api_key: Option<&s
 
 fn deterministic_identity(index: usize) -> AttemptIdentity {
     AttemptIdentity {
-        model_alias: format!("promptforge-test-model-{index}"),
-        api_key: format!("promptforge-test-key-{index}"),
+        model_alias: format!("runvil-test-model-{index}"),
+        api_key: format!("runvil-test-key-{index}"),
     }
 }
 
@@ -230,7 +230,7 @@ fn attempt_identity_and_spawn_request_debug_redact_the_token() {
     const TOKEN: &str = "super-secret-per-attempt-token";
 
     let identity = AttemptIdentity {
-        model_alias: "promptforge-local-alias".to_owned(),
+        model_alias: "runvil-local-alias".to_owned(),
         api_key: TOKEN.to_owned(),
     };
     let rendered = format!("{identity:?}");
@@ -243,7 +243,7 @@ fn attempt_identity_and_spawn_request_debug_redact_the_token() {
     let args = server_args(
         Path::new("model.gguf"),
         4242,
-        "promptforge-local-alias",
+        "runvil-local-alias",
         TOKEN,
         &options(false),
     );
@@ -252,7 +252,7 @@ fn attempt_identity_and_spawn_request_debug_redact_the_token() {
         args: &args,
         path_prefix: &[],
         port: 4242,
-        model_alias: "promptforge-local-alias",
+        model_alias: "runvil-local-alias",
         api_key: TOKEN,
     };
     let rendered = format!("{request:?}");
@@ -262,7 +262,7 @@ fn attempt_identity_and_spawn_request_debug_redact_the_token() {
     );
     assert!(rendered.contains(API_KEY_REDACTION));
     // The non-secret alias still renders, so redaction is targeted.
-    assert!(rendered.contains("promptforge-local-alias"));
+    assert!(rendered.contains("runvil-local-alias"));
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn debug_redacts_api_key() {
     assert!(rendered.contains("Secret(redacted)"));
 }
 
-const BLOCKED_CHILD_MARKER: &str = "PROMPTFORGE_GATEWAY_TEST_BLOCKED_CHILD";
+const BLOCKED_CHILD_MARKER: &str = "RUNVIL_GATEWAY_TEST_BLOCKED_CHILD";
 
 #[test]
 #[ignore = "subprocess worker: stays alive without ever serving readiness"]

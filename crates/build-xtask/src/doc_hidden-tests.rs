@@ -51,10 +51,10 @@ const HIDDEN: &[u8] = b"#[doc(hidden)]\npub struct Seam;\n";
 /// One clean source under each directory the ban covers, so none is
 /// reported missing.
 const BANNED_DIR_LIBS: [(&str, &[u8]); 4] = [
-    ("crates/promptforge/src/lib.rs", b"pub use x::Y;\n"),
+    ("crates/runvil/src/lib.rs", b"pub use x::Y;\n"),
     ("crates/harness/src/lib.rs", b"pub use x::Y;\n"),
     (
-        "crates/promptforge-internal/lua/src/lib.rs",
+        "crates/runvil-internal/lua/src/lib.rs",
         b"pub struct Plain;\n",
     ),
     (
@@ -252,12 +252,12 @@ fn a_violation_names_the_file_line_rule_required_and_found() {
 #[test]
 fn every_rs_file_under_the_facade_and_the_container_is_scanned() {
     let hidden = [
-        "crates/promptforge/tests/suite/main.rs",
-        "crates/promptforge/benches/surface.rs",
-        "crates/promptforge-internal/lua/src/nested/deep.rs",
-        "crates/promptforge-internal/lua/build.rs",
-        "crates/promptforge-internal/model-client/src/client/wire.rs",
-        "crates/promptforge-internal/stray.rs",
+        "crates/runvil/tests/suite/main.rs",
+        "crates/runvil/benches/surface.rs",
+        "crates/runvil-internal/lua/src/nested/deep.rs",
+        "crates/runvil-internal/lua/build.rs",
+        "crates/runvil-internal/model-client/src/client/wire.rs",
+        "crates/runvil-internal/stray.rs",
     ];
     let mut files = BANNED_DIR_LIBS.to_vec();
     files.extend(hidden.iter().map(|path| (*path, HIDDEN)));
@@ -291,10 +291,10 @@ fn files_outside_the_facades_and_containers_are_not_scanned() {
     files.extend([
         ("crates/workshop/server/src/lib.rs", HIDDEN),
         ("crates/gateway-api-discovery/src/lib.rs", HIDDEN),
-        ("crates/promptforge-internal-old/src/lib.rs", HIDDEN),
+        ("crates/runvil-internal-old/src/lib.rs", HIDDEN),
         ("crates/harness-internal-old/src/lib.rs", HIDDEN),
-        ("crates/promptforge-internal/target/debug/out.rs", HIDDEN),
-        ("crates/promptforge/src/notes.md", HIDDEN),
+        ("crates/runvil-internal/target/debug/out.rs", HIDDEN),
+        ("crates/runvil/src/notes.md", HIDDEN),
     ]);
     let root = tree(&files);
     let violations = doc_hidden_violations(root.path());
@@ -304,9 +304,9 @@ fn files_outside_the_facades_and_containers_are_not_scanned() {
 #[test]
 fn a_missing_facade_or_container_directory_is_reported_not_skipped() {
     for missing in [
-        "crates/promptforge",
+        "crates/runvil",
         "crates/harness",
-        "crates/promptforge-internal",
+        "crates/runvil-internal",
         "crates/harness-internal",
     ] {
         let present: Vec<_> = BANNED_DIR_LIBS
@@ -336,7 +336,7 @@ fn an_unreadable_or_unparseable_source_is_reported_not_skipped() {
         ),
         (b"pub struct Seam {\n".as_slice(), ": unparseable source: "),
     ] {
-        let path = "crates/promptforge-internal/lua/src/broken.rs";
+        let path = "crates/runvil-internal/lua/src/broken.rs";
         let mut files = BANNED_DIR_LIBS.to_vec();
         files.push((path, text));
         let root = tree(&files);

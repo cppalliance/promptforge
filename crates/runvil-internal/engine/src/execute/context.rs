@@ -1,0 +1,470 @@
+//! The execute subtree's ambient run state.
+//!
+//! [`RunState`] is built once in [`run`](super::run) and travels through
+//! the execute subtree as parameter one (`ctx: &RunState`). The
+//! invariant: a new run-scoped concern becomes a field here, never a new
+//! parameter. Per-call data (a section, a `var` snapshot) stays
+//! in parameters or on the per-section frame.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex};
+
+use runvil_types::emitter::{Emitter, EventSink};
+use runvil_types::event::Event;
+use runvil_types::ids::{ChainId, TaskId};
+use runvil_types::plugins::{PluginId, Prelude};
+use runvil_vfs::{Access, VfsRef};
+
+use crate::cancel::CancelHandle;
+use crate::lua::{ToolBinding, ToolSet};
+use crate::model::{ModelSet, ModelView};
+use crate::parser::Prompt;
+use crate::untrusted::GuardNonce;
+
+use super::config::{RunContext, RunLimits};
+use super::section_vm::{SectionVmSetup, VmSeed};
+
+#[path = "context-bound.rs"]
+mod bound;
+
+/// The context inputs a run moves into its state whole, rather than
+/// copying them out of a borrow: the `ui` snapshot, the Plugin preludes,
+/// and the roster.
+pub(super) struct OwnedInputs {
+    ui: Option<serde_json::Value>,
+    preludes: Vec<Prelude>,
+    roster: BTreeMap<PluginId, Option<String>>,
+}
+
+impl OwnedInputs {
+    /// Moves the inputs out of `ctx`, leaving their empty defaults behind.
+    pub(super) fn take(ctx: &mut RunContext) -> OwnedInputs {
+        OwnedInputs {
+            ui: ctx.ui.take(),
+            preludes: std::mem::take(&mut ctx.preludes),
+            roster: std::mem::take(&mut ctx.roster),
+        }
+    }
+}
+
+/// The ambient state one run shares across the execute subtree.
+///
+/// Immutable for the run's lifetime and cheap to clone: every field is
+/// shared ownership or `Copy`, so a clone points at the same run state.
+/// The three sanctioned forks: [`with_walk_state`](Self::with_walk_state)
+/// at the H1-to-walk handoff, [`with_task`](Self::with_task) giving a
+/// spawned chain its own task emitter and turn counter, and
+/// [`with_args`](Self::with_args) passing a `call` call's args override
+/// into its contained chain.
+#[derive(Clone)]
+pub(crate) struct RunState {
+    /// The prompt this run executes.
+    prompt: Arc<Prompt>,
+    /// The untrusted-envelope nonce, derived once here from the run's seed
+    /// so every wrap in the run shares it.
+    nonce: GuardNonce,
+    /// The run's VFS handle: the run's whole filesystem, the declared
+    /// store backing every section's Lua `store` table included. Chain
+    /// steps acquire or spawn their access capabilities from it.
+    vfs: VfsRef,
+    /// The execution identifier stamped on every observation.
+    execution: Arc<str>,
+    /// The run's argument string for `{{ args }}` substitution.
+    args: Arc<str>,
+    /// The run's `argv`: the parsed form of `args` (`None` installs nil).
+    /// At construction this is the derived value the H1 pass starts from;
+    /// the walk's fork holds the value H1 left behind at the freeze, so
+    /// an H1 repair reaches every downstream section.
+    argv: Option<Arc<serde_json::Value>>,
+    /// The run's resource limits.
+    limits: RunLimits,
+    /// The run's event buffer, shared by every chain's emitter, spawned
+    /// task chains' included, and drained once per `step` into the batch
+    /// returned to the caller.
+    events: EventSink,
+    /// This context's task-scoped emitter: the root task's at
+    /// construction, a spawned chain's own after [`with_task`](Self::with_task).
+    /// The Lua layer's seams (`require`'s library loads, `log`, teardown,
+    /// the shared tool-dispatch body) take it too, so their reports land in
+    /// the buffer in order with the scheduler's own.
+    emitter: Arc<Emitter>,
+    /// The run's cancel flag: polled between chain steps and installed on
+    /// every section VM's instruction hook. The context's one handle, the
+    /// same flag the caller watches and the run's `cancel` sets.
+    cancel: CancelHandle,
+    /// The model-turn counter this context advances: the run's, or a
+    /// spawned task chain's own from [`with_task`](Self::with_task).
+    turns: Arc<AtomicU32>,
+    /// The run's tool set: built from the prepared catalog at construction
+    /// and changed by nothing during the run, so every reader, every
+    /// section VM (H1 included) among them, shares it with no lock and no
+    /// copy.
+    tool_set: Arc<ToolSet>,
+    /// Every tool in the prepared catalog, bound under its full id: the
+    /// fallback a script `tools.call` resolves when its id names no offered
+    /// tool. Kept apart from `tool_set`, the set section VMs scope from, so
+    /// a tool left out of the offering never enters a scope.
+    catalog_bindings: Arc<BTreeMap<String, ToolBinding>>,
+    /// The run's model set as a read-only view: built from the prepared
+    /// bindings at construction. The only writer is `models.default` (a
+    /// prompt-wide fact) through the concrete handle the section VMs
+    /// share.
+    models: Arc<dyn ModelView>,
+    /// The concrete handle behind `models`, shared with every section VM
+    /// (H1 included). Readers outside the VM layer go through the view.
+    model_set: Arc<Mutex<ModelSet>>,
+    /// The run's `started_at` rendered as RFC 3339, stamped into every
+    /// section's `sys.when`, the H1 pass included.
+    when: Arc<str>,
+    /// The run's application-state snapshot; its presence gives every
+    /// section VM the `ui()` global and the raw-model-id `models.get`
+    /// fallback.
+    ui: Option<Arc<serde_json::Value>>,
+    /// The run's Plugin preludes, in install order: every section VM
+    /// installs each one before `require`.
+    preludes: Arc<[Prelude]>,
+    /// Test-only: installs the raw `tools.call_as_model` shim in every
+    /// section VM, so a fixture section can yield one model-issued
+    /// `tool_call` at the scheduler's dispatch arm without going through a
+    /// loop shim.
+    #[cfg(test)]
+    raw_shims: bool,
+}
+
+impl RunState {
+    /// Builds the context for one run of `prompt` over `ctx` and the inputs
+    /// moved out of it. The turn counter is minted here (starting at zero),
+    /// as are the run's shared tool and model sets - built from the catalog,
+    /// the roster, and the model bindings (only the bindings come from
+    /// [`RunContext::prepare`](super::RunContext::prepare), and they stay
+    /// empty on a caller-built context that skipped it) - and the full-id
+    /// bindings of `ctx`'s catalog; the nonce derives from `ctx`'s seed and
+    /// `when` renders `ctx`'s `started_at`, so two contexts over the same
+    /// inputs agree on both.
+    #[must_use]
+    pub(super) fn new(
+        prompt: Arc<Prompt>,
+        args: &str,
+        ctx: &RunContext,
+        owned: OwnedInputs,
+    ) -> Self {
+        let tool_set = Arc::new(bound::bound_tool_set(&prompt, ctx, owned.roster));
+        let model_set = Arc::new(Mutex::new(bound::bound_model_set(&prompt, ctx)));
+        let execution: Arc<str> = Arc::from(ctx.name.as_str());
+        // The root task's counter starts at the context's `provenance_start`:
+        // past any parse events the caller put in the stream ahead of the
+        // run, or at zero.
+        let events = EventSink::seeded(ctx.provenance_start);
+        // The root chain - the main walk - is task `0`.
+        let emitter = Arc::new(Emitter::new(
+            events.clone(),
+            TaskId::from(ChainId::root()),
+            Arc::clone(&execution),
+            ctx.report_debug,
+        ));
+        let derived_argv = bound::derive_argv(&prompt, args).map(Arc::from);
+        let models = Arc::clone(&model_set);
+        Self {
+            prompt,
+            nonce: GuardNonce::from_seed(&ctx.seed),
+            vfs: ctx.vfs.clone(),
+            execution,
+            args: Arc::from(args),
+            argv: derived_argv,
+            limits: ctx.limits,
+            events,
+            emitter,
+            cancel: ctx.cancel.clone(),
+            turns: Arc::new(AtomicU32::new(0)),
+            tool_set,
+            catalog_bindings: Arc::new(bound::catalog_bindings(ctx)),
+            models,
+            model_set,
+            when: Arc::from(ctx.started_at.to_rfc3339()),
+            ui: owned.ui.map(Arc::new),
+            preludes: owned.preludes.into(),
+            #[cfg(test)]
+            raw_shims: false,
+        }
+    }
+
+    /// Exposes the raw `tools.call_as_model` shim in every section VM this
+    /// run starts, so a test fixture can drive the scheduler's `tool_call`
+    /// arm with one model-issued call.
+    #[cfg(test)]
+    pub(crate) fn expose_raw_shims_for_test(&mut self) {
+        self.raw_shims = true;
+    }
+
+    /// Replaces the run's model set with `set`, as the live H1 pass would
+    /// leave it, so a test can skip the pass. Call it before the run
+    /// starts: every section VM shares the set it finds here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_models_for_test(self, set: ModelSet) -> Self {
+        *self
+            .model_set
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = set;
+        self
+    }
+
+    /// Replaces the run's tool set with `set`, so a test can arm the run
+    /// with fixture bindings its catalog doesn't carry. Call it before the
+    /// run starts: every section VM shares the set it finds here.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_tool_set(mut self, set: ToolSet) -> Self {
+        self.tool_set = Arc::new(set);
+        self
+    }
+
+    /// The prompt this run executes.
+    pub(super) fn prompt(&self) -> &Prompt {
+        &self.prompt
+    }
+
+    /// The prompt's shared handle, for a caller that must hold the tree
+    /// independently of this context's borrow.
+    pub(super) fn prompt_arc(&self) -> &Arc<Prompt> {
+        &self.prompt
+    }
+
+    /// The run's cancel flag.
+    pub(super) fn cancel(&self) -> &CancelHandle {
+        &self.cancel
+    }
+
+    /// The run's untrusted-envelope nonce.
+    pub(super) fn nonce(&self) -> &GuardNonce {
+        &self.nonce
+    }
+
+    /// The run's VFS handle.
+    pub(super) fn vfs(&self) -> &VfsRef {
+        &self.vfs
+    }
+
+    /// The execution identifier stamped on every observation.
+    pub(super) fn execution(&self) -> &str {
+        &self.execution
+    }
+
+    /// The run's argument string as the shared handle, for a renderer that
+    /// outlives this borrow.
+    pub(super) fn args_shared(&self) -> Arc<str> {
+        Arc::clone(&self.args)
+    }
+
+    /// The run's `argv`: the parsed form of the args string, or `None`
+    /// (nil) when it did not parse. On the walk this is the value H1 left
+    /// behind at the freeze.
+    pub(super) fn argv(&self) -> Option<&serde_json::Value> {
+        self.argv.as_deref()
+    }
+
+    /// The run's `argv` as the shared handle, for a renderer that outlives
+    /// this borrow.
+    pub(super) fn argv_shared(&self) -> Option<Arc<serde_json::Value>> {
+        self.argv.as_ref().map(Arc::clone)
+    }
+
+    /// The run's resource limits.
+    pub(crate) fn limits(&self) -> RunLimits {
+        self.limits
+    }
+
+    /// This context's task-scoped emitter: where every report the
+    /// scheduler makes on this chain goes.
+    pub(super) fn emitter(&self) -> &Arc<Emitter> {
+        &self.emitter
+    }
+
+    /// Drains the run's event buffer: every event pushed since the last
+    /// drain, in push order. The run's `step` calls this once per step and
+    /// returns the batch to the caller.
+    pub(super) fn take_events(&self) -> Vec<Event> {
+        self.events.take()
+    }
+
+    /// The model-turn counter this context advances.
+    pub(super) fn turns(&self) -> &Arc<AtomicU32> {
+        &self.turns
+    }
+
+    /// The run's shared tool set, the one every section VM the run
+    /// constructs holds.
+    pub(super) fn tool_set(&self) -> &Arc<ToolSet> {
+        &self.tool_set
+    }
+
+    /// The binding for the catalog tool whose full id is `id`, the
+    /// fallback a script `tools.call` resolves when the id names no offered
+    /// tool.
+    pub(super) fn catalog_binding(&self, id: &str) -> Option<&ToolBinding> {
+        self.catalog_bindings.get(id)
+    }
+
+    /// The run's model set, read-only.
+    pub(super) fn models(&self) -> &dyn ModelView {
+        &*self.models
+    }
+
+    /// The concrete handle behind the models view, shared with every
+    /// section VM the run constructs.
+    pub(super) fn model_set(&self) -> Arc<Mutex<ModelSet>> {
+        Arc::clone(&self.model_set)
+    }
+
+    /// The resolved per-section tool-loop cap: the frontmatter's
+    /// `max_tool_iterations` over the limits default.
+    fn max_tool_iterations(&self) -> usize {
+        runvil_parser::detail::max_tool_iterations(self.prompt.frontmatter())
+            .resolve(self.limits.tool_iterations().get() as usize)
+    }
+
+    /// The run's top-level section count, reported as `sys.section_count`.
+    fn section_count(&self) -> usize {
+        runvil_parser::detail::sections(&self.prompt).len()
+    }
+
+    /// The H1-to-walk handoff: the `argv` H1 left behind at the freeze,
+    /// set on a cheap clone so the context H1 saw stays untouched. The
+    /// tool and model sets need no delta: they were built at construction,
+    /// nothing writes the tool set during the run, and H1's prompt-wide
+    /// `models.default` landed in the same shared model set the view reads. `when` needs none either: it is the run's
+    /// `started_at`, the same for the pass and the walk.
+    #[must_use]
+    pub(super) fn with_walk_state(&self, argv: Option<serde_json::Value>) -> Self {
+        let mut ctx = self.clone();
+        ctx.argv = argv.map(Arc::from);
+        ctx
+    }
+
+    /// The context a contained chain runs under: `args` in place of the
+    /// run's own, because a `call` call's explicit input overrides the
+    /// run's args for the chain - and `argv` re-derives from the chain's
+    /// args, so the chain sees the parsed form of what it was passed.
+    #[must_use]
+    pub(super) fn with_args(&self, args: &str) -> Self {
+        let mut ctx = self.clone();
+        ctx.argv = bound::derive_argv(&self.prompt, args).map(Arc::from);
+        ctx.args = Arc::from(args);
+        ctx
+    }
+
+    /// The context a spawned task chain runs under: an emitter stamping
+    /// the chain's own `task` on every report, and `turns` in place of the
+    /// run's counter, so the task's turns count against its own cap.
+    #[must_use]
+    pub(super) fn with_task(&self, task: TaskId, turns: Arc<AtomicU32>) -> Self {
+        let mut ctx = self.clone();
+        ctx.emitter = Arc::new(self.emitter.for_task(task));
+        ctx.turns = turns;
+        ctx
+    }
+
+    /// The borrowed VM-setup inputs both section drivers share, sourcing the
+    /// run-wide inputs (`args`, the emitter, the shim caps, and the
+    /// preludes) from this context; the driver supplies only its own
+    /// deltas: the `sys`
+    /// JSON, the seed, the chain step's access capability (the walk's own,
+    /// a call chain's borrowed parent capability, a task chain's spawned
+    /// one), and the section name.
+    pub(super) fn vm_setup<'a>(
+        &'a self,
+        sys: &'a serde_json::Value,
+        seed: VmSeed<'a>,
+        access: &'a Arc<Access>,
+        section_name: &'a str,
+    ) -> SectionVmSetup<'a> {
+        SectionVmSetup {
+            args: &self.args,
+            argv: self.argv(),
+            argv_writable: false,
+            sys,
+            access,
+            seed,
+            emitter: &self.emitter,
+            section_name,
+            max_tool_iterations: self.max_tool_iterations(),
+            ui: self.ui.as_ref(),
+            preludes: &self.preludes,
+            #[cfg(test)]
+            raw_shims: self.raw_shims,
+        }
+    }
+
+    /// The `sys` JSON for one section or arm of this run: the six shared
+    /// fields in one construction, with the driver supplying only the
+    /// section entry's hierarchical id, the entering chain's task id, and
+    /// the section name. A driver with an extra field (`index`, on a
+    /// spawned chain) inserts it at its own call site.
+    ///
+    /// `when` is the run's `started_at` rendered as RFC 3339, the same
+    /// string in every section; `id` is the section entry's hierarchical id
+    /// (the entering chain's id extended by its local entry counter),
+    /// rendered as a dot-separated path; `taskid` is the id of the nearest
+    /// enclosing task (the main walk is task `0`; a `call` child reports
+    /// its caller's task), the handle a chain passes to `tasks.*` to speak
+    /// about itself.
+    pub(super) fn sys_json(
+        &self,
+        id: &str,
+        task_id: &TaskId,
+        section_name: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "when": &*self.when,
+            "id": id,
+            "taskid": task_id.to_string(),
+            "section_name": section_name,
+            "execution": &*self.execution,
+            "section_count": self.section_count(),
+        })
+    }
+}
+
+impl fmt::Debug for RunState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut state = f.debug_struct("RunState");
+        #[cfg(test)]
+        state.field("raw_shims", &self.raw_shims);
+        state
+            .field("prompt", &self.prompt)
+            .field("nonce", &self.nonce)
+            .field("vfs", &"<VfsRef>")
+            .field("execution", &self.execution)
+            .field("args", &self.args)
+            .field("argv", &self.argv)
+            .field("limits", &self.limits)
+            .field("events", &self.events)
+            .field("emitter", &self.emitter)
+            .field("cancel", &self.cancel)
+            .field("turns", &self.turns)
+            .field("tool_set", &self.tool_set)
+            .field(
+                "catalog_bindings",
+                &self.catalog_bindings.keys().collect::<Vec<_>>(),
+            )
+            .field("models", &"<dyn ModelView>")
+            .field("model_set", &self.model_set)
+            .field("when", &self.when)
+            .field("ui", &self.ui)
+            .field(
+                "preludes",
+                &self
+                    .preludes
+                    .iter()
+                    .map(Prelude::plugin)
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+#[cfg(test)]
+#[path = "context-tests.rs"]
+mod tests;

@@ -1,6 +1,6 @@
 ---
 name: Workshop Cursor parity
-overview: "Full visual and behavioral parity between the PromptForge workshop window and Cursor's workspace window: menu bar, file tree, agent panel (feed + input card with toolbar inside), status bar, zoom keys, auto-launch, and global typography. Every target value is extracted from Cursor's bundles and cited."
+overview: "Full visual and behavioral parity between the Runvil workshop window and Cursor's workspace window: menu bar, file tree, agent panel (feed + input card with toolbar inside), status bar, zoom keys, auto-launch, and global typography. Every target value is extracted from Cursor's bundles and cited."
 todos:
   - id: tokens
     content: Add layout tokens to style.css, update font stack and base font-size
@@ -45,7 +45,7 @@ todos:
     content: "Update pinned test values: agent-session-view, agent-toolbar, titlebar-style, workbench-mount"
     status: completed
   - id: verify
-    content: npm run build + typecheck + test; cargo build -p promptforge-workshop
+    content: npm run build + typecheck + test; cargo build -p runvil-workshop
     status: completed
 isProject: false
 ---
@@ -54,7 +54,7 @@ isProject: false
 
 All Cursor values cited from `workbench.desktop.main.css` (as `desktop.css @ <byte>`), `workbench.glass.main.css` (as `glass.css @ <byte>`), or `workbench.glass.main.js` / `workbench.desktop.main.js` (as `glass.js @ <byte>` / `desktop.js @ <byte>`).
 
-Workshop files under `promptforge/crates/promptforge-workshop-server/ui/`.
+Workshop files under `runvil/crates/runvil-workshop-server/ui/`.
 
 **Execution notes:**
 - Single commit. All CSS, TS, Rust, and test changes land together.
@@ -94,7 +94,7 @@ Change `--font-prose` and `html, body` to `"Segoe WPC", "Segoe UI", sans-serif` 
 
 ## 1. Fix zoom keys (Ctrl+= / Ctrl+-)
 
-**Root cause:** [src/main.rs](promptforge/crates/promptforge-workshop/src/main.rs) line ~200 - `WebviewWindowBuilder` does not call `.with_browser_accelerator_keys(false)`. WebView2 on Windows intercepts Ctrl+= / Ctrl+- / Ctrl+0 at the native layer for its own built-in zoom, racing or blocking the JS `keydown` handler.
+**Root cause:** [src/main.rs](runvil/crates/runvil-workshop/src/main.rs) line ~200 - `WebviewWindowBuilder` does not call `.with_browser_accelerator_keys(false)`. WebView2 on Windows intercepts Ctrl+= / Ctrl+- / Ctrl+0 at the native layer for its own built-in zoom, racing or blocking the JS `keydown` handler.
 
 **Fix (Rust, one line):** Add `.with_browser_accelerator_keys(false)` to the Windows `#[cfg]` block in `open_window`, next to the existing `.disable_drag_drop_handler()`:
 
@@ -105,7 +105,7 @@ let builder = builder
     .with_browser_accelerator_keys(false);
 ```
 
-This disables WebView2's built-in keyboard shortcuts (zoom, find, devtools F12) so the JS handler in [src/ui/workshop/shortcuts.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/shortcuts.ts) is the sole zoom path.
+This disables WebView2's built-in keyboard shortcuts (zoom, find, devtools F12) so the JS handler in [src/ui/workshop/shortcuts.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/shortcuts.ts) is the sole zoom path.
 
 **JS side:** No changes needed - `event.key` matching (`"="`, `"+"`, `"-"`, `"0"`) works fine once WebView2 stops eating the events. Numpad is not in scope (user confirmed not using numpad).
 
@@ -115,7 +115,7 @@ This disables WebView2's built-in keyboard shortcuts (zoom, find, devtools F12) 
 
 ## 2. Menu bar
 
-Files: [src/ui/window-menu.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/window-menu.ts), [src/ui/window-menu.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/window-menu.css), [src/ui/window-chrome.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/window-chrome.css)
+Files: [src/ui/window-menu.ts](runvil/crates/runvil-workshop-server/ui/src/ui/window-menu.ts), [src/ui/window-menu.css](runvil/crates/runvil-workshop-server/ui/src/ui/window-menu.css), [src/ui/window-chrome.css](runvil/crates/runvil-workshop-server/ui/src/ui/window-chrome.css)
 
 ### Menu button (title bar items)
 
@@ -158,7 +158,7 @@ Workshop already has "New Agent" in File menu (`test/window-menu.mjs` asserts th
 
 ## 3. Status bar
 
-Files: [src/ui/status-bar.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.ts), [src/ui/status-bar.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.css)
+Files: [src/ui/status-bar.ts](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.ts), [src/ui/status-bar.css](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.css)
 
 | Property | Workshop now | Cursor target | Cite |
 |---|---|---|---|
@@ -182,7 +182,7 @@ Change `--status-bar-height` token from `28px` to `22px`. Restyle `.status-bar` 
 
 ## 4. Workshop tree (explorer parity)
 
-Files: [src/ui/workshop/workshop-panel.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/workshop-panel.ts), [src/ui/workshop/zones.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/zones.css)
+Files: [src/ui/workshop/workshop-panel.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/workshop-panel.ts), [src/ui/workshop/zones.css](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/zones.css)
 
 Match Cursor's explorer tree density:
 
@@ -207,7 +207,7 @@ Header "WORKSHOP" label: add `text-transform: uppercase; font-size: 11px; font-w
 
 ## 5. Agent panel - feed and messages
 
-Files: [src/ui/agent-session-view.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session-view.ts), [src/ui/agent-session.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session.css)
+Files: [src/ui/agent-session-view.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session-view.ts), [src/ui/agent-session.css](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session.css)
 
 ### Feed column (centered, max-width)
 
@@ -236,7 +236,7 @@ Files: [src/ui/agent-session-view.ts](promptforge/crates/promptforge-workshop-se
 
 ### Markdown conversation text
 
-[src/ui/markdown-render.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/markdown-render.css):
+[src/ui/markdown-render.css](runvil/crates/runvil-workshop-server/ui/src/ui/markdown-render.css):
 - `.markdown-content`: `font-size: 13px; line-height: 18px` -> `var(--font-size-lg, 14px)` / `var(--line-height-lg, 22px)`
 - Source: Cursor default `--conversation-text-font-size: var(--cursor-font-size-lg)` @ `glass.css @ ~638238`
 
@@ -246,7 +246,7 @@ Files: [src/ui/agent-session-view.ts](promptforge/crates/promptforge-workshop-se
 
 ## 6. Agent panel - input card (toolbar inside)
 
-### DOM restructure in [src/ui/agent-session-view.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-session-view.ts)
+### DOM restructure in [src/ui/agent-session-view.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-session-view.ts)
 
 **Before:**
 ```
@@ -286,12 +286,12 @@ Changes:
 - `display: flex; flex-direction: column; gap: 0; align-items: stretch; background: var(--prompt-input-bg); border: 1px solid var(--prompt-input-border); border-radius: var(--agent-card-radius, 18px); overflow: hidden; padding: 0`
 - Remove: old `border-top`, `padding: 12px`, `gap: 8px`, `align-items: flex-end`
 
-**`.prompt-input`** ([src/ui/prompt-input.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/prompt-input.css)):
+**`.prompt-input`** ([src/ui/prompt-input.css](runvil/crates/runvil-workshop-server/ui/src/ui/prompt-input.css)):
 - Remove: `border`, `border-radius` (chrome moves to the card)
 - Background: `transparent`
 - Editor padding `8px 12px` and min/max height `36px`/`200px` are already correct (match Cursor @ `glass.js @ ~18689503`)
 
-**`.agent-toolbar`** ([src/ui/agent-toolbar.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-toolbar.css)):
+**`.agent-toolbar`** ([src/ui/agent-toolbar.css](runvil/crates/runvil-workshop-server/ui/src/ui/agent-toolbar.css)):
 - `block-size: var(--height-base, 28px)` -> `min-block-size: var(--height-base, 28px)` (let content breathe)
 - `gap: var(--space-1, 4px)` -> `var(--space-2, 8px)` (Cursor toolbar gap @ `glass.js @ ~17641530`)
 - Add: `padding: var(--space-2, 8px) var(--space-2-5, 10px) var(--space-2-5, 10px)` (Cursor `--prompt-input-toolbar-padding` @ `glass.js @ ~18689503`)
@@ -303,7 +303,7 @@ Changes:
 
 ### Tool-call cards
 
-[src/ui/tool-call-card.css](promptforge/crates/promptforge-workshop-server/ui/src/ui/tool-call-card.css):
+[src/ui/tool-call-card.css](runvil/crates/runvil-workshop-server/ui/src/ui/tool-call-card.css):
 - `.tool-call-card` radius: `var(--radius, 6px)` -> `var(--bubble-radius, 12px)` (Cursor `--conversation-surface-border-radius` @ `glass.css @ ~498261`)
 - `.tool-call-card__body` padding-inline: `12px` -> `10px`, gap: `8px` -> `6px` (Cursor `--conversation-tool-card-padding-x: 10px`, `--conversation-tool-card-gap: 6px` @ `glass.css @ ~638238`)
 - `.tool-call-card__summary` padding-inline: `8px 12px` -> `6px 10px` (Cursor tight-x 6px, right 10px)
@@ -319,7 +319,7 @@ Changes:
 
 ## 7. Auto-launch agent (skip the menu)
 
-Files: [src/ui/workshop/agent-panel.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/workshop/agent-panel.ts), [src/ui/agent-menu.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/agent-menu.ts)
+Files: [src/ui/workshop/agent-panel.ts](runvil/crates/runvil-workshop-server/ui/src/ui/workshop/agent-panel.ts), [src/ui/agent-menu.ts](runvil/crates/runvil-workshop-server/ui/src/ui/agent-menu.ts)
 
 Currently `AgentPanel.init()` shows `AgentMenu` (the "Launch an agent to start a session" screen) and waits for a click. Change to:
 
@@ -350,14 +350,14 @@ No other stray controls identified. The agent mode chip, model picker, and token
 
 ## 9. Build and verify
 
-From `promptforge/crates/promptforge-workshop-server/ui/`:
+From `runvil/crates/runvil-workshop-server/ui/`:
 - `npm run build`
 - `npm run typecheck`
 - `npm test`
 
 From workspace root:
-- `cargo build -p promptforge-workshop` (confirms esbuild layer plugin + Rust `with_browser_accelerator_keys` compiles)
-- `cargo test -p promptforge-workshop` (if any Rust tests exist)
+- `cargo build -p runvil-workshop` (confirms esbuild layer plugin + Rust `with_browser_accelerator_keys` compiles)
+- `cargo test -p runvil-workshop` (if any Rust tests exist)
 
 ---
 

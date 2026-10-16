@@ -94,7 +94,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
 
 - Actors and workflows:
   - A gateway operator leaves `[stt] whisper_backend` at `auto`, or sets `cpu` or `cuda`, and restarts the gateway.
-  - After this work merges, anyone with write access to `cppalliance/promptforge` dispatches the whisper build workflow on `master` for the tag. One commit then pins the two new rows' digests from the release's `SHA256SUMS`.
+  - After this work merges, anyone with write access to `cppalliance/runvil` dispatches the whisper build workflow on `master` for the tag. One commit then pins the two new rows' digests from the release's `SHA256SUMS`.
 - Inputs and outputs:
   - Input: `[stt] whisper_backend` is `auto` (the default), `cpu`, or `cuda`. Serialization omits it when it is `auto`.
   - Machine inputs to selection: the NVIDIA probe's answer, which is each GPU's compute capability and the driver version; whether `CUDA_VISIBLE_DEVICES` hides every GPU; on Linux, whether the machine's `libstdc++.so.6` defines the CUDA build's `GLIBCXX` version; and the CPU's instruction-set extensions.
@@ -211,7 +211,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - whisper.cpp b4938 polls the callback after each encoder pass, one per 30 s window, and after each decoder step, never inside a graph computation. The pass then returns -6, -8, or -9, which surfaces as the existing `WhisperError::Inference`.
     - The decode's job is then released, `wait_until_idle` returns, and the speech engine's workers join.
     - A load (`whisper_init`) has no abort, so it keeps its residual risk.
-  - The native fixture configs in `crates/gateway/stt/api/tests/common/mod.rs`, `crates/gateway/stt/api/src/batch-native-tests.rs`, and `crates/gateway/app/tests/it/realtime_stt.rs` set `whisper_backend` from a test-only `PROMPTFORGE_WHISPER_BACKEND`, defaulting to `cpu`. It sits beside the existing `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO`, and the `native-whisper` job in `.github/workflows/stt-miri.yml` sets it to `cuda`.
+  - The native fixture configs in `crates/gateway/stt/api/tests/common/mod.rs`, `crates/gateway/stt/api/src/batch-native-tests.rs`, and `crates/gateway/app/tests/it/realtime_stt.rs` set `whisper_backend` from a test-only `RUNVIL_WHISPER_BACKEND`, defaulting to `cpu`. It sits beside the existing `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL`, and `RUNVIL_WHISPER_AUDIO`, and the `native-whisper` job in `.github/workflows/stt-miri.yml` sets it to `cuda`.
   - `Gateway::serve`, in `crates/gateway/app/src/runner.rs`, keeps a clone of the process's `SpeechService` under the `stt` feature.
     - After the bounded command-worker join, it runs `SpeechService::shutdown` on `spawn_blocking` under a deadline shared with that join.
     - On expiry it logs a warning and abandons the call, as the join abandons a stuck command.
@@ -231,7 +231,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - `gateway.local.example.toml`: a commented `whisper_backend` line with the three values.
     - `guide/src/gateway/05-speech.md`: the two builds on Windows x86-64 and Linux x86-64, how the setting chooses between them, the Linux CUDA build's driver floor with the `auto` fallback below it, and the x86 CPU baseline. The `[stt]` row in `crates/gateway/app/README.md` and the example config state the floor and the baseline too.
     - `guide/src/gateway/04-local-models.md`: the `whisper.cpp/` cache directory, with one directory per pinned build, such as `b4938-windows-x86_64` and `b4938-linux-x86_64-cuda`.
-    - `guide/promptforge-gateway-guide.md`, the assembled guide, carries the same two changes.
+    - `guide/runvil-gateway-guide.md`, the assembled guide, carries the same two changes.
     - `crates/gateway/app/README.md`: the `whisper_backend` row in the `[stt]` table, matching the `[local]` table's `llama_backend` row, and the speech-runtime sentence.
     - The fixes extend the same four places, and the assembled guide is regenerated:
       - `auto`'s requirements: the Windows floor and native capabilities, the Linux C++ runtime (a GCC 12 or later `libstdc++`, which RHEL 9 and Amazon Linux 2023 lack), and hidden GPUs.
@@ -281,7 +281,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - the realtime authentication test that served one speech service from two servers gives each server its own.
 - Integration and end-to-end:
   - Tests that go through provisioning, the native fixtures included, pass an explicit backend, so no test depends on the machine's GPUs. The existing warm-cache reuse and no-older-ABI tests keep passing under the new signature.
-  - On a Linux x86-64 machine with `nvidia-smi` on PATH (WSL here), the ignored native suites pass without `PROMPTFORGE_WHISPER_BACKEND` and use the pinned CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and the gateway's realtime native test.
+  - On a Linux x86-64 machine with `nvidia-smi` on PATH (WSL here), the ignored native suites pass without `RUNVIL_WHISPER_BACKEND` and use the pinned CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and the gateway's realtime native test.
   - The Linux CUDA job's shell steps run in a scratch directory on a Linux x86-64 machine before the workflow change lands, publishing nothing. WSL2 is enough.
     - Expect a successful build, a stub smoke-load that reports CUDA, and `ldd` resolving every library inside the package.
     - A container with no driver refuses the load on `libcuda.so.1`.
@@ -334,11 +334,11 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - An explicit `cuda` is honored as given. Below the Linux floor it can end the gateway at the first transcription on a GPU without native code in the build, which the docs state.
   - Selection checks the x86 CPU baseline under every setting and fails the speech load with a named error, so a machine below the baseline loses speech rather than the gateway.
     - It covers every x86 row because they share the baseline, which also closes the same exposure in the older Linux CPU and Windows CUDA rows.
-  - The native fixtures read a test-only backend variable that defaults to `cpu`, and CI's native job sets `cuda`, following the existing `PROMPTFORGE_WHISPER_*` fixture variables.
+  - The native fixtures read a test-only backend variable that defaults to `cpu`, and CI's native job sets `cuda`, following the existing `RUNVIL_WHISPER_*` fixture variables.
   - The machine-capability and fixture fixes join this plan ahead of the pins, in the user's words: "Fold these fixes into the whisper plan ahead of its checksum step." The pins land last, after merge, because they make the fixed paths reachable.
   - One pull request, #91, merges before the release, and one commit after merge pins both new rows. The user asked for it: "When the PR gets merged into upstream master after review, anyone can run the workflow, update the checksum lists in a single commit."
     - It follows master's Blackwell llama-server row. `66f8f95f` added that row with an all-zero digest and a placeholder comment, and after the first release run `56feb2dd` pinned it in one commit.
-    - It replaces the dispatch from the pull request's head, which needed that head pushed to `cppalliance/promptforge` and published archives from workflow changes no reviewer had approved. That dispatch had replaced the earlier two-PR landing.
+    - It replaces the dispatch from the pull request's head, which needed that head pushed to `cppalliance/runvil` and published archives from workflow changes no reviewer had approved. That dispatch had replaced the earlier two-PR landing.
     - Consequence: until the pin commit, `master`'s `auto` sends a Linux NVIDIA machine on driver 570 or later, and a Windows machine whose probe finds no NVIDIA GPU, to an unpinned row whose speech load fails. `cpu` on Linux and `cuda` on Windows keep today's builds. The Blackwell row had the same window.
     - The machine requirements the fixes add widen the Windows side of that window. A Windows NVIDIA machine they turn away, such as one with a Turing GPU or a driver older than 580, also reaches the unpinned CPU row until the pin commit, and `cuda` keeps it on the pinned CUDA build.
   - The setting lives in `[stt]`, not `[local]`. It is a speech concern read at speech boot, and `[local]` configures llama-server and the cache.
@@ -383,10 +383,10 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
   - A separate workflow and release tag for the CUDA build: it duplicates the Linux flags and packaging and splits one tag across two releases. Revisit if a build ever needs a different whisper.cpp tag than the other rows.
   - Re-dispatching the workflow as it is: it would replace the five pinned archives with rebuilt ones whose digests differ. No revisit condition.
   - `auto` using the CUDA build only once it is installed, with a test load before committing to it: no precedent does either, and llama-server's `auto` detects and downloads. Revisit if GPU machines commonly want the CPU build, which `cpu` already gives them.
-  - Runtime backend loading inside ggml, with one archive per platform: PromptForge's own builds do not use it, and whisper.cpp at `b4938` does not load backends itself, so it would need new FFI surface. Revisit if whisper.cpp starts loading its backends itself.
+  - Runtime backend loading inside ggml, with one archive per platform: Runvil's own builds do not use it, and whisper.cpp at `b4938` does not load backends itself, so it would need new FFI surface. Revisit if whisper.cpp starts loading its backends itself.
   - Compiling the Linux CUDA build on every push: the GitHub-hosted compile is slow, and master already keeps its GitHub-hosted Blackwell CUDA compile manual. Revisit if a self-hosted Linux runner becomes available.
   - A pull-request trigger for the workflow: it has none, and changes are checked by local dry runs before landing and by the push run after. No revisit condition.
-  - An operator path override for the whisper library: llama-server has one (`llama_server_path` and `PROMPTFORGE_LLAMA_SERVER`), but it is a separate feature this work does not need, since both new builds are published. Revisit if an operator needs a build this repository does not publish.
+  - An operator path override for the whisper library: llama-server has one (`llama_server_path` and `RUNVIL_LLAMA_SERVER`), but it is a separate feature this work does not need, since both new builds are published. Revisit if an operator needs a build this repository does not publish.
   - A warning when the setting is set on a platform with one build: `llama_backend` has none, and the docs say where the setting is consulted. No revisit condition.
   - A config UI control: `llama_backend` has none either, and the Speech card already preserves the field. Revisit if the UI gains controls for build selection generally.
   - Matching the GPU's compute capability against the archive's native-code list: it couples selection to device code frozen at dispatch. Revisit if a second CUDA build with a different list is added. That condition was met, and the Windows row now matches, as the Decisions record.
@@ -438,7 +438,7 @@ Before the first implementation change, run `/export-vibe-plan`. It writes this 
     - `speech.gpu` reporting how a build was compiled even when ggml finds no device;
     - the test-only eager gateway constructor that provisions speech before binding.
   - The `workshop-gateway` fixture race is pre-existing and tracked apart from this plan.
-  - The post-merge release needs someone with write access to `cppalliance/promptforge` to dispatch it, and the self-hosted Windows CUDA runner online.
+  - The post-merge release needs someone with write access to `cppalliance/runvil` to dispatch it, and the self-hosted Windows CUDA runner online.
   - wg21-website's Talktron gateway guide, `docs/talktron-gateway.md`, depends on this work.
     - Today it installs the CUDA build by setting `cuda` and returning to `auto`. With detection, a native Linux machine with driver 570 or later leaves `auto`, and the WSL2 reference machine sets `cuda` or extends the unit's PATH.
     - Its checks read the `provisioned whisper library` line for the build. The path names it on stdout and in the journal but is redacted in `gateway.log`, where `/admin/status`'s `speech.gpu` is the check that holds.
@@ -453,12 +453,12 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `cargo build --locked -p gateway`; plain `cargo build` builds the same `default-members` crate, `crates/gateway/app`. Default features are `local`, `web-search`, `config-ui`, `stt`; `config-ui` bundles `crates/gateway/config-ui/ui` with esbuild, so `npm ci --prefix crates/gateway/config-ui/ui` must have run (its `node_modules` is present on this machine).
   - Headless shape: `cargo build --locked -p gateway --no-default-features`. Desktop app: `cargo workshop` (alias of `cargo run -p build-workshop --`) after `npm ci --prefix crates/workshop` (its `node_modules` is absent on this machine).
   - Toolchain: stable per `rust-toolchain.toml` (cargo and rustc 1.98.0 here), edition 2024, resolver 3, no `rust-version` declared. Windows links with `rust-lld` and `+crt-static` (`.cargo/config.toml`).
-  - On this machine every cargo command runs in WSL2 through `bash vibe/scratch/wsl-cargo.sh <cargo args>` (Ubuntu-24.04, cargo 1.98.1, target directory `~/promptforge-verify-target`, with `RUSTFLAGS` and `RUSTDOCFLAGS` passed through). `crates/gateway/config-ui/ui/node_modules` is a Linux install that the operator's WSL Talktron gateway build uses, so a Windows build of `gateway-config-ui` finds no `esbuild.cmd` and fails; the operator chose to keep it. `cargo xtask site --books-only` still runs on Windows, where mdBook 0.4.44 is installed.
+  - On this machine every cargo command runs in WSL2 through `bash vibe/scratch/wsl-cargo.sh <cargo args>` (Ubuntu-24.04, cargo 1.98.1, target directory `~/runvil-verify-target`, with `RUSTFLAGS` and `RUSTDOCFLAGS` passed through). `crates/gateway/config-ui/ui/node_modules` is a Linux install that the operator's WSL Talktron gateway build uses, so a Windows build of `gateway-config-ui` finds no `esbuild.cmd` and fails; the operator chose to keep it. `cargo xtask site --books-only` still runs on Windows, where mdBook 0.4.44 is installed.
 - Focused test command pattern:
   - CI form: `cargo nextest run --locked -p <package> --all-features [<filter>]`. cargo-nextest is not installed on this machine (`cargo nextest` is "no such command"), so run `cargo test --locked -p <package> --all-features [--lib | --test it] [<module-path filter>]`.
   - This plan's areas: `cargo test --locked -p gateway-config --lib -- config::tests:: config::stt::tests::` (submodules `validation::`, `schema::`, `serialize::`, plus the inline tests in `config/stt.rs`, which `config::tests::` alone does not match), `cargo test --locked -p gateway-local --lib artifacts::assets::tests::`, `cargo test --locked -p gateway-local --lib artifacts::tests::`, `cargo test --locked -p gateway-stt --all-features --lib artifacts::tests::`.
   - One crate's doctests: `cargo test --locked --doc -p <package>`.
-  - Native whisper tests are `#[ignore]`d; they run as `-- --ignored --test-threads=1` with `PROMPTFORGE_WHISPER_LIBRARY`, `PROMPTFORGE_WHISPER_MODEL`, and `PROMPTFORGE_WHISPER_AUDIO` set, as `.github/workflows/stt-miri.yml` does on the self-hosted Windows CUDA runner.
+  - Native whisper tests are `#[ignore]`d; they run as `-- --ignored --test-threads=1` with `RUNVIL_WHISPER_LIBRARY`, `RUNVIL_WHISPER_MODEL`, and `RUNVIL_WHISPER_AUDIO` set, as `.github/workflows/stt-miri.yml` does on the self-hosted Windows CUDA runner.
 - Full-suite test command:
   - `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features`, then `cargo test --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features --doc`; the workshop trio runs apart as `cargo nextest run --locked -p workshop -p workshop-server -p workshop-server-api`.
   - Without nextest: `cargo test --locked --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-features` also runs the doctests, but loses `.config/nextest.toml`'s `heavy` group that throttles `gateway-stt` and `gateway-stt-backend-whisper`.
@@ -468,41 +468,41 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `cargo clippy --workspace --exclude workshop --exclude workshop-server --exclude workshop-server-api --all-targets --all-features -- -D warnings`; workshop: `cargo clippy -p workshop -p workshop-server -p workshop-server-api --all-targets -- -D warnings`.
   - `cargo fmt --all --check` (`rustfmt.toml`: `style_edition = "2024"`). Headless gate: `cargo check -p gateway --no-default-features`.
   - On this machine the WSL toolchain has no clippy or rustfmt component. So `cargo fmt --all --check`, and clippy for crates that do not build the config UI, such as `gateway-config`, `gateway-local`, and `gateway-stt`, run with the Windows toolchain.
-  - Docs: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; CI also runs `cargo doc -p promptforge --no-deps` and `cargo doc -p harness --no-deps`. Books: `cargo xtask site --books-only`, which runs `$MDBOOK` (default `mdbook`, CI pins mdBook 0.4.44); mdbook is not installed here, so point `MDBOOK` at a binary.
+  - Docs: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server --exclude workshop-server-api`; CI also runs `cargo doc -p runvil --no-deps` and `cargo doc -p harness --no-deps`. Books: `cargo xtask site --books-only`, which runs `$MDBOOK` (default `mdbook`, CI pins mdBook 0.4.44); mdbook is not installed here, so point `MDBOOK` at a binary.
   - CI's STT gates: `RUSTFLAGS="-D warnings" cargo rustc --locked -p <crate> --lib -- -F unsafe-code` for `gateway-stt-engine`, `gateway-stt-backend-whisper`, and `gateway-stt`; `RUSTFLAGS="-D warnings" cargo check --locked -p gateway-whisper-ffi --lib`.
-  - Supply chain: `cargo deny check` (installed here), `cargo audit` (CI). Facade surface: `cargo +nightly-2026-09-05 xtask api --check`, needed only when the `promptforge` facade changes; that nightly is not installed here.
+  - Supply chain: `cargo deny check` (installed here), `cargo audit` (CI). Facade surface: `cargo +nightly-2026-09-05 xtask api --check`, needed only when the `runvil` facade changes; that nightly is not installed here.
   - UI: `npm run typecheck`, `npm run build`, `npm test` in `crates/gateway/config-ui/ui`; `npm run typecheck --workspaces --if-present` and `npm test --workspaces --if-present` in `crates/workshop`.
   - Workflows have no linter (no actionlint or shellcheck in the repository); dry runs and push runs check them.
   - `.githooks/pre-commit` (fmt) and `.githooks/pre-push` (headless check, clippy, cargo deny) exist, but `core.hooksPath` is unset here, so neither runs.
 - Test placement and naming conventions:
   - Unit tests live with their module in one of three forms: an inline `#[cfg(test)] mod tests { ... }` at the end of the file (`artifacts/assets.rs`, `config/stt.rs`); a kebab sibling, `#[cfg(test)] #[path = "foo-tests.rs"] mod tests;` (`staging-tests.rs`, `gguf-tests.rs`); or `mod tests;` in the module directory (`artifacts/tests.rs`; `config/tests.rs` with `config/tests/{schema,serialize,validation}.rs`).
-  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/main.rs` in the `promptforge` and `harness` facades), with `tests/common/` helpers and `tests/fixtures/` data; the gateway's is `cargo test -p gateway --test it`. A few targets stand alone, such as `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`.
+  - Integration tests are one binary per crate at `tests/it/main.rs` (`tests/suite/main.rs` in the `runvil` and `harness` facades), with `tests/common/` helpers and `tests/fixtures/` data; the gateway's is `cargo test -p gateway --test it`. A few targets stand alone, such as `crates/gateway/stt/backend-whisper/tests/native_whisper.rs`.
   - Names are snake_case sentences stating the behavior (`provision_whisper_library_reuses_a_verified_install`, `no_nvidia_gpu_selects_vulkan`). `clippy.toml` lets tests `unwrap` and `expect`; product code may not.
   - Test-only hooks sit behind `test-fixtures`, `test-support`, or `test-helpers` features; `gateway` and `gateway-stt` dev-depend on themselves with `test-fixtures`. Public `gateway-config` types carry `# Examples` doctests.
   - TypeScript and JavaScript tests are `node --test` `.mjs` files: `src/**/*.test.mjs` in the config UI, `test/**/*.mjs` plus `src/**/*.test.mjs` in the Workshop UI, and `tools/*.test.mjs` beside their scripts.
 - Directory map:
   - Languages seen: Rust, TypeScript, CSS, JavaScript (`.mjs`), Python (`tools/scripts/`, workflow smoke-loads), PowerShell and bash (workflows, hooks), Lua (prompt code fences, vendored `mlua`), Jinja (`crates/gateway/local/src/chat_templates/`), TOML, YAML, Markdown.
-  - `crates/` root, the public layer: `promptforge` (Engine facade), `harness` (Harness facade), `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a crate), `workspace-hack` (cargo-hakari), and the `build-*` tools (`build-xtask`, `build-user-guide`, `build-ui`, `build-workshop`, `build-llama-cuda`).
+  - `crates/` root, the public layer: `runvil` (Engine facade), `harness` (Harness facade), `gateway-api-types`, `gateway-api-discovery`, `shared-error-source`, `shared-loopback`, `shared-ui` (TypeScript and CSS package, not a crate), `workspace-hack` (cargo-hakari), and the `build-*` tools (`build-xtask`, `build-user-guide`, `build-ui`, `build-workshop`, `build-llama-cuda`).
   - Private manifestless family containers:
-    - `crates/promptforge-internal/`: `engine`, `lua`, `parser`, `model-client`, `types`, `vfs`.
+    - `crates/runvil-internal/`: `engine`, `lua`, `parser`, `model-client`, `types`, `vfs`.
     - `crates/gateway/`: `app`, `cloud-providers`, `config`, `config-ui`, `local`, `logging`, `progress`, `protocol`, `routing`, `web-search`, and `stt/` (`api`, `engine`, `backend-whisper`, `whisper-ffi`).
     - `crates/workshop/`: `desktop`, `server`, `server-api`, `gateway`, `menu`, `protocol`, `registry`, `status`, `support`, `user-state`, `workspace`, and the TypeScript packages `ui`, `look`, `platform`.
     - `crates/harness-internal/`: `log`, `models`, `plugins`, `runner`, `sessions`, `web`, `webfetch`, `web-search`.
     - `Cargo.toml` enumerates every member explicitly and sets `default-members = ["crates/gateway/app"]`.
-  - `guide/`: mdBook chapters in `guide/src/{gateway,workshop,language}/` (numbered) and `guide/src/introduction.md`, plus `books/`, `chrome/`, `landing/`; `guide/promptforge-<set>-guide.md` are generated single-file exports.
-  - `.github/workflows/`: `ci.yml` (fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface, ci-green), `stt-miri.yml`, `whisper-lib.yml`, `llama-cuda-blackwell.yml`, `nightly.yml`, `promptforge-gateway-v-release.yml`, `gateway-release-test.yml`, `release-workshop.yml`, `workshop-installer-smoke.yml`, `site.yml`, `dist-ci/`; `.github/fixtures/` holds the workshop package smoke configs.
+  - `guide/`: mdBook chapters in `guide/src/{gateway,workshop,language}/` (numbered) and `guide/src/introduction.md`, plus `books/`, `chrome/`, `landing/`; `guide/runvil-<set>-guide.md` are generated single-file exports.
+  - `.github/workflows/`: `ci.yml` (fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface, ci-green), `stt-miri.yml`, `whisper-lib.yml`, `llama-cuda-blackwell.yml`, `nightly.yml`, `runvil-gateway-v-release.yml`, `gateway-release-test.yml`, `release-workshop.yml`, `workshop-installer-smoke.yml`, `site.yml`, `dist-ci/`; `.github/fixtures/` holds the workshop package smoke configs.
   - Tooling: `.config/` (nextest, hakari), `.cargo/config.toml` (aliases `cargo xtask`, `cargo workshop`), `.githooks/`, `tools/` (Node sidecar staging and TTS scripts; Python in `tools/scripts/`).
   - Other trees: `prompts/` (example prompt documents), `images/`, `vibe/` (exported plans, `archdoc.md`, analyses, monthly archives `vibe/YYYY-MM/`), `target/` (ignored).
   - Root files: `gateway.local.example.toml` (sample gateway config), `deny.toml`, `dist-workspace.toml` (cargo-dist gateway packaging), `rust-toolchain.toml`, `rustfmt.toml`, `clippy.toml`, `AGENTS.md`, `README.md`, `LICENSE` (BSL-1.0).
 - Component boundaries (archdoc components; arrows are Cargo normal edges read from `cargo metadata`):
-  - Executor, Lua VM boundary, VFS layer: `promptforge` -> `promptforge-engine` -> parser, lua, model-client, vfs, types; parser -> lua; lua -> model-client, vfs. `promptforge-types` has no dependencies and `promptforge-vfs` is std-only. Outside crates name only `promptforge`.
-  - Harness: `harness` -> `harness-sessions`, `harness-runner`, `harness-log`; `harness-sessions` -> `harness-models`, `harness-plugins`, `harness-runner`, `harness-web`; `harness-web` -> `harness-webfetch`, `harness-web-search`. Every Harness crate reaches the Engine only through `promptforge` and names no gateway or workshop crate.
+  - Executor, Lua VM boundary, VFS layer: `runvil` -> `runvil-engine` -> parser, lua, model-client, vfs, types; parser -> lua; lua -> model-client, vfs. `runvil-types` has no dependencies and `runvil-vfs` is std-only. Outside crates name only `runvil`.
+  - Harness: `harness` -> `harness-sessions`, `harness-runner`, `harness-log`; `harness-sessions` -> `harness-models`, `harness-plugins`, `harness-runner`, `harness-web`; `harness-web` -> `harness-webfetch`, `harness-web-search`. Every Harness crate reaches the Engine only through `runvil` and names no gateway or workshop crate.
   - Gateway:
-    - `gateway` (bin `promptforge-gateway`) -> config, logging, progress, protocol, routing, `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, and the optional `gateway-local`, `gateway-stt`, `gateway-web-search`, `gateway-config-ui`.
+    - `gateway` (bin `runvil-gateway`) -> config, logging, progress, protocol, routing, `gateway-api-types`, `gateway-api-discovery`, `shared-loopback`, and the optional `gateway-local`, `gateway-stt`, `gateway-web-search`, `gateway-config-ui`.
     - Speech: `gateway-stt` -> `gateway-local`, `gateway-config`, `gateway-progress`, `gateway-stt-engine`, `gateway-stt-backend-whisper`; `gateway-stt-backend-whisper` -> `gateway-whisper-ffi`, `gateway-stt-engine`, `gateway-progress`.
     - Below speech: `gateway-local` -> config, progress, protocol, routing, `shared-error-source`; routing -> config, protocol; protocol -> config, `gateway-api-types`; `gateway-config` -> `gateway-api-types` only.
-    - Leaves: `gateway-whisper-ffi`, `gateway-stt-engine`, and `gateway-logging` have no workspace dependencies. No gateway crate names a promptforge, Harness, or workshop crate.
-  - Workshop: `workshop` (desktop) -> `workshop-server-api` -> `workshop-server` -> features (`workspace`, `user-state`) -> services (`gateway`, `menu`, `status`) -> vocabulary (`protocol`, `registry`, `support`). The server also names `harness`, `promptforge`, `gateway-api-discovery`, `shared-loopback`.
+    - Leaves: `gateway-whisper-ffi`, `gateway-stt-engine`, and `gateway-logging` have no workspace dependencies. No gateway crate names a runvil, Harness, or workshop crate.
+  - Workshop: `workshop` (desktop) -> `workshop-server-api` -> `workshop-server` -> features (`workspace`, `user-state`) -> services (`gateway`, `menu`, `status`) -> vocabulary (`protocol`, `registry`, `support`). The server also names `harness`, `runvil`, `gateway-api-discovery`, `shared-loopback`.
   - Shared: `gateway-api-types`, `shared-error-source`, and `shared-loopback` have no workspace dependencies; `gateway-api-discovery` depends only on `shared-error-source`. The `build-*` crates depend on no workspace crate; `build-ui` is a build-dependency of `workshop-server` and `gateway-config-ui`.
   - Runtime: Workshop and the Harness reach the gateway over HTTP and WebSocket through the discovery file. Archdoc A1 (bind and report readiness before provisioning, which runs through the command queue) and A5 (local model set fixed for the process lifetime) govern speech provisioning; both now sit in the `## Invariants` crate doc of `crates/gateway/app/src/lib.rs`, since `vibe/archdoc.md` was retired.
   - Drift: the archdoc's CLI component has no crate here.
@@ -514,17 +514,17 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - Errors: `thiserror` enums, `#[non_exhaustive]`, messages written for model consumption that name required versus actual. Comments state constraints only; a workaround cites its upstream issue URL.
   - Logging: `tracing` with structured fields. The gateway runs an unredacted stdout layer beside the `gateway.log` file layer (`init_logging_for_state` in `crates/gateway/app/src/main.rs`); the file layer never formats a classified field, `path` included, and replaces unlabeled local paths (`crates/gateway/logging/src/redact.rs`), so `provisioned llama-server`'s `path` reaches stdout but not `gateway.log`.
   - Workflows: top-level `permissions: contents: read`, with `contents: write` only on a publish job gated to `workflow_dispatch`. Third-party actions are pinned by commit SHA with a version comment, `actions/*` by major tag. Self-hosted jobs never run fork pull-request code. The GitHub-hosted CUDA compile is dispatch-only (`llama-cuda-blackwell.yml`: `windows-2022`, `timeout-minutes: 240`).
-  - Guide: chapters are hand-edited, with no em-dash or double-dash, four-backtick fences, and one line per paragraph (`guide/CONTRIBUTING.md`); the `guide/promptforge-<set>-guide.md` exports come only from `cargo run -p build-user-guide`.
+  - Guide: chapters are hand-edited, with no em-dash or double-dash, four-backtick fences, and one line per paragraph (`guide/CONTRIBUTING.md`); the `guide/runvil-<set>-guide.md` exports come only from `cargo run -p build-user-guide`.
   - Line endings: `.gitattributes` forces LF, CRLF for `.ps1` and `.bat`.
   - Commits: imperative subject with no prefix, a prose paragraph on the behavior, then bullets naming the touched symbols and tests. Trailers are `Design: ...`, `Repairs: <what> @ <path>::<symbol> - <symptom>`, and `Plan: vibe/<plan>.md`. The first step's commit adds the exported plan and a `vibe/ACTIVE` file naming it; a final `Close plan: <words>` commit deletes `vibe/ACTIVE`.
   - Run state: the ledger is `vibe/scratch/vibe-ledger.md` and verification logs go under `vibe/scratch/logs/`, both ignored through `vibe/.gitignore` (`/scratch`); review findings go to the repository-root `vibe-review.md`, which the root `.gitignore` ignores. None of them is tracked, because the repository no longer keeps run ledgers in version control.
-  - Remotes: `origin` is the fork `wpak-ai/promptforge`; `upstream` is `cppalliance/promptforge`.
+  - Remotes: `origin` is the fork `wpak-ai/runvil`; `upstream` is `cppalliance/runvil`.
   - Tooling on this machine: `gh`, `python`, WSL2 Ubuntu-24.04, `nvidia-smi` with two RTX 3090 GPUs, and CMake only inside Visual Studio 18 (`C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`, not on PATH).
 - Rules manifest (22 tracked `AGENTS.md`, each governing its own directory's subtree):
   - `AGENTS.md`: the whole repository.
   - Root crates: `crates/gateway-api-discovery/AGENTS.md`, `crates/harness-gateway-client/AGENTS.md`, `crates/shared-loopback/AGENTS.md`, `crates/shared-ui/AGENTS.md`.
   - Gateway: `crates/gateway/{app,config,logging,progress}/AGENTS.md` and `crates/gateway/stt/{engine,whisper-ffi}/AGENTS.md`; `cloud-providers`, `config-ui`, `local`, `protocol`, `routing`, `web-search`, `stt/api`, and `stt/backend-whisper` have none.
-  - PromptForge: `crates/promptforge-internal/{engine,lua,types,vfs}/AGENTS.md`.
+  - Runvil: `crates/runvil-internal/{engine,lua,types,vfs}/AGENTS.md`.
   - Harness: no harness-internal crate has an `AGENTS.md`; `harness-plugins` and `harness-runner` state their rules in their `lib.rs` `## Invariants` blocks.
   - Workshop: `crates/workshop/AGENTS.md` (the whole family and its npm workspace), `crates/workshop/{desktop,server,ui,look,platform}/AGENTS.md`, and `crates/workshop/desktop/icons/AGENTS.md`.
   - Scoped rules outside AGENTS.md: `.cursor/rules/workshop-architecture.mdc` (`crates/workshop*/**`) and `.cursor/rules/workshop-spa.mdc` (the ui, look, and platform packages).
@@ -562,12 +562,12 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - Landing:
   - The work happens on branch `whisper-cuda-backend`, fast-forwarded to `master` at `a7e50ec5` before Step 1. `/export-vibe-plan` runs before Step 1.
   - `/export-vibe-plan` runs again before Step 6, before Step 8, before Step 10, and before Step 13. Each time it rewrites the plan's repository copy at its existing path, `vibe/2026-09-28-2-whisper-cuda-backend.md`, and the rewrite rides in that step's commit. The export before Step 10 carries Steps 10 to 12, and the export before Step 13 carries the fixes from the end-to-end testing.
-  - Every step reaches `master` in one pull request, #91 on `cppalliance/promptforge`, which merges after review with the two new rows fail-closed.
+  - Every step reaches `master` in one pull request, #91 on `cppalliance/runvil`, which merges after review with the two new rows fail-closed.
   - No step depends on the release, because the new rows' zero digests keep them fail-closed.
   - After merge, anyone with write access runs the release and pins both rows in one commit, as the Deferred list sets out. Until then `master` selects an unpinned row where the Functional Specification says, and never a build that can end the gateway.
   - Every step passes the Testing Plan's exit gates, and its commit carries its tests. A workflow step's dry-run results are recorded under that step in the plan's repository copy.
 - Deferred and out of scope:
-  - The post-merge release and pin commit, for anyone with write access to `cppalliance/promptforge`:
+  - The post-merge release and pin commit, for anyone with write access to `cppalliance/runvil`:
     - Dispatch `whisper-lib.yml` on `master` with `whisper_tag` `b4938`, with the self-hosted Windows CUDA runner online. The add-only publish adds the two new archives and their `SHA256SUMS` lines.
     - Confirm that the five existing archives and their `SHA256SUMS` lines are unchanged.
     - In one commit, replace the two all-zero `sha256` values in `WHISPER_ASSETS` with the new `SHA256SUMS` lines and drop the two placeholder comments, as `56feb2dd` did for the Blackwell row. The seven-row coverage test still passes.
@@ -660,7 +660,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `gateway.local.example.toml`: a commented `whisper_backend` line in `[stt]` with the three values.
   - `guide/src/gateway/05-speech.md`, under "The runtime": the two builds on Windows x86-64 and Linux x86-64, and how the setting chooses between them.
   - `guide/src/gateway/04-local-models.md`, under "The cache directory": the `whisper.cpp/` directory, with one directory per pinned build, such as `b4938-windows-x86_64` and `b4938-linux-x86_64-cuda`.
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
   - `crates/gateway/app/README.md`: the `whisper_backend` row in the `[stt]` table, matching the `[local]` table's `llama_backend` row, and the speech-runtime sentence under "Feature flags".
 - Tests:
   - In `assets.rs`, beside the `server_asset` tests: on both platforms an NVIDIA GPU selects the CUDA row, and `None` or an empty probe selects the CPU row; `Cpu` and `Cuda` select their rows whatever the probe reported; every other platform returns its single row under every setting; an unsupported platform is an error.
@@ -669,16 +669,16 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 
 ### Step 6: Give the native speech fixtures an explicit whisper backend [completed]
 
-- `crates/gateway/stt/api/src/test_fixtures/native.rs` gains a public `fixture_whisper_backend()` beside its `require_fixture` re-export. It returns the `[stt] whisper_backend` spelling from the test-only `PROMPTFORGE_WHISPER_BACKEND`, and `cpu` when that is unset. It returns the spelling rather than a `WhisperBackend`, so an unknown value fails the fixture's config parse with the error that names the accepted values.
+- `crates/gateway/stt/api/src/test_fixtures/native.rs` gains a public `fixture_whisper_backend()` beside its `require_fixture` re-export. It returns the `[stt] whisper_backend` spelling from the test-only `RUNVIL_WHISPER_BACKEND`, and `cpu` when that is unset. It returns the spelling rather than a `WhisperBackend`, so an unknown value fails the fixture's config parse with the error that names the accepted values.
 - The three native fixture configs write that spelling into `[stt]`:
   - `fixture_service_with_models_on_dedicated_thread` in `crates/gateway/stt/api/tests/common/mod.rs`;
   - `verbose_round_trip_accepts_literal_timestamp_granularities_field` in `crates/gateway/stt/api/src/batch-native-tests.rs`, whose config gains an `[stt]` section;
   - `native_speech_service` in `crates/gateway/app/tests/it/realtime_stt.rs`.
-- In `.github/workflows/stt-miri.yml`, the `native-whisper` job's `Provision pinned native fixtures` step adds `PROMPTFORGE_WHISPER_BACKEND=cuda` to `$env:GITHUB_ENV` beside the other fixture variables, so the self-hosted Windows CUDA runner keeps testing the CUDA build.
-- Checks, with the `PROMPTFORGE_WHISPER_*` fixture variables set as `stt-miri.yml` sets them:
+- In `.github/workflows/stt-miri.yml`, the `native-whisper` job's `Provision pinned native fixtures` step adds `RUNVIL_WHISPER_BACKEND=cuda` to `$env:GITHUB_ENV` beside the other fixture variables, so the self-hosted Windows CUDA runner keeps testing the CUDA build.
+- Checks, with the `RUNVIL_WHISPER_*` fixture variables set as `stt-miri.yml` sets them:
   - Before the change, on this machine in WSL with `nvidia-smi` on PATH, the ignored native suites fail, because `auto` selects the unpublished, all-zero `linux-x86_64-cuda` row.
-  - After it, without `PROMPTFORGE_WHISPER_BACKEND`, they pass on the pinned `linux-x86_64` CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and `cargo test --locked -p gateway --test it realtime_stt::realtime_stt_native_incremental -- --ignored --test-threads=1`.
-  - Until the post-merge commit pins the Windows CPU row, a Windows run of those suites sets `PROMPTFORGE_WHISPER_BACKEND=cuda`, as CI does.
+  - After it, without `RUNVIL_WHISPER_BACKEND`, they pass on the pinned `linux-x86_64` CPU build: `cargo test --locked -p gateway-stt --lib -- --ignored --test-threads=1`, the same with `--test it`, and `cargo test --locked -p gateway --test it realtime_stt::realtime_stt_native_incremental -- --ignored --test-threads=1`.
+  - Until the post-merge commit pins the Windows CPU row, a Windows run of those suites sets `RUNVIL_WHISPER_BACKEND=cuda`, as CI does.
   - CI's `native-whisper` job skips fork pull requests, so it first runs after merge. It passes on the CUDA build.
 
 ### Step 7: Gate whisper selection on the machine's driver and CPU [completed]
@@ -700,7 +700,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - the `whisper_backend` row of the `[stt]` table in `crates/gateway/app/README.md`;
   - `guide/src/gateway/05-speech.md`, under "The runtime";
   - the commented `whisper_backend` lines in `gateway.local.example.toml`;
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
 - Tests:
   - In `assets.rs`, the whisper selection tests move to the new signature with the full baseline, and new ones join them:
     - under `auto` on Linux x86-64, driver 569 or an unreadable version selects `linux-x86_64`, and 570 or later selects `linux-x86_64-cuda`, while Windows x86-64 selects `windows-x86_64-cuda` at any driver version;
@@ -740,7 +740,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - the package holds what Step 2's record lists, and `dumpbin /dependents` over every DLL in it lists no `VCOMP140.DLL`;
   - the smoke-load's `whisper_print_system_info()` output has no `OPENMP` entry, where Step 2's build reported `OPENMP = 1`;
   - a probe that, on a fresh thread for each cycle, loads the library, transcribes `jfk.wav` on the CPU, and frees it, several times over, exits cleanly, where the OpenMP build ends with `0xC0000005` at the first free. One thread per load matches how the gateway and Rust's built-in test harness load the library;
-  - the ignored native suites of `gateway-whisper-ffi` and `gateway-stt-backend-whisper` pass with `PROMPTFORGE_WHISPER_LIBRARY` at the new `whisper.dll`;
+  - the ignored native suites of `gateway-whisper-ffi` and `gateway-stt-backend-whisper` pass with `RUNVIL_WHISPER_LIBRARY` at the new `whisper.dll`;
   - a `small.en` transcription of `jfk.wav`, timed on the OpenMP and OpenMP-off builds, is recorded under this step.
 - If the probe still ends the process without OpenMP, the step stops and reports, and Steps 11 and 12 wait.
 - Dry run, 2026-10-01, on this machine with Visual Studio 18's CMake and MSVC 19.51, against Step 2's OpenMP build as the control:
@@ -763,8 +763,8 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - The `gateway-stt` native suites already end their services with `SpeechService::shutdown`, and this suite now does the same at the speech engine level.
 - The speech engine, its signal-and-detach `Drop`, the FFI, and the suite's assertions do not change.
 - The pinned Windows CUDA archive, `whisper-b4938-windows-x86_64-cuda.zip` (523,565,776 bytes) from the `whisper-lib-b4938` release, is downloaded once into the ignored `vibe/scratch/` for this step's and Step 12's checks; approving this plan authorizes that download. No local copy exists on this machine.
-- Checks run `cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1`, with `PROMPTFORGE_WHISPER_MODEL` and `PROMPTFORGE_WHISPER_AUDIO` at the fixtures in `vibe/scratch/stt-native/`:
-  - In WSL, with `PROMPTFORGE_WHISPER_LIBRARY` at `libwhisper.so` in the extracted Linux CUDA package from Step 3's dry run (`~/whisper-cuda-dryrun/work/dist/`). One run before the change is recorded under this step, whether or not it prints a `CUDA error` at exit. After the change, the suite passes and exits 0 with no `CUDA error` in its output.
+- Checks run `cargo test --locked -p gateway-stt-backend-whisper --test native_whisper -- --ignored --test-threads=1`, with `RUNVIL_WHISPER_MODEL` and `RUNVIL_WHISPER_AUDIO` at the fixtures in `vibe/scratch/stt-native/`:
+  - In WSL, with `RUNVIL_WHISPER_LIBRARY` at `libwhisper.so` in the extracted Linux CUDA package from Step 3's dry run (`~/whisper-cuda-dryrun/work/dist/`). One run before the change is recorded under this step, whether or not it prints a `CUDA error` at exit. After the change, the suite passes and exits 0 with no `CUDA error` in its output.
   - In WSL, on the pinned `linux-x86_64` CPU build, the suite passes.
   - On this Windows machine, with the Windows toolchain and Step 10's OpenMP-off `whisper.dll`, the suite passes. A run on Step 2's OpenMP build is recorded beside it as the control.
   - On this Windows machine, on the `whisper.dll` of the pinned `windows-x86_64-cuda` build, which keeps OpenMP, the suite passes. CI's `native-whisper` job runs this suite on that build, but only after merge.
@@ -802,7 +802,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
     - On `cpu`, the gateway exits 0 when stopped after a transcription.
     - On `cpu`, the `gateway-stt` native suites (`--lib` and `--test it`, ignored, one thread) pass on that build.
     - On `cuda`, the pinned Windows CUDA build, served from loopback with its real pin from Step 11's download, keeps OpenMP, and the gateway also exits 0 when stopped after a transcription.
-  - The scratch work binds loopback ports clear of 8000, 8002, 8008, 8009, and 8011. It leaves `~/pf-target` untouched, only reads `~/.promptforge`, and pulls or publishes nothing beyond Step 11's one download.
+  - The scratch work binds loopback ports clear of 8000, 8002, 8008, 8009, and 8011. It leaves `~/rv-target` untouched, only reads `~/.runvil`, and pulls or publishes nothing beyond Step 11's one download.
 - As the final step, it runs the full suite.
 - Runs, 2026-10-01:
   - Linux CUDA package, without this step's change: both stops printed `CUDA error: driver shutting down` from `cudaFree`. One exited 0, the other 134, from an abort.
@@ -827,7 +827,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - It also says that a GPU without native code, such as a Linux GPU at 7.5, 8.0, or 9.0, compiles the build's PTX at its first decode, which took about 20 seconds with an empty driver JIT cache.
   - `guide/src/gateway/04-local-models.md`, under "The cache directory": a CUDA build takes about 1.2 GB of cache on Windows and 1.7 GB on Linux, counting the downloaded archive the cache keeps.
   - The `whisper_backend` row of the `[stt]` table in `crates/gateway/app/README.md` and the commented `whisper_backend` lines in `gateway.local.example.toml` state the Windows floor, the native list, and the explicit `cuda` outcomes.
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
 - The commit also carries the plan's re-export, as the Landing sets out.
 - Tests, in `assets.rs`:
   - `auto_takes_the_windows_cuda_whisper_build_at_any_driver_version` becomes `auto_takes_the_windows_cuda_whisper_build_from_driver_580`, shaped like the Linux test: with a GPU at 8.6, an unreadable version, 0, or 579 selects `windows-x86_64`, and 580 or 591 selects `windows-x86_64-cuda`.
@@ -837,7 +837,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `whisper_assets_cover_the_seven_release_builds` asserts each row's `min_driver_major` and `native_compute_caps`.
 - Checks:
   - `cargo test --locked -p gateway-local --lib artifacts::` passes, with llama-server's selection tests unchanged among them.
-  - The end-to-end checks of Steps 13 to 17 run the scratch scripts in `vibe/scratch/run-36900875610/scripts/`, as the Testing Plan sets out, on their WSL clone `~/promptforge-e2e` and their Windows clone `vibe/scratch/pf-e2e`. The coder runs them before the step's commit exists, so each clone moves to the previous step's commit and takes the step's working-tree diff on top.
+  - The end-to-end checks of Steps 13 to 17 run the scratch scripts in `vibe/scratch/run-36900875610/scripts/`, as the Testing Plan sets out, on their WSL clone `~/runvil-e2e` and their Windows clone `vibe/scratch/rv-e2e`. The coder runs them before the step's commit exists, so each clone moves to the previous step's commit and takes the step's working-tree diff on top.
   - The scratch scripts `wsl-env.sh` and `win-env.sh` accept only `4b2ab768` today, so each step first names its own commit there. `wsl-prepare.sh` and `win-prepare.sh` then point the clones' two new rows at run 36900875610's archives, served from loopback, and build the gateways.
   - Windows, `win_gateway.py boots`: on this machine, whose two RTX 3090s report 8.6 on driver 591, `auto` still takes the CUDA build, and `cpu` takes the CPU build.
 
@@ -860,7 +860,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `guide/src/gateway/05-speech.md`, under "The runtime": on Linux, `auto` takes the CUDA build only where the machine's `libstdc++.so.6` comes from GCC 12 or later and defines `GLIBCXX_3.4.30`, so RHEL 9, its rebuilds, and Amazon Linux 2023 keep the CPU build, and an explicit `cuda` there fails to load.
   - The same paragraph says that on both platforms a `CUDA_VISIBLE_DEVICES` that hides every GPU counts as no GPU, and that an explicit `cuda` on Windows with every GPU hidden decodes on the CPU and ends the gateway at a graceful stop.
   - The `whisper_backend` row in `crates/gateway/app/README.md` and the commented lines in `gateway.local.example.toml` state both requirements.
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
 - Tests, in `assets.rs`, where the selection tests move to the new signature with a C++ runtime that defines `GLIBCXX_3.4.30`:
   - `cuda_visible_devices_hides_every_gpu_by_cudas_rule`: with two GPUs, unset, `0`, `1,0`, `0,-1`, `GPU-...`, and `MIG-...` leave a GPU visible, and empty, `-1`, `2`, and `none` hide them.
   - `libstdcxx_defines_matches_only_the_whole_version`: it finds a NUL-terminated `GLIBCXX_3.4.30`, and rejects bytes that hold only `GLIBCXX_3.4.29` or only `GLIBCXX_3.4.300`.
@@ -891,7 +891,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
 - Docs:
   - `guide/src/gateway/05-speech.md`, under "The runtime": a stop during the speech load cancels the whisper library and speech model downloads at their next chunk, the next start resumes them, and an extraction already under way finishes first.
   - The speech paragraph of `crates/gateway/app/README.md` says the same.
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
 - Tests:
   - In `crates/gateway/local/src/artifacts/tests.rs`, `a_cancelled_whisper_provision_downloads_nothing`: with a fired token and an explicit backend, `provision_whisper_library_with_cancellation` returns `LocalError::Cancelled`, and the store holds no download and no install.
   - In `crates/gateway/stt/api/src/artifacts.rs`, `prepare_hands_the_load_token_to_the_library_provision`: the injected provision receives the load's token, and its `LocalError::Cancelled` reaches the caller as `SpeechError::InitialLoadCancelled`.
@@ -943,7 +943,7 @@ Surveyed at `a7e50ec5` on `whisper-cuda-backend` (clean tree). Architecture anch
   - `guide/src/gateway/05-speech.md`, under "The runtime": a graceful stop aborts running transcriptions after their current encoder pass or decoder step, their requests fail, and speech retires within the existing shutdown bounds.
   - The same paragraph says that a stop while a speech model is still loading can outlast those bounds, and the gateway then exits without retiring speech.
   - The speech paragraph of `crates/gateway/app/README.md` says the same.
-  - `guide/promptforge-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
+  - `guide/runvil-gateway-guide.md`, regenerated with `cargo run -p build-user-guide`.
 - Tests:
   - In `params.rs`, `abort_requested` reads false for null data and for an unset flag, and true once the flag is set. With a flag set, `apply` writes the callback and the flag's address, and without one it leaves both null.
   - `crates/gateway/stt/backend-whisper/tests/native_whisper.rs` gains `a_decode_ends_when_its_cancellation_flag_is_set`, through an `SttEngine`. It is the native check of the FFI's abort path too, so `gateway-whisper-ffi` gains no native test and no dev-dependency:

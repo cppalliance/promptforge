@@ -1,9 +1,9 @@
 ---
 name: Flat Sources Rule
-overview: Add a flat-sources rule to promptforge/AGENTS.md (source subdirs need 3+ files, with defined flatten/rehydrate conversions in both directions), then flatten all 19 non-compliant crates workspace-wide.
+overview: Add a flat-sources rule to runvil/AGENTS.md (source subdirs need 3+ files, with defined flatten/rehydrate conversions in both directions), then flatten all 19 non-compliant crates workspace-wide.
 todos:
   - id: create-rule
-    content: Add flat-sources bullet to Structural Rules in promptforge/AGENTS.md
+    content: Add flat-sources bullet to Structural Rules in runvil/AGENTS.md
     status: completed
   - id: flatten-crates
     content: Flatten all 19 non-compliant crates per the audit table and mechanics spec
@@ -20,20 +20,20 @@ isProject: false
 
 ## Product Requirements
 
-The promptforge workspace has accumulated source subdirectories holding only one or two files each, which the repository owner wants eliminated and prevented from recurring. The work is a written convention in promptforge/AGENTS.md plus a one-time mechanical flattening of every violating directory in the workspace.
+The runvil workspace has accumulated source subdirectories holding only one or two files each, which the repository owner wants eliminated and prevented from recurring. The work is a written convention in runvil/AGENTS.md plus a one-time mechanical flattening of every violating directory in the workspace.
 
-- Problem and users: 45 source subdirectories across 19 of 43 crates hold only 1-2 files each (full scan of promptforge/crates/, excluding target/, taken 2026-09-15). The repository owner is the user; the affected users are every contributor and agent navigating the tree.
+- Problem and users: 45 source subdirectories across 19 of 43 crates hold only 1-2 files each (full scan of runvil/crates/, excluding target/, taken 2026-09-15). The repository owner is the user; the affected users are every contributor and agent navigating the tree.
 - Goals: a durable written rule covering both directions of conversion, and a workspace tree that already complies with it when the work is done.
-- Non-goals: rehydrating anything (zero dash-named .rs files exist in promptforge/crates/, so no flat group qualifies); changing top-level tests/ or benches/ trees; changing any module name, public API, or behavior; adding structural enforcement tooling.
-- Success criteria: the rule text is present under ## Structural Rules in promptforge/AGENTS.md; no src/ subdirectory in any crate holds fewer than three .rs files; the full verification gate passes with zero test modifications.
-- Constraints: file moves use git mv to preserve history; module names and call sites stay unchanged via #[path] attributes; repository policy (promptforge/AGENTS.md, ## Engineering) forbids introducing structural enforcement without explicit user approval, so the rule is documentation only.
+- Non-goals: rehydrating anything (zero dash-named .rs files exist in runvil/crates/, so no flat group qualifies); changing top-level tests/ or benches/ trees; changing any module name, public API, or behavior; adding structural enforcement tooling.
+- Success criteria: the rule text is present under ## Structural Rules in runvil/AGENTS.md; no src/ subdirectory in any crate holds fewer than three .rs files; the full verification gate passes with zero test modifications.
+- Constraints: file moves use git mv to preserve history; module names and call sites stay unchanged via #[path] attributes; repository policy (runvil/AGENTS.md, ## Engineering) forbids introducing structural enforcement without explicit user approval, so the rule is documentation only.
 - Open questions: None
 
 ## Functional Specification
 
 The convention governs how contributors and coding agents lay out Rust modules. A module group smaller than three files lives as flat kebab-labeled siblings; a group of three or more may occupy a subdirectory; touching a group on the wrong side of the line triggers conversion.
 
-- Actors and workflows: contributors and coding agents adding or editing Rust modules in promptforge. When creating, growing, shrinking, or touching a module group, they place it in the valid form for its size.
+- Actors and workflows: contributors and coding agents adding or editing Rust modules in runvil. When creating, growing, shrinking, or touching a module group, they place it in the valid form for its size.
 - Inputs and outputs: input is the existing source tree plus any new module work; output is a tree where every src/ subdirectory holds at least three .rs files and every smaller group is a set of dash-labeled sibling files.
 - States and validation: a module group is either flat (`foo.rs` beside `foo-bar.rs`, wired with `#[path = "foo-bar.rs"] mod bar;`) or rehydrated (`foo.rs` beside `foo/bar.rs`, standard layout, no path attributes). Validity is determined by direct .rs file count, with three as the line in both directions.
 - Errors and recovery: name collisions with existing siblings are checked before each move; a miswired #[path] surfaces as a cargo check failure for that crate and is corrected before moving on.
@@ -48,11 +48,11 @@ The convention governs how contributors and coding agents lay out Rust modules. 
 This is a file-layout convention change with no runtime architecture impact. All design content is the rule text, the move mechanics, and the per-crate audit of required moves.
 
 - Architecture: no change. Module names, visibility, and call sites are preserved exactly; only file paths change.
-- Modules and interfaces: no public interface changes. Each flattened submodule keeps its module name through an explicit path attribute on its declaration in the parent module, e.g. `#[path = "anthropic-taxonomy.rs"] pub(crate) mod taxonomy;` in promptforge/crates/shared-cloud-providers/src/providers/anthropic.rs:16. A #[path] attribute in a file module resolves relative to that file's own directory, so sibling filenames work without call-site changes.
+- Modules and interfaces: no public interface changes. Each flattened submodule keeps its module name through an explicit path attribute on its declaration in the parent module, e.g. `#[path = "anthropic-taxonomy.rs"] pub(crate) mod taxonomy;` in runvil/crates/shared-cloud-providers/src/providers/anthropic.rs:16. A #[path] attribute in a file module resolves relative to that file's own directory, so sibling filenames work without call-site changes.
 - File and public API changes:
-  - promptforge/AGENTS.md gains one bullet under ## Structural Rules, verbatim: "Source directories are flat by default. A subdirectory of source files must contain at least three files; one or two files belong beside the parent module as `foo-bar.rs` (parent stem, dash, kebab label), wired with an explicit path attribute so the module name stays clean: `#[path = "foo-bar.rs"] mod bar;`. The two forms are convertible in both directions: when a `foo-*.rs` sibling group grows to three files, rehydrate it into a `foo/` subdirectory in standard module layout (`foo/bar.rs` beside `foo.rs`) and drop the path attributes; when a subdirectory shrinks below three files, flatten it back to kebab siblings. Apply whichever conversion applies when you touch files in a group on the wrong side of the line. Top-level `tests/` and `benches/` trees are exempt; they follow Cargo target conventions."
+  - runvil/AGENTS.md gains one bullet under ## Structural Rules, verbatim: "Source directories are flat by default. A subdirectory of source files must contain at least three files; one or two files belong beside the parent module as `foo-bar.rs` (parent stem, dash, kebab label), wired with an explicit path attribute so the module name stays clean: `#[path = "foo-bar.rs"] mod bar;`. The two forms are convertible in both directions: when a `foo-*.rs` sibling group grows to three files, rehydrate it into a `foo/` subdirectory in standard module layout (`foo/bar.rs` beside `foo.rs`) and drop the path attributes; when a subdirectory shrinks below three files, flatten it back to kebab siblings. Apply whichever conversion applies when you touch files in a group on the wrong side of the line. Top-level `tests/` and `benches/` trees are exempt; they follow Cargo target conventions."
   - Move mechanics for every row below: git mv each file; parent stem stays verbatim even when snake_case (`boot_load-tests.rs`); only the appended label is kebab (`logging_tests` becomes `logging-tests`); a mod.rs in a flattened directory promotes to the parent-stem file (`compactors/mod.rs` becomes `compactors.rs`); nested violating directories flatten recursively with chained labels (`take/agreement/final_overlap/tests.rs` becomes `take/agreement-final-overlap-tests.rs`); emptied directories are removed; collisions with existing siblings are checked before each move.
-  - Audit of all 43 crates (source: directory scan of promptforge/crates/ excluding target/, 2026-09-15). Compliant, untouched (24): build-llama-cuda, build-ui, build-user-guide, build-workshop, build-xtask, gateway-config-ui, gateway-logging, gateway-protocol, gateway-stt-backend-whisper, gateway-web-search, gateway-whisper-ffi, promptforge-model-client, promptforge-parser, promptforge-vfs, promptforge-web, promptforge-webfetch, shared-gateway-api, shared-loopback, shared-progress, shared-sidecar, shared-vfs, workshop, workshop-protocol, workshop-support.
+  - Audit of all 43 crates (source: directory scan of runvil/crates/ excluding target/, 2026-09-15). Compliant, untouched (24): build-llama-cuda, build-ui, build-user-guide, build-workshop, build-xtask, gateway-config-ui, gateway-logging, gateway-protocol, gateway-stt-backend-whisper, gateway-web-search, gateway-whisper-ffi, runvil-model-client, runvil-parser, runvil-vfs, runvil-web, runvil-webfetch, shared-gateway-api, shared-loopback, shared-progress, shared-sidecar, shared-vfs, workshop, workshop-protocol, workshop-support.
   - Non-compliant (19), with directories to flatten and resulting filenames:
 
 | Crate | Dirs to flatten | Resulting files |
@@ -64,11 +64,11 @@ This is a file-layout convention change with no runtime architecture impact. All
 | gateway-routing | src/queue (tests.rs) | queue-tests.rs |
 | gateway-stt | src/batch (2), src/generation (lease.rs, snapshot.rs), src/segment (boundary.rs), src/realtime/session/items (1), src/realtime/session/route (1), src/realtime/wire/server (events.rs), src/take/agreement (2 plus nested final_overlap/tests.rs), src/take/pcm (1), src/take/state (2 plus nested alignment_tests/adversaries.rs and tests/live_prefix.rs), src/take/window/tests (live_prefix.rs) | batch-tests.rs, batch-native-tests.rs, generation-lease.rs, generation-snapshot.rs, segment-boundary.rs, realtime/session/items-tests.rs, realtime/session/route-tests.rs, realtime/wire/server-events.rs, take/agreement-final-overlap.rs, take/agreement-projection.rs, take/agreement-final-overlap-tests.rs, take/pcm-tests.rs, take/state-alignment-tests.rs, take/state-tests.rs, take/state-alignment-tests-adversaries.rs, take/state-tests-live-prefix.rs, take/window-tests-live-prefix.rs |
 | gateway-stt-engine | src/test_fixtures/tests (scenario_cleanup.rs plus nested scenario_cleanup/ with construction.rs, decode.rs) | test_fixtures/tests-scenario-cleanup.rs, tests-scenario-cleanup-construction.rs, tests-scenario-cleanup-decode.rs |
-| promptforge-api | src/capabilities (tests.rs), src/lua (coro_tests.rs), src/tools (tests.rs) | capabilities-tests.rs, lua-coro-tests.rs, tools-tests.rs |
-| promptforge-lua | src/compactors, src/messages, src/projection (mod.rs plus tests.rs each) | compactors.rs, compactors-tests.rs, messages.rs, messages-tests.rs, projection.rs, projection-tests.rs |
-| promptforge-tool-picker | src/picker (tests.rs), src/policy (tests.rs) | picker-tests.rs, policy-tests.rs |
-| promptforge-web-search | src/web_search (tests.rs) | web_search-tests.rs |
-| shared-promptforge-api | src/capabilities (tests.rs), src/names (tests.rs), src/untrusted (inventory.rs) | capabilities-tests.rs, names-tests.rs, untrusted-inventory.rs |
+| runvil-api | src/capabilities (tests.rs), src/lua (coro_tests.rs), src/tools (tests.rs) | capabilities-tests.rs, lua-coro-tests.rs, tools-tests.rs |
+| runvil-lua | src/compactors, src/messages, src/projection (mod.rs plus tests.rs each) | compactors.rs, compactors-tests.rs, messages.rs, messages-tests.rs, projection.rs, projection-tests.rs |
+| runvil-tool-picker | src/picker (tests.rs), src/policy (tests.rs) | picker-tests.rs, policy-tests.rs |
+| runvil-web-search | src/web_search (tests.rs) | web_search-tests.rs |
+| shared-runvil-api | src/capabilities (tests.rs), src/names (tests.rs), src/untrusted (inventory.rs) | capabilities-tests.rs, names-tests.rs, untrusted-inventory.rs |
 | workshop-gateway | src/gateway_progress (tests.rs plus nested tests/ with lifecycle.rs, recovery.rs), src/heartbeat (refresh.rs, tests.rs), src/observer (tests.rs), src/resolve (tests.rs), src/test_gateway (process.rs) | gateway_progress-tests.rs, gateway_progress-tests-lifecycle.rs, gateway_progress-tests-recovery.rs, heartbeat-refresh.rs, heartbeat-tests.rs, observer-tests.rs, resolve-tests.rs, test_gateway-process.rs |
 | workshop-menu | src/catalog (chat.rs, tests.rs), src/menu (memory.rs, tests.rs plus nested tests/memory.rs) | catalog-chat.rs, catalog-tests.rs, menu-memory.rs, menu-tests.rs, menu-tests-memory.rs |
 | workshop-registry | src/push (tests.rs) | push-tests.rs |
@@ -84,7 +84,7 @@ This is a file-layout convention change with no runtime architecture impact. All
 
 ## Testing Plan
 
-Every move is behavior-preserving, so the entire existing suite must pass unmodified. The gate is the workspace's documented verification set (command list source: promptforge/AGENTS.md, ## Verification).
+Every move is behavior-preserving, so the entire existing suite must pass unmodified. The gate is the workspace's documented verification set (command list source: runvil/AGENTS.md, ## Verification).
 
 - Unit: all existing unit tests, including the moved tests.rs and *_tests.rs files, pass unmodified under their unchanged module names.
 - Integration and end-to-end: `cargo nextest run --locked --workspace --exclude workshop --exclude workshop-server --all-features`; doctests via `cargo test --workspace --exclude workshop --exclude workshop-server --all-features --doc`; workshop crates via `cargo nextest run --locked -p workshop -p workshop-server`.
@@ -97,7 +97,7 @@ Every move is behavior-preserving, so the entire existing suite must pass unmodi
 ## Decision Record
 
 - Decisions:
-  - Rule lives in promptforge/AGENTS.md rather than a Cursor rule file. Rationale: the user stated the .mdc form does not work for this purpose. User's words: "it cant be .mdc that wont work. use AGENTS.md".
+  - Rule lives in runvil/AGENTS.md rather than a Cursor rule file. Rationale: the user stated the .mdc form does not work for this purpose. User's words: "it cant be .mdc that wont work. use AGENTS.md".
   - Three-file threshold in both directions. Rationale: some crates legitimately need subdirectories, so an absolute ban was wrong; the user picked the hard count over a judgment test. User's words: "some of them need subdirs", then selecting "Subdir needs 3+ files to exist; 1-2 files must flatten to kebab siblings".
   - The rule is bidirectional with a defined rehydration path. Rationale: a growing flat group needs a defined route back to a directory. User's words: "but there also needs a way to take the flattened files and rehydrate".
   - Flat naming is parent stem, dash, kebab label. User's words: "use the root filename and put a dash, and then give it a, a, a subname. Give it a kebab label."
@@ -134,8 +134,8 @@ Every move is behavior-preserving, so the entire existing suite must pass unmodi
 - Formatter check command: `cargo fmt --all --check`
 - Docs command: `cargo doc --workspace --no-deps --all-features --exclude workshop --exclude workshop-server` with `RUSTDOCFLAGS="-D warnings"`; user guide: `mdbook build guide`
 - Test placement and naming conventions: unit tests live in `src/tests.rs` pulled in by `#[cfg(test)] mod tests;` at the foot of `lib.rs`, with shared fixtures in `src/test_support.rs`; integration tests are a directory target `tests/it/main.rs` with per-area modules (gateway, gateway-stt) or single-file `tests/<name>.rs`; test names are sentence-style snake_case (e.g. `a_process_lifetime_lease_recovers_after_its_owner_is_terminated`); structural/boundary checks run via `cargo test -p build-xtask`
-- Directory map: `crates/` holds all 44 workspace members (`members = ["crates/*"]`, `crates/shared-ui` excluded as a TypeScript+CSS package); `guide/` is the mdbook user guide; `prompts/` holds example PromptForge pipeline files; `tools/` holds Node helper scripts (sidecar staging, TTS live checks); `local/` holds local run configuration and fixtures; `vibe/` holds plan files and `archdoc.md`; `.config/nextest.toml` configures nextest; `.github/workflows/` holds CI (`ci.yml` plus release and nightly workflows); `target/` and `target-msrv/` are build outputs
-- Component boundaries: three products - PromptForge runtime (`promptforge-*` crates, executor + parser + Lua VM boundary + store/VFS), Gateway (`gateway-*` crates, independent inference server), Workshop (`workshop-*` crates, Tauri desktop + in-process server) - over `shared-*` substrate crates and `build-*` build tooling; dependency rules: workshop never depends on gateway, gateway never on promptforge/workshop, promptforge never on gateway/workshop, shared never on products, and the one-door rule: outside crates may depend only on `promptforge-api`, never on internal `promptforge-*` substrate crates; SPA dependency direction is shell -> features -> services -> vocabulary
+- Directory map: `crates/` holds all 44 workspace members (`members = ["crates/*"]`, `crates/shared-ui` excluded as a TypeScript+CSS package); `guide/` is the mdbook user guide; `prompts/` holds example Runvil pipeline files; `tools/` holds Node helper scripts (sidecar staging, TTS live checks); `local/` holds local run configuration and fixtures; `vibe/` holds plan files and `archdoc.md`; `.config/nextest.toml` configures nextest; `.github/workflows/` holds CI (`ci.yml` plus release and nightly workflows); `target/` and `target-msrv/` are build outputs
+- Component boundaries: three products - Runvil runtime (`runvil-*` crates, executor + parser + Lua VM boundary + store/VFS), Gateway (`gateway-*` crates, independent inference server), Workshop (`workshop-*` crates, Tauri desktop + in-process server) - over `shared-*` substrate crates and `build-*` build tooling; dependency rules: workshop never depends on gateway, gateway never on runvil/workshop, runvil never on gateway/workshop, shared never on products, and the one-door rule: outside crates may depend only on `runvil-api`, never on internal `runvil-*` substrate crates; SPA dependency direction is shell -> features -> services -> vocabulary
 - Conventions summary: Rust edition 2024 with workspace lints (`unsafe_code = "forbid"`, clippy `all` deny, `unwrap_used`/`expect_used` deny, rustdoc link lints deny); no file exceeds 500 lines (enforced by `build-xtask`); every `workshop-*` lib.rs opens with a `## Invariants` doc marker; behavior changes ship with tests in the same change; error messages are written for model consumption (concise, factual, required-vs-actual); Cargo features gate real constraints, not product shape; CSS lives beside its TypeScript using `--ws-*` tokens, never raw values; comments cite upstream issue URLs for workarounds; CI requires a clean git tree after builds
 
 </project-survey>
@@ -145,11 +145,11 @@ Every move is behavior-preserving, so the entire existing suite must pass unmodi
 
 Components in dependency order, with placement reasons:
 
-1. `rule` - the flat-sources convention text in promptforge/AGENTS.md. Placed first because it defines the rule the flattening implements; documentation-only with no code dependency.
-2. `shared-crates` - shared-cloud-providers, shared-promptforge-api. Substrate layer per archdoc; flattened before product crates so later per-crate checks run against final paths.
-3. `gateway-crates` - gateway, gateway-config, gateway-local, gateway-routing, gateway-stt, gateway-stt-engine. Independent of the promptforge and workshop groups; ordered here by archdoc layering.
-4. `promptforge-crates` - promptforge-api, promptforge-lua, promptforge-tool-picker, promptforge-web-search. Independent of the gateway and workshop groups.
-5. `workshop-crates` - workshop-gateway, workshop-menu, workshop-registry, workshop-server, workshop-sessions, workshop-status, workshop-workspace. Independent of the gateway and promptforge groups.
+1. `rule` - the flat-sources convention text in runvil/AGENTS.md. Placed first because it defines the rule the flattening implements; documentation-only with no code dependency.
+2. `shared-crates` - shared-cloud-providers, shared-runvil-api. Substrate layer per archdoc; flattened before product crates so later per-crate checks run against final paths.
+3. `gateway-crates` - gateway, gateway-config, gateway-local, gateway-routing, gateway-stt, gateway-stt-engine. Independent of the runvil and workshop groups; ordered here by archdoc layering.
+4. `runvil-crates` - runvil-api, runvil-lua, runvil-tool-picker, runvil-web-search. Independent of the gateway and workshop groups.
+5. `workshop-crates` - workshop-gateway, workshop-menu, workshop-registry, workshop-server, workshop-sessions, workshop-status, workshop-workspace. Independent of the gateway and runvil groups.
 6. `verification` - the full Testing Plan gate. Placed last because it depends on every move.
 
 Within each crate component, each crate is one piece built as one step. The crates are mutually independent (module names and call sites are unchanged), so the pieces have no inter-dependencies; they are sequenced one per step only to keep each commit crate-scoped and reviewable.
@@ -161,7 +161,7 @@ Every crate step applies the move mechanics in Technical Design: git mv each fil
 ### Step 1: Add flat-sources rule to AGENTS.md [completed]
 
 - Component: rule
-- Add the rule bullet verbatim (full text in Technical Design, File and public API changes) under ## Structural Rules in promptforge/AGENTS.md.
+- Add the rule bullet verbatim (full text in Technical Design, File and public API changes) under ## Structural Rules in runvil/AGENTS.md.
 - Documentation only; no tests. One commit.
 
 </step-1>
@@ -178,11 +178,11 @@ Every crate step applies the move mechanics in Technical Design: git mv each fil
 
 <step-3>
 
-### Step 3: Flatten shared-promptforge-api [completed]
+### Step 3: Flatten shared-runvil-api [completed]
 
 - Component: shared-crates
-- Apply the shared-promptforge-api row of the audit table. Dirs to flatten: src/capabilities (tests.rs), src/names (tests.rs), src/untrusted (inventory.rs). Resulting files: capabilities-tests.rs, names-tests.rs, untrusted-inventory.rs.
-- Verify: `cargo check -p shared-promptforge-api --all-features`.
+- Apply the shared-runvil-api row of the audit table. Dirs to flatten: src/capabilities (tests.rs), src/names (tests.rs), src/untrusted (inventory.rs). Resulting files: capabilities-tests.rs, names-tests.rs, untrusted-inventory.rs.
+- Verify: `cargo check -p shared-runvil-api --all-features`.
 
 </step-3>
 
@@ -248,41 +248,41 @@ Every crate step applies the move mechanics in Technical Design: git mv each fil
 
 <step-10>
 
-### Step 10: Flatten promptforge-api [completed]
+### Step 10: Flatten runvil-api [completed]
 
-- Component: promptforge-crates
-- Apply the promptforge-api row of the audit table. Dirs to flatten: src/capabilities (tests.rs), src/lua (coro_tests.rs), src/tools (tests.rs). Resulting files: capabilities-tests.rs, lua-coro-tests.rs, tools-tests.rs.
-- Verify: `cargo check -p promptforge-api --all-features`.
+- Component: runvil-crates
+- Apply the runvil-api row of the audit table. Dirs to flatten: src/capabilities (tests.rs), src/lua (coro_tests.rs), src/tools (tests.rs). Resulting files: capabilities-tests.rs, lua-coro-tests.rs, tools-tests.rs.
+- Verify: `cargo check -p runvil-api --all-features`.
 
 </step-10>
 
 <step-11>
 
-### Step 11: Flatten promptforge-lua [completed]
+### Step 11: Flatten runvil-lua [completed]
 
-- Component: promptforge-crates
-- Apply the promptforge-lua row of the audit table. Dirs to flatten: src/compactors, src/messages, src/projection (mod.rs plus tests.rs each; each mod.rs promotes to the parent-stem file). Resulting files: compactors.rs, compactors-tests.rs, messages.rs, messages-tests.rs, projection.rs, projection-tests.rs.
-- Verify: `cargo check -p promptforge-lua --all-features`.
+- Component: runvil-crates
+- Apply the runvil-lua row of the audit table. Dirs to flatten: src/compactors, src/messages, src/projection (mod.rs plus tests.rs each; each mod.rs promotes to the parent-stem file). Resulting files: compactors.rs, compactors-tests.rs, messages.rs, messages-tests.rs, projection.rs, projection-tests.rs.
+- Verify: `cargo check -p runvil-lua --all-features`.
 
 </step-11>
 
 <step-12>
 
-### Step 12: Flatten promptforge-tool-picker [completed]
+### Step 12: Flatten runvil-tool-picker [completed]
 
-- Component: promptforge-crates
-- Apply the promptforge-tool-picker row of the audit table. Dirs to flatten: src/picker (tests.rs), src/policy (tests.rs). Resulting files: picker-tests.rs, policy-tests.rs.
-- Verify: `cargo check -p promptforge-tool-picker --all-features`.
+- Component: runvil-crates
+- Apply the runvil-tool-picker row of the audit table. Dirs to flatten: src/picker (tests.rs), src/policy (tests.rs). Resulting files: picker-tests.rs, policy-tests.rs.
+- Verify: `cargo check -p runvil-tool-picker --all-features`.
 
 </step-12>
 
 <step-13>
 
-### Step 13: Flatten promptforge-web-search [completed]
+### Step 13: Flatten runvil-web-search [completed]
 
-- Component: promptforge-crates
-- Apply the promptforge-web-search row of the audit table. Dirs to flatten: src/web_search (tests.rs). Resulting files: web_search-tests.rs.
-- Verify: `cargo check -p promptforge-web-search --all-features`.
+- Component: runvil-crates
+- Apply the runvil-web-search row of the audit table. Dirs to flatten: src/web_search (tests.rs). Resulting files: web_search-tests.rs.
+- Verify: `cargo check -p runvil-web-search --all-features`.
 
 </step-13>
 

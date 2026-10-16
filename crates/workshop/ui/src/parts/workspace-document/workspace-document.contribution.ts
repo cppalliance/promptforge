@@ -11,10 +11,10 @@
 // so this module pulls neither into the initial bundle. Every action is
 // a switch: the server replaces the grants wholesale (open) or writes a
 // new file and moves onto it (save as, duplicate); the page then fires
-// the existing promptforge:workspace-changed event (marked roots-current:
+// the existing runvil:workspace-changed event (marked roots-current:
 // open dropped the roots before re-creating the tree, save as and
 // duplicate keep the grants) so the window title and the tree refresh
-// without a second roots fetch, emits the promptforge:workspace-opened
+// without a second roots fetch, emits the runvil:workspace-opened
 // Tauri event so the desktop app can fetch and apply the file's window
 // geometry (native geometry is the desktop app's to apply, never the page's),
 // and records the file in the recent-files store. Failures paint the
@@ -25,7 +25,7 @@
 // server where it stands and follows it (resyncAfterTimeout).
 //
 // The workspace-scoped UI state follows the switch too. The
-// .pfwork file holds the dock layout, the tree's expanded folders, and
+// .rvwork file holds the dock layout, the tree's expanded folders, and
 // the closed-editor stack in its workspace bucket. Open pulls the file's
 // bucket through the UI-state adapter and applies all three to the live
 // stores with writes suppressed, so a store that writes synchronously on
@@ -61,10 +61,10 @@ import { STATUS_BAR } from "@workshop/platform/status-bar";
 import { WORKSPACE_CHANGED_EVENT, type WorkspaceChangedDetail } from "../../services/workspace-events";
 
 /** The Tauri event the desktop app listens for to re-apply window geometry. */
-export const WORKSPACE_OPENED_EVENT = "promptforge:workspace-opened";
+export const WORKSPACE_OPENED_EVENT = "runvil:workspace-opened";
 
 /** The workspace file extension, as the pickers filter and the save paths end. */
-const WORKSPACE_EXTENSION = ".pfwork";
+const WORKSPACE_EXTENSION = ".rvwork";
 
 /** The name the server reports while the workspace is ephemeral; the picker's fallback seed. */
 const UNTITLED = "Untitled";
@@ -77,7 +77,7 @@ const UNTITLED = "Untitled";
 export const registrations = new DisposableStore();
 
 /** The picker filter: workspace files only. */
-const WORKSPACE_FILTERS = [{ name: "PromptForge Workspace", extensions: ["pfwork"] }];
+const WORKSPACE_FILTERS = [{ name: "Runvil Workspace", extensions: ["rvwork"] }];
 
 /** Paints an action failure onto the status bar, when one is up. */
 function reportError(label: string): void {
@@ -221,7 +221,7 @@ function writeLiveWorkspaceState(): void {
 }
 
 /**
- * The native picker filtered to .pfwork. Answers the picked path, or
+ * The native picker filtered to .rvwork. Answers the picked path, or
  * null when the picker was cancelled (it answers a non-string then).
  */
 async function pickWorkspaceFile(): Promise<string | null> {
@@ -235,7 +235,7 @@ async function pickWorkspaceFile(): Promise<string | null> {
  * state applied to the live stores, then the invalidation, the desktop app
  * event, and the recent entry. With a string `path` argument (an Open
  * Recent row or a Ctrl+P hit) the picker is skipped and the argument is
- * the file; otherwise the native picker filtered to .pfwork supplies it.
+ * the file; otherwise the native picker filtered to .rvwork supplies it.
  * A cancelled picker is a no-op; a refusal reports and changes nothing
  * on the page; a timeout reports and then resyncs.
  */
@@ -261,8 +261,8 @@ async function openWorkspaceFromFile(path?: unknown): Promise<void> {
 }
 
 /**
- * Appends .pfwork to a picked path that lacks it. Case-insensitive so a
- * Windows pick of `Name.PFWORK` is not doubled into `Name.PFWORK.pfwork`;
+ * Appends .rvwork to a picked path that lacks it. Case-insensitive so a
+ * Windows pick of `Name.RVWORK` is not doubled into `Name.RVWORK.rvwork`;
  * the extension is appended at most once.
  */
 function withWorkspaceExtension(path: string): string {

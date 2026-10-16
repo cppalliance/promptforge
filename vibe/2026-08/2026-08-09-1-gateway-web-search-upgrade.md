@@ -1,6 +1,6 @@
 ---
 name: Gateway web_search upgrade
-overview: Upgrade promptforge-gateway web_search with Brave knobs, host diversity, sanitisation, clearer empty/error behavior, richer trimmed hits, and config defaults. Then evaluate local Qwen3.6-27B (Q4_K_M then Q5_K_M) on briefer at parallel=1 and context 65536. Self-contained for cold execution. No search-result cache. No Briefer prompt edits.
+overview: Upgrade runvil-gateway web_search with Brave knobs, host diversity, sanitisation, clearer empty/error behavior, richer trimmed hits, and config defaults. Then evaluate local Qwen3.6-27B (Q4_K_M then Q5_K_M) on briefer at parallel=1 and context 65536. Self-contained for cold execution. No search-result cache. No Briefer prompt edits.
 todos:
   - id: step-1
     content: Config defaults + WebSearchState settings + config unit tests
@@ -18,7 +18,7 @@ todos:
     content: Integration tests for diversity, query echo, empty query
     status: completed
   - id: step-6
-    content: promptforge-core WebSearch schema mirror + descriptor test
+    content: runvil-core WebSearch schema mirror + descriptor test
     status: completed
   - id: step-7
     content: Docs + final Verify (fmt, clippy, package tests)
@@ -43,11 +43,11 @@ Cold-reader test: a fresh agent with only this file and the workspace can finish
 
 ## Why (inline, not chat-dependent)
 
-Research agents using promptforge get SERP leads via Brave through the gateway. The current tool returns only `title`/`url`/`description`/`age`, defaults count to 10, and does no host diversity or sanitisation. Briefer evidence runs under-fetched public pages partly because SERP rows were duplicate-host and thin. Peer stacks (Tavily, Nexo, Brave MCP, Codex Brave) expose freshness/geo and sanitise; they keep search separate from fetch. This plan upgrades the gateway tool only. Caller/Briefer prompt changes are a later plan.
+Research agents using runvil get SERP leads via Brave through the gateway. The current tool returns only `title`/`url`/`description`/`age`, defaults count to 10, and does no host diversity or sanitisation. Briefer evidence runs under-fetched public pages partly because SERP rows were duplicate-host and thin. Peer stacks (Tavily, Nexo, Brave MCP, Codex Brave) expose freshness/geo and sanitise; they keep search separate from fetch. This plan upgrades the gateway tool only. Caller/Briefer prompt changes are a later plan.
 
 ## Baseline on disk (today)
 
-`POST /v1/tools/web_search` in `promptforge-gateway`:
+`POST /v1/tools/web_search` in `runvil-gateway`:
 
 - Request: `query` (required), `count` optional; defaults `DEFAULT_COUNT=10`, `MAX_COUNT=20` constants in `tools.rs`
 - Response: `{ "results": [ { title, url, description, age? } ] }` - no `query` echo
@@ -55,7 +55,7 @@ Research agents using promptforge get SERP leads via Brave through the gateway. 
 - Config `[tools.web_search]`: `provider`, `api_key`, `base_url` only
 - Errors: missing tool 404; bad auth 401; Brave failures as upstream transport/status
 - Empty query is not rejected before Brave
-- Core tool schema (`promptforge-core`): `query` + `count` only; description says "title, url, description"
+- Core tool schema (`runvil-core`): `query` + `count` only; description says "title, url, description"
 - `GatewayError::MalformedRequest(String)` already exists and maps to HTTP 400
 - No `url` crate dependency; do not add one - parse host with a small manual helper
 
@@ -63,14 +63,14 @@ Research agents using promptforge get SERP leads via Brave through the gateway. 
 
 | Path | Lines | Role |
 |---|---|---|
-| `promptforge/crates/promptforge-gateway/src/tools.rs` | 229 | Handler, Brave client, types - primary edit |
-| `promptforge/crates/promptforge-gateway/src/config.rs` | 1259 | `WebSearchConfig` near line 311; add fields + parse tests near `parses_web_search_tool_config` |
-| `promptforge/crates/promptforge-gateway/src/error.rs` | - | Use existing `MalformedRequest`; no new variant required |
-| `promptforge/crates/promptforge-gateway/tests/it/main.rs` | 859 | `fake_brave`, `web_search_*` tests near lines 144-256 |
-| `promptforge/crates/promptforge-core/src/tools/web_search.rs` | 227 | Schema + descriptor test |
-| `promptforge/crates/promptforge-gateway/design-gateway.md` | 469 | Section `### POST /v1/tools/web_search` near line 209 |
-| `promptforge/README.md` | 787 | Tool configuration section near line 124 |
-| `promptforge/gateway.toml` | 33 | `[tools.web_search]` near line 31 - commented optional keys only |
+| `runvil/crates/runvil-gateway/src/tools.rs` | 229 | Handler, Brave client, types - primary edit |
+| `runvil/crates/runvil-gateway/src/config.rs` | 1259 | `WebSearchConfig` near line 311; add fields + parse tests near `parses_web_search_tool_config` |
+| `runvil/crates/runvil-gateway/src/error.rs` | - | Use existing `MalformedRequest`; no new variant required |
+| `runvil/crates/runvil-gateway/tests/it/main.rs` | 859 | `fake_brave`, `web_search_*` tests near lines 144-256 |
+| `runvil/crates/runvil-core/src/tools/web_search.rs` | 227 | Schema + descriptor test |
+| `runvil/crates/runvil-gateway/design-gateway.md` | 469 | Section `### POST /v1/tools/web_search` near line 209 |
+| `runvil/README.md` | 787 | Tool configuration section near line 124 |
+| `runvil/gateway.toml` | 33 | `[tools.web_search]` near line 31 - commented optional keys only |
 
 ---
 
@@ -83,7 +83,7 @@ Apply these imperatives on every step. Do not name rulebook files in crate docs 
 - Return `Result` for expected failure; panic only for internal bugs.
 - Document every new public item; add `# Errors` on public fallible functions.
 - Put a test in the same commit as the behavior it guards.
-- Before each commit: `cargo fmt --all --check` and `cargo clippy -p promptforge-gateway -p promptforge-core --all-targets --all-features -- -D warnings` must pass (coder runs fmt/clippy on touched packages; full Verify uses the same).
+- Before each commit: `cargo fmt --all --check` and `cargo clippy -p runvil-gateway -p runvil-core --all-targets --all-features -- -D warnings` must pass (coder runs fmt/clippy on touched packages; full Verify uses the same).
 - Prefer `&str` inputs on pure helpers; return owned `String` / `Vec` when producing new values.
 - No `unsafe`. No new dependencies unless a step explicitly names one (this plan names none).
 
@@ -102,7 +102,7 @@ Apply these imperatives on every step. Do not name rulebook files in crate docs 
 Run Verify after the post-process step, after the core-schema step, and after the final docs step; also whenever review-and-fix dirtied the tree. Verify command set:
 
 1. `cargo fmt --all --check`
-2. `cargo clippy -p promptforge-gateway -p promptforge-core --all-targets --all-features -- -D warnings`
+2. `cargo clippy -p runvil-gateway -p runvil-core --all-targets --all-features -- -D warnings`
 3. The step's named test command
 
 Verify returns one line: `pass` or `fail` plus a log path under scratch. Main does not read the log body.
@@ -242,47 +242,47 @@ Each step produces code + tests named below. After commit, update the status fil
 
 Edit `config.rs`: add the six keys with serde defaults on `WebSearchConfig`. Edit `tools.rs`: `WebSearchState` holds a cloneable settings struct filled in `WebSearchState::new`. Unit tests: omitted keys → defaults; explicit TOML values parse. Rustdoc on new public fields.
 
-**Test:** `cargo test -p promptforge-gateway parses_web_search`
+**Test:** `cargo test -p runvil-gateway parses_web_search`
 
 ### step-2 - Types + empty query
 
 Expand `WebSearchRequest` with optional knobs and domain vecs. Expand `WebSearchResponse` with `query: String`. Expand `SearchResult` with `site_name: Option<String>`, `extra_snippets: Option<Vec<String>>` (or vec + skip-if-empty). Expand `BraveResult` for `extra_snippets`. Handler: trim/reject empty query; set response `query`; resolve count from settings; still call Brave with q+count only until the pipeline step lands (response must include `query` so integration tests that parse JSON do not break later). Update existing integration assertion that reads results to tolerate `query` if that test runs in CI against this commit.
 
-**Test:** unit or handler-level test that empty query yields `MalformedRequest`; `cargo test -p promptforge-gateway --test it web_search_returns_results`
+**Test:** unit or handler-level test that empty query yields `MalformedRequest`; `cargo test -p runvil-gateway --test it web_search_returns_results`
 
 ### step-3 - Post-process functions
 
 Add pure functions in `tools.rs`: `sanitize_text`, `strip_tracking_params`, `host_from_url`, `site_name_from_host`, `filter_domains`, `diversify_hosts`. Unit tests covering the worked example numbers and the five bullets previously listed (caps, utm/fbclid, include, exclude, diversify 3+2 → 2+2 at count 4).
 
-**Test:** `cargo test -p promptforge-gateway --lib diversify_hosts sanitize_text strip_tracking filter_domains`
+**Test:** `cargo test -p runvil-gateway --lib diversify_hosts sanitize_text strip_tracking filter_domains`
 
 ### step-4 - Brave + pipeline
 
 Replace `brave_search` with a params struct (query, over-fetch count, optional knobs). Always send `extra_snippets=true`. After map, run full post-process. Prefix upstream errors with `web_search: `. Update `#[ignore]` live test signature.
 
-**Test:** `cargo test -p promptforge-gateway --lib`
+**Test:** `cargo test -p runvil-gateway --lib`
 
 ### step-5 - Integration tests
 
 Extend `fake_brave` to return at least 5 hits on 2 hosts with optional `extra_snippets`. Assert: `query` echo; at most 2 results per host when default config applies; empty query → 400; keep 401 and 404 tests.
 
-**Test:** `cargo test -p promptforge-gateway --test it web_search`
+**Test:** `cargo test -p runvil-gateway --test it web_search`
 
 ### step-6 - Core schema
 
-Update `promptforge-core` `WebSearch::description` and `parameters_schema` for all optional fields (types: string or array of strings; `count` integer). Update descriptor unit test expected JSON.
+Update `runvil-core` `WebSearch::description` and `parameters_schema` for all optional fields (types: string or array of strings; `count` integer). Update descriptor unit test expected JSON.
 
-**Test:** `cargo test -p promptforge-core descriptor_is_stable`
+**Test:** `cargo test -p runvil-core descriptor_is_stable`
 
 ### step-7 - Docs + final Verify
 
 Update `design-gateway.md` section `POST /v1/tools/web_search` to match this contract. Update `README.md` tool section with under 15 new lines on defaults. Comment optional keys in `gateway.toml` without requiring them.
 
-**Final Verify:** fmt, clippy (both packages), `cargo test -p promptforge-gateway`, `cargo test -p promptforge-core descriptor_is_stable`
+**Final Verify:** fmt, clippy (both packages), `cargo test -p runvil-gateway`, `cargo test -p runvil-core descriptor_is_stable`
 
 ### step-8 - Qwen3.6 briefer evaluation (after search upgrade)
 
-Run only after step-7 is committed and Verify passed. This step evaluates the upgraded `web_search` under a newer local model. It does **not** edit `briefer.md` or any promptforge prompt.
+Run only after step-7 is committed and Verify passed. This step evaluates the upgraded `web_search` under a newer local model. It does **not** edit `briefer.md` or any runvil prompt.
 
 **Model pin (dense 27B, matches prior qwen27 cell size class)**
 
@@ -303,7 +303,7 @@ Run only after step-7 is committed and Verify passed. This step evaluates the up
 
 **Serve + smoke (each quant)**
 
-1. Kill any prior gateway/`llama-server`; `cargo run -p promptforge-gateway -- serve` the Q4 profile first
+1. Kill any prior gateway/`llama-server`; `cargo run -p runvil-gateway -- serve` the Q4 profile first
 2. Smoke: `/health`, `/v1/models` (`tool_dialect=openai`, `tools_mode=native`, `context>=65536`), one-turn native tool call
 3. If load fails at 64k (VRAM/slot), stop that quant, log blocker in research, continue to Q5 only if Q4 failed for a quant-specific reason; if both fail at 64k, stop step as blocked with evidence (do not silently drop to 32k)
 
@@ -313,7 +313,7 @@ Subjects (exact strings): `The C++ Alliance`, `Boost C++ Library Collection`, `B
 
 For each quant profile:
 
-1. `PROMPTFORGE_GATEWAY_URL` / `PROMPTFORGE_GATEWAY_KEY` set; `cargo run -p promptforge-dev -- briefer.md "<subject>"`
+1. `RUNVIL_GATEWAY_URL` / `RUNVIL_GATEWAY_KEY` set; `cargo run -p runvil-dev -- briefer.md "<subject>"`
 2. Archive `briefer.store/evidence.md` to scratch `cabinet/_scratch/briefer-evidence-rounds/qwen36-<q4|q5>-<subject-slug>-r0-evidence.md` (and stderr/stdout siblings)
 3. Score lightly vs locked qwen9 bests in `cabinet/_research/2026-08-08-briefer-evidence-tuning.md`: packet bytes, clean five headers, search+fetch discipline (epilog stubs), Alliance EIN/Falco, Boost Shielder, Bloomberg FactSet/wrong-entity hygiene
 4. After Q4 cell completes (or hard-blocks), switch profile to Q5 and repeat the three subjects
@@ -326,7 +326,7 @@ Append a dated section to `cabinet/_research/2026-08-08-briefer-evidence-tuning.
 
 Stop gateway. Do not delete Qwen3.6 caches unless the operator asks (large re-download). Leave `qwen36-q4.toml` / `qwen36-q5.toml` on disk for reuse.
 
-**Test / gate for this step:** not a cargo test - success is archived evidence for both quants (or a documented VRAM/slot blocker) plus the research-log append. No promptforge crate commit required unless a gateway bug is found; if a bug fix is required, cut a separate commit outside this plan's step numbering and note it in the research log.
+**Test / gate for this step:** not a cargo test - success is archived evidence for both quants (or a documented VRAM/slot blocker) plus the research-log append. No runvil crate commit required unless a gateway bug is found; if a bug fix is required, cut a separate commit outside this plan's step numbering and note it in the research log.
 
 ---
 
@@ -334,7 +334,7 @@ Stop gateway. Do not delete Qwen3.6 caches unless the operator asks (large re-do
 
 - Result cache / TTL
 - Multi-provider / RRF / Brave LLM Context
-- Briefer or promptforge prompt caller changes (step-8 evaluates; it does not edit prompts)
+- Briefer or runvil prompt caller changes (step-8 evaluates; it does not edit prompts)
 - Adding the `url` or `psl` crates
 - Qwen3.6 MoE (35B-A3B), MTP, or context below 65536 for the step-8 trial
 

@@ -3,13 +3,13 @@ use std::{ffi::OsString, path::PathBuf};
 use gateway::{ProfileName, ServeOptions};
 
 pub(crate) const USAGE: &str = concat!(
-    "usage: promptforge-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
-    "       promptforge-gateway diagnostics [--config PATH]\n",
-    "       promptforge-gateway --version\n",
-    "the config path may also be set with the PROMPTFORGE_GATEWAY_CONFIG environment variable;\n",
+    "usage: runvil-gateway [--config PATH] [--profile NAME] [--no-tray] [--login] [--print-url] [--browser]\n",
+    "       runvil-gateway diagnostics [--config PATH]\n",
+    "       runvil-gateway --version\n",
+    "the config path may also be set with the RUNVIL_GATEWAY_CONFIG environment variable;\n",
     "--config wins over it\n",
     "with no config path, the gateway searches beside the executable, the current directory,\n",
-    "and the profile's .promptforge directory, generating a default config on first run\n",
+    "and the profile's .runvil directory, generating a default config on first run\n",
     "diagnostics  print a JSON report of the state dir, config, logs, and gateway discovery file;\n",
     "             never serves, rotates logs, or parses the config\n",
     "--no-tray    run headless (Ctrl-C driven); for servers and CI\n",
@@ -64,7 +64,7 @@ pub(crate) struct Invocation {
 ///
 /// The bare invocation serves; there are no subcommands. Uses `OsString`
 /// operands so non-UTF-8 config paths survive. The config path
-/// (`--config PATH`, falling back to `PROMPTFORGE_GATEWAY_CONFIG`) stays
+/// (`--config PATH`, falling back to `RUNVIL_GATEWAY_CONFIG`) stays
 /// optional: with neither set, the gateway discovers or generates the
 /// boot config itself. `--profile NAME` is validated into a
 /// [`ProfileName`] at parse time.
@@ -136,8 +136,7 @@ pub(crate) fn parse_args(
         ));
     }
 
-    let config_path =
-        resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
+    let config_path = resolve_config_path(config_path, std::env::var_os("RUNVIL_GATEWAY_CONFIG"));
 
     Ok(Invocation {
         command: LaunchCommand::Serve,
@@ -177,8 +176,7 @@ fn parse_diagnostics_args(args: impl Iterator<Item = OsString>) -> Result<Invoca
             }
         }
     }
-    let config_path =
-        resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"));
+    let config_path = resolve_config_path(config_path, std::env::var_os("RUNVIL_GATEWAY_CONFIG"));
     Ok(Invocation {
         command: LaunchCommand::Diagnostics,
         serve: ServeOptions::new(config_path, None),
@@ -189,7 +187,7 @@ fn parse_diagnostics_args(args: impl Iterator<Item = OsString>) -> Result<Invoca
 }
 
 /// Resolves the config path: the `--config` flag wins, then the
-/// `PROMPTFORGE_GATEWAY_CONFIG` environment variable - but only when it
+/// `RUNVIL_GATEWAY_CONFIG` environment variable - but only when it
 /// names an existing file. A stale env var warns and falls through to boot
 /// discovery: ambient state rots in ways a typed CLI path does not, and a
 /// forgotten variable must not hard-fail a first-run boot. A `--config`
@@ -207,7 +205,7 @@ fn resolve_config_path(cli: Option<PathBuf>, env: Option<OsString>) -> Option<Pa
         }
         tracing::warn!(
             path = %path.display(),
-            "PROMPTFORGE_GATEWAY_CONFIG names no file; falling back to discovery"
+            "RUNVIL_GATEWAY_CONFIG names no file; falling back to discovery"
         );
         None
     })

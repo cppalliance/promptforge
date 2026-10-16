@@ -84,7 +84,7 @@ async fn put_while_ephemeral_returns_false_and_writes_nothing() {
 #[tokio::test]
 async fn put_with_a_file_open_persists_and_ui_state_reflects_it() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("mine.pfwork");
+    let path = home.path().join("mine.rvwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
     assert_eq!(
@@ -129,7 +129,7 @@ async fn put_with_a_file_open_persists_and_ui_state_reflects_it() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn overlapping_puts_to_one_key_leave_the_file_holding_what_memory_holds() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("race.pfwork");
+    let path = home.path().join("race.rvwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
 
@@ -169,8 +169,8 @@ async fn overlapping_puts_to_one_key_leave_the_file_holding_what_memory_holds() 
 #[tokio::test]
 async fn open_reads_a_files_ui_state_into_memory_and_a_later_open_replaces_it() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let full_path = home.path().join("full.pfwork");
-    let empty_path = home.path().join("empty.pfwork");
+    let full_path = home.path().join("full.rvwork");
+    let empty_path = home.path().join("empty.rvwork");
     // A file written through the storage layer alone.
     let file = WorkspaceFile::create(
         &full_path,
@@ -231,7 +231,7 @@ async fn open_reads_a_files_ui_state_into_memory_and_a_later_open_replaces_it() 
 #[tokio::test]
 async fn a_failed_persist_leaves_the_in_memory_value_standing() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let path = home.path().join("closed.pfwork");
+    let path = home.path().join("closed.rvwork");
     let workspace = Workspace::new();
     workspace.save_as(&path).await.expect("save as creates");
     // Stop the actor while leaving the backing in place: every later
@@ -259,9 +259,9 @@ async fn a_failed_persist_leaves_the_in_memory_value_standing() {
 #[tokio::test]
 async fn save_as_starts_empty_and_duplicate_keeps_the_live_values() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let first_path = home.path().join("first.pfwork");
-    let second_path = home.path().join("second.pfwork");
-    let copy_path = home.path().join("copy.pfwork");
+    let first_path = home.path().join("first.rvwork");
+    let second_path = home.path().join("second.rvwork");
+    let copy_path = home.path().join("copy.rvwork");
     let workspace = Workspace::new();
     workspace
         .save_as(&first_path)

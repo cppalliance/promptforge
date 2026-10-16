@@ -146,7 +146,7 @@ fn the_wire_shape_matches_the_server_fixture() {
     );
 
     let current: CurrentResponse = serde_json::from_str(
-        r#"{"path":"C:\\ws\\Name.pfwork","name":"Name","grants":[{"path":"C:\\src","exists":true}],"window_state":{"width":1280,"height":800,"x":100,"y":-50,"maximized":true}}"#,
+        r#"{"path":"C:\\ws\\Name.rvwork","name":"Name","grants":[{"path":"C:\\src","exists":true}],"window_state":{"width":1280,"height":800,"x":100,"y":-50,"maximized":true}}"#,
     )
     .expect("the current-file answer parses");
     assert_eq!(current.window_state, Some(state(1280, 800, 100, -50, true)));

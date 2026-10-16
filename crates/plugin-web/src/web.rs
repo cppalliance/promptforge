@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use promptforge_plugin::{
+use runvil_plugin::{
     HostServices, Package, Plugin, PluginFuture, PluginId, ServiceKey, ToolContext, ToolDescriptor,
     ToolError, ToolErrorKind, ToolId, ToolOutput,
 };
@@ -21,24 +21,24 @@ use crate::search::WebSearch;
 
 /// The Plugin's label, which a Host adds to its package registry.
 ///
-/// Its name is `promptforge/web`, so a Host that picks no name installs it
+/// Its name is `runvil/web`, so a Host that picks no name installs it
 /// as `web`. It has no prelude and needs no per-run service; its
 /// `construct` reads [`SEARCH_PROVIDER`] and the Plugin contract's
-/// [`promptforge_plugin::TOKIO_RUNTIME`] service from the Host-wide
+/// [`runvil_plugin::TOKIO_RUNTIME`] service from the Host-wide
 /// services and takes no configuration but `null` or `{}`.
 pub const PACKAGE: Package =
-    Package::new("promptforge/web", construct).description("Search the web and fetch pages");
+    Package::new("runvil/web", construct).description("Search the web and fetch pages");
 
 /// The service key for the Host's search provider.
 ///
-/// The key's id is `promptforge/search-provider`. A Host provides it among
+/// The key's id is `runvil/search-provider`. A Host provides it among
 /// its Host-wide services, and every search runs through it.
 pub const SEARCH_PROVIDER: ServiceKey<dyn SearchProvider> =
-    ServiceKey::new("promptforge/search-provider");
+    ServiceKey::new("runvil/search-provider");
 
 /// The key `construct` reads the Host's runtime through. Every fetch is
 /// spawned onto it.
-const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new(promptforge_plugin::TOKIO_RUNTIME);
+const TOKIO_RUNTIME: ServiceKey<Handle> = ServiceKey::new(runvil_plugin::TOKIO_RUNTIME);
 
 /// The one object every run shares: its two-tool list and the two tools.
 #[derive(Debug)]
@@ -64,10 +64,10 @@ fn construct(
         return Err(ToolError::message("web takes no configuration"));
     }
     let provider = services.get(&SEARCH_PROVIDER).ok_or_else(|| {
-        ToolError::message("web needs promptforge/search-provider, and this host provides none")
+        ToolError::message("web needs runvil/search-provider, and this host provides none")
     })?;
     let runtime = services.get(&TOKIO_RUNTIME).ok_or_else(|| {
-        ToolError::message("web needs promptforge/tokio-runtime, and this host provides none")
+        ToolError::message("web needs runvil/tokio-runtime, and this host provides none")
     })?;
     let web = Web::new(
         name,

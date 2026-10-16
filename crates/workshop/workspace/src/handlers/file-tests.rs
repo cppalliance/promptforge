@@ -98,7 +98,7 @@ async fn current_on_an_ephemeral_workspace_reports_no_file_and_its_grants() {
 #[tokio::test]
 async fn current_answers_the_pinned_json_shape() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("pinned.pfwork");
+    let file_path = home.path().join("pinned.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     let root = workspace.grant(dir.path()).expect("grant the tempdir");
@@ -146,7 +146,7 @@ async fn current_answers_the_pinned_json_shape() {
 #[cfg(unix)]
 fn non_unicode_path() -> PathBuf {
     use std::os::unix::ffi::OsStrExt as _;
-    PathBuf::from(std::ffi::OsStr::from_bytes(b"/home/lost-\xff.pfwork"))
+    PathBuf::from(std::ffi::OsStr::from_bytes(b"/home/lost-\xff.rvwork"))
 }
 
 /// A path that is not valid Unicode: an unpaired surrogate.
@@ -155,7 +155,7 @@ fn non_unicode_path() -> PathBuf {
     use std::os::windows::ffi::OsStringExt as _;
     let mut wide: Vec<u16> = "C:\\lost-".encode_utf16().collect();
     wide.push(0xd800);
-    wide.extend(".pfwork".encode_utf16());
+    wide.extend(".rvwork".encode_utf16());
     PathBuf::from(std::ffi::OsString::from_wide(&wide))
 }
 
@@ -184,7 +184,7 @@ fn a_non_unicode_workspace_path_serializes_lossily() {
 #[tokio::test]
 async fn save_as_then_current_shows_the_new_path_and_name() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     let root = workspace.grant(dir.path()).expect("grant the tempdir");
@@ -210,7 +210,7 @@ async fn save_as_then_current_shows_the_new_path_and_name() {
     workspace.close_backing_for_test().await;
     assert_eq!(
         names_in(home.path()),
-        ["mine.pfwork"],
+        ["mine.rvwork"],
         "save as creates exactly the file"
     );
 }
@@ -218,7 +218,7 @@ async fn save_as_then_current_shows_the_new_path_and_name() {
 #[tokio::test]
 async fn open_replaces_the_grants_with_the_files() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("theirs.pfwork");
+    let file_path = home.path().join("theirs.rvwork");
     let theirs = tempfile::TempDir::new().expect("tempdir");
     let mine = tempfile::TempDir::new().expect("tempdir");
     let author = Workspace::new();
@@ -253,8 +253,8 @@ async fn open_replaces_the_grants_with_the_files() {
 #[tokio::test]
 async fn an_alien_database_is_refused_and_current_still_shows_the_prior_grants() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
-    let alien_path = home.path().join("alien.pfwork");
+    let file_path = home.path().join("mine.rvwork");
+    let alien_path = home.path().join("alien.rvwork");
     let mine = tempfile::TempDir::new().expect("tempdir");
     {
         let conn = open_database(&alien_path)
@@ -284,7 +284,7 @@ async fn an_alien_database_is_refused_and_current_still_shows_the_prior_grants()
         .as_str()
         .expect("the envelope includes a message");
     assert!(
-        message.contains("is not a promptforge workspace file"),
+        message.contains("is not a runvil workspace file"),
         "the refusal names what was required: {message}"
     );
 
@@ -311,7 +311,7 @@ async fn opening_a_missing_path_answers_not_found() {
         json_request(
             "POST",
             "/workspace/file/open",
-            path_body(&home.path().join("nowhere.pfwork")),
+            path_body(&home.path().join("nowhere.rvwork")),
         ),
     )
     .await;
@@ -326,7 +326,7 @@ async fn opening_a_missing_path_answers_not_found() {
 #[tokio::test]
 async fn save_as_onto_a_taken_path_answers_conflict() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let taken = home.path().join("taken.pfwork");
+    let taken = home.path().join("taken.rvwork");
     std::fs::write(&taken, b"already here").expect("placeholder writes");
     let workspace = Workspace::new();
 
@@ -373,7 +373,7 @@ async fn put_window_state_while_ephemeral_is_a_no_op() {
 #[tokio::test]
 async fn put_window_state_on_a_file_backed_workspace_persists() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let file_path = home.path().join("mine.pfwork");
+    let file_path = home.path().join("mine.rvwork");
     let workspace = Workspace::new();
     workspace
         .save_as(&file_path)
@@ -405,8 +405,8 @@ async fn put_window_state_on_a_file_backed_workspace_persists() {
 #[tokio::test]
 async fn duplicate_switches_current_to_the_copy() {
     let home = tempfile::TempDir::new().expect("tempdir");
-    let original_path = home.path().join("original.pfwork");
-    let copy_path = home.path().join("copy.pfwork");
+    let original_path = home.path().join("original.rvwork");
+    let copy_path = home.path().join("copy.rvwork");
     let dir = tempfile::TempDir::new().expect("tempdir");
     let workspace = Workspace::new();
     let root = workspace.grant(dir.path()).expect("grant the tempdir");
@@ -441,7 +441,7 @@ async fn duplicate_switches_current_to_the_copy() {
     workspace.close_backing_for_test().await;
     assert_eq!(
         names_in(home.path()),
-        ["copy.pfwork", "original.pfwork"],
+        ["copy.rvwork", "original.rvwork"],
         "both files exist and neither left a sidecar once closed"
     );
 }

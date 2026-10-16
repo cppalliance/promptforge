@@ -45,7 +45,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-markdown-render-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-markdown-render-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { renderMarkdown, highlightCode, markdownReady, MarkdownStream, FADE_MS } = await import(
   pathToFileURL(bundlePath).href

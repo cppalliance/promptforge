@@ -10,8 +10,8 @@ use std::sync::atomic::Ordering;
 
 use harness_runner::Harness;
 use harness_runner::recorder::MemoryRecorder;
-use promptforge::model::{Completion, CompletionResult, ToolCall};
-use promptforge_plugin::HostServices;
+use runvil::model::{Completion, CompletionResult, ToolCall};
+use runvil_plugin::HostServices;
 use serde_json::json;
 
 use super::{
@@ -36,7 +36,7 @@ fn loops_offering(tools: &[&str]) -> String {
         writeln!(offers, "tools.offer('{tool}')").unwrap();
     }
     format!(
-        "---\nname: loops\ndescription: d\npromptforge: 0\nplugins:\n{plugins}\
+        "---\nname: loops\ndescription: d\nrunvil: 0\nplugins:\n{plugins}\
          models:\n  writer: {{}}\n---\n\n\
          # Loops\n\n```lua\nmodels.default('writer')\n```\n\n\
          ## Only\n\n```lua\n{offers}local msgs = messages.new()\nmsgs:user('hold')\n\
@@ -76,7 +76,7 @@ async fn settle() {
 
 /// Main spawns Child, which asks the operator; Main then waits on a
 /// `wait` round, cancels Child, and waits on an `after` round.
-const CANCELS_AN_ASKER: &str = "---\nname: cancels\ndescription: d\npromptforge: 0\n\
+const CANCELS_AN_ASKER: &str = "---\nname: cancels\ndescription: d\nrunvil: 0\n\
     plugins:\n  - user-input\nmodels:\n  writer: {}\n---\n\n\
     # Cancels\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Main\n\n```lua\n\

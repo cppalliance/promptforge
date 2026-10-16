@@ -264,14 +264,14 @@ mod tests {
     #[test]
     fn windows_path_separators_survive_json_escaping() {
         let report = parse(&render(
-            Some(Path::new("C:\\Users\\v\\.promptforge")),
+            Some(Path::new("C:\\Users\\v\\.runvil")),
             None,
             None,
             false,
         ));
         assert_eq!(
             report["state_dir"].as_str(),
-            Some("C:\\Users\\v\\.promptforge"),
+            Some("C:\\Users\\v\\.runvil"),
             "backslashes round-trip through the JSON escaping"
         );
     }

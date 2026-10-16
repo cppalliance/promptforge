@@ -1,5 +1,5 @@
 //! Native Realtime noise: streams each 16 kHz mono 16-bit `.wav` clip in
-//! the directory `PROMPTFORGE_NOISE_CLIPS` names, the noise clips the native
+//! the directory `RUNVIL_NOISE_CLIPS` names, the noise clips the native
 //! Silero tests read, through the mounted `/v1/realtime` route at real-time
 //! pace, as the native capture streams its clip, and asserts that no
 //! hypothesis and no final shows text.
@@ -13,13 +13,13 @@ use super::capture::{Recorder, negotiate, stream_and_commit};
 use super::native::{clip_24khz, native_speech_service_with};
 use super::{connect, server};
 
-const CLIPS_VARIABLE: &str = "PROMPTFORGE_NOISE_CLIPS";
+const CLIPS_VARIABLE: &str = "RUNVIL_NOISE_CLIPS";
 const MIN_NOISE_CLIPS: usize = 3;
 const HYPOTHESIS: &str = "conversation.item.input_audio_transcription.hypothesis";
 const DELTA: &str = "conversation.item.input_audio_transcription.delta";
 const COMPLETED: &str = "conversation.item.input_audio_transcription.completed";
 
-/// Every `.wav` clip in the directory `PROMPTFORGE_NOISE_CLIPS` names, in
+/// Every `.wav` clip in the directory `RUNVIL_NOISE_CLIPS` names, in
 /// path order.
 fn noise_clips() -> Vec<PathBuf> {
     let Some(directory) = std::env::var_os(CLIPS_VARIABLE).map(PathBuf::from) else {

@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex};
 use harness_runner::effect_loop::drive_run;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Performers};
 use harness_runner::recorder::{RecordKind, RunOutcome};
-use promptforge::cancel::CancelHandle;
-use promptforge::effect::Round;
-use promptforge::event::ReplyOrigin;
-use promptforge::ids::RoundId;
-use promptforge::model::{
+use runvil::cancel::CancelHandle;
+use runvil::effect::Round;
+use runvil::event::ReplyOrigin;
+use runvil::ids::RoundId;
+use runvil::model::{
     Completion, CompletionError, CompletionOptions, CompletionResult, Message, ModelBinding,
     ModelCatalog, ModelDescriptor, ModelId, ThinkingMode, ToolSchema,
 };
-use promptforge::timestamp::Timestamp;
-use promptforge::{Prompt, Run, RunContext};
+use runvil::timestamp::Timestamp;
+use runvil::{Prompt, Run, RunContext};
 use serde_json::{Value, json};
 
 use super::begun_log;
@@ -27,7 +27,7 @@ use crate::support::{EXECUTION, TEST_SEED, unused};
 /// A program that infers once and then chats once: the nested round
 /// first, then the section's own round over its message list.
 const INFERS_THEN_CHATS: &str = "---\nname: runner-broker\ndescription: infers then chats\n\
-    promptforge: 0\nmodels:\n  writer: {}\n---\n\n\
+    runvil: 0\nmodels:\n  writer: {}\n---\n\n\
     # Broker\n\n```lua\nmodels.default('writer')\n```\n\n\
     ## Only\n\n```lua\n\
     local inferred = models.infer('infer round')\n\

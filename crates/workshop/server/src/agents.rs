@@ -48,8 +48,8 @@ use harness::record::RunId;
 use harness::vfs::VfsRef;
 use harness::{Harness, RunRequest};
 use plugin_web::SEARCH_PROVIDER;
-use promptforge::tools::ToolId;
-use promptforge_plugin::{PluginId, ServiceKey};
+use runvil::tools::ToolId;
+use runvil_plugin::{PluginId, ServiceKey};
 use serde_json::Value;
 use workshop_agents::{
     Conversation, ConversationId, Conversations, LaunchError, TokioTimer, discover_agents,
@@ -71,8 +71,7 @@ const HARNESS_STATE_DIR: &str = "harness";
 
 /// The key the server provides its runtime under: the Plugin contract's
 /// tokio runtime service, as the handle it supplies.
-const RUNTIME: ServiceKey<tokio::runtime::Handle> =
-    ServiceKey::new(promptforge_plugin::TOKIO_RUNTIME);
+const RUNTIME: ServiceKey<tokio::runtime::Handle> = ServiceKey::new(runvil_plugin::TOKIO_RUNTIME);
 
 /// The server's installed Plugins over its Host-wide [`services`], beside
 /// the ask tool's id. `mcp` is the `[agents] mcp` setting: the servers of
@@ -174,7 +173,7 @@ fn with_plugins(
             None
         }
     };
-    if let Err(error) = host.install("promptforge/subagents", None, Value::Null) {
+    if let Err(error) = host.install("runvil/subagents", None, Value::Null) {
         tracing::warn!(%error, "the subagents Plugin was not installed");
     }
     for (server, entry) in servers {

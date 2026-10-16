@@ -1,5 +1,5 @@
 //! Plugin-family fixtures: a `plugin-*` crate depends only on
-//! `promptforge-plugin`, `shared-*` crates, and outside libraries; Engine,
+//! `runvil-plugin`, `shared-*` crates, and outside libraries; Engine,
 //! Gateway, and Harness crates may not depend on a Plugin crate, except
 //! `harness-gateway-client`.
 
@@ -12,8 +12,8 @@ fn plugin_web_naming(deps: &str) -> Vec<String> {
     let root = tempfile::TempDir::new().expect("tempdir");
     write_crate(root.path(), "plugin-web", "plugin-web", deps);
     for (dir, name) in [
-        ("promptforge-plugin", "promptforge-plugin"),
-        ("promptforge", "promptforge"),
+        ("runvil-plugin", "runvil-plugin"),
+        ("runvil", "runvil"),
         ("shared-loopback", "shared-loopback"),
         ("harness", "harness"),
         ("plugin-user-input", "plugin-user-input"),
@@ -25,14 +25,14 @@ fn plugin_web_naming(deps: &str) -> Vec<String> {
 }
 
 const PLUGIN_RULE: &str =
-    "plugin crates may depend only on promptforge-plugin, shared-* crates, and outside libraries";
+    "plugin crates may depend only on runvil-plugin, shared-* crates, and outside libraries";
 
 #[test]
 fn a_plugin_crate_naming_the_contract_and_a_shared_crate_passes() {
     let violations = plugin_web_naming(
-        "[dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\" }\n\
+        "[dependencies]\nrunvil-plugin = { path = \"../runvil-plugin\" }\n\
          shared-loopback = { path = \"../shared-loopback\" }\n\
-         [dev-dependencies]\npromptforge-plugin = { path = \"../promptforge-plugin\", features = [\"test-support\"] }\n",
+         [dev-dependencies]\nrunvil-plugin = { path = \"../runvil-plugin\", features = [\"test-support\"] }\n",
     );
     assert!(violations.is_empty(), "{violations:?}");
 }
@@ -40,7 +40,7 @@ fn a_plugin_crate_naming_the_contract_and_a_shared_crate_passes() {
 #[test]
 fn a_plugin_crate_naming_any_other_workspace_crate_is_reported_in_every_table() {
     for (table, dep) in [
-        ("dependencies", "promptforge"),
+        ("dependencies", "runvil"),
         ("dependencies", "harness"),
         ("dev-dependencies", "plugin-user-input"),
         ("build-dependencies", "build-ui"),
@@ -73,7 +73,7 @@ fn naming_plugin_web(dir: &str, package: &str, table: &str) -> Vec<String> {
 #[test]
 fn engine_gateway_and_harness_crates_naming_a_plugin_crate_are_reported() {
     for (dir, package, table) in [
-        ("promptforge", "promptforge", "dependencies"),
+        ("runvil", "runvil", "dependencies"),
         ("gateway/app", "gateway", "dependencies"),
         ("harness", "harness", "dev-dependencies"),
         ("harness-internal/runner", "harness-runner", "dependencies"),
@@ -83,7 +83,7 @@ fn engine_gateway_and_harness_crates_naming_a_plugin_crate_are_reported() {
         assert!(
             violations[0].starts_with(&format!("{package} depends on plugin-web:"))
                 && violations[0].contains(
-                    "promptforge, gateway, and harness crates must not depend on plugin crates"
+                    "runvil, gateway, and harness crates must not depend on plugin crates"
                 ),
             "{package}: {violations:?}"
         );

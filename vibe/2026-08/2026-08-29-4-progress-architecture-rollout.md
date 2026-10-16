@@ -1,12 +1,12 @@
 ---
 name: Progress architecture rollout
-overview: Build promptforge-progress (operation-scoped weighted progress trees over a process-lifetime hub, feature-gated serde wire events, remote import), adopt it across all four existing ad-hoc progress systems, expose a gateway SSE progress endpoint, and merge gateway events into the workshop-server hub that renders through the existing Push facade.
+overview: Build runvil-progress (operation-scoped weighted progress trees over a process-lifetime hub, feature-gated serde wire events, remote import), adopt it across all four existing ad-hoc progress systems, expose a gateway SSE progress endpoint, and merge gateway events into the workshop-server hub that renders through the existing Push facade.
 todos:
   - id: crate
-    content: "Create promptforge-progress crate: operation-scoped trees, hub broker, handles, coalescing, wire events behind serde feature, remote import, snapshots"
+    content: "Create runvil-progress crate: operation-scoped trees, hub broker, handles, coalescing, wire events behind serde feature, remote import, snapshots"
     status: completed
   - id: transcribe
-    content: Add prewarm + new_with_progress to promptforge-transcribe, parallelize model loads
+    content: Add prewarm + new_with_progress to runvil-transcribe, parallelize model loads
     status: completed
   - id: gl-bytes
     content: "gateway-local: TreeProgress for byte-measurable producers (download, verify, extract)"
@@ -33,7 +33,7 @@ todos:
     content: "gateway: cache.rs download leaves + TTY renderer absorbing indicatif"
     status: completed
   - id: client
-    content: Add subscribe_progress to promptforge-gateway-client
+    content: Add subscribe_progress to runvil-gateway-client
     status: completed
   - id: ws-renderer
     content: "workshop-server: ProgressHub in AppState + hub-to-Push renderer task driving the status bar"
@@ -53,11 +53,11 @@ todos:
 isProject: false
 ---
 
-# Progress Architecture: promptforge-progress with Full Adoption
+# Progress Architecture: runvil-progress with Full Adoption
 
 ## Context
 
-The workspace ships four independent ad-hoc progress mechanisms: indicatif/tracing reporters in [artifacts/progress.rs](promptforge/crates/promptforge-gateway-local/src/artifacts/progress.rs), per-request `DownloadProgress` SSE in [cache.rs](promptforge/crates/promptforge-gateway/src/cache.rs), a `&'static str` stage channel in [lib.rs `run_switch`](promptforge/crates/promptforge-gateway/src/lib.rs), and hand-built `push_progress` calls in [provision.rs](promptforge/crates/promptforge-workshop-server/src/provision.rs). None compose. Meanwhile [push.rs](promptforge/crates/promptforge-workshop-server/src/push.rs) already is a complete UI renderer (`push_progress` -> `StatusFrame` -> `/ws`).
+The workspace ships four independent ad-hoc progress mechanisms: indicatif/tracing reporters in [artifacts/progress.rs](runvil/crates/runvil-gateway-local/src/artifacts/progress.rs), per-request `DownloadProgress` SSE in [cache.rs](runvil/crates/runvil-gateway/src/cache.rs), a `&'static str` stage channel in [lib.rs `run_switch`](runvil/crates/runvil-gateway/src/lib.rs), and hand-built `push_progress` calls in [provision.rs](runvil/crates/runvil-workshop-server/src/provision.rs). None compose. Meanwhile [push.rs](runvil/crates/runvil-workshop-server/src/push.rs) already is a complete UI renderer (`push_progress` -> `StatusFrame` -> `/ws`).
 
 Architecture (whisper is on-device in workshop-server; the gateway only serves model bytes via its blob cache):
 
@@ -80,19 +80,19 @@ flowchart LR
 
 Everything a fresh session needs, nothing here requires the chat that wrote this plan.
 
-- **Repo**: `c:\Users\Vinnie\cursor\promptforge` (a git repo; worktree was clean when this plan was written - verify with `git status` before step 1 and stop if dirty). All linked paths in this plan are relative to the workspace root `c:\Users\Vinnie\cursor`.
+- **Repo**: `c:\Users\Vinnie\cursor\runvil` (a git repo; worktree was clean when this plan was written - verify with `git status` before step 1 and stop if dirty). All linked paths in this plan are relative to the workspace root `c:\Users\Vinnie\cursor`.
 - **Governing rulebooks**: `tools-public/rulebooks/vibe-rulebook.md` (execution protocol; subagent dispatches name its `<rule-book>`, `<code-review>`, and `<commit-message>` tag blocks) and `tools-public/rulebooks/rust-rulebook.md` (Rust standards). Read both before step 1.
-- **House rules manifest** (vibe rule 3): `promptforge/AGENTS.md` governs everything. Per-crate files bind their crates: `crates/promptforge-transcribe/AGENTS.md`, `crates/promptforge-gateway-local/AGENTS.md`, `crates/promptforge-gateway/AGENTS.md`, `crates/promptforge-gateway-client/AGENTS.md`, `crates/promptforge-workshop-server/AGENTS.md`. tool-picker, mcp-server, cli, and dev have no crate-level file - the root governs them. The new crate gets `crates/promptforge-progress/AGENTS.md` written in the sibling convention as part of step 1.
+- **House rules manifest** (vibe rule 3): `runvil/AGENTS.md` governs everything. Per-crate files bind their crates: `crates/runvil-transcribe/AGENTS.md`, `crates/runvil-gateway-local/AGENTS.md`, `crates/runvil-gateway/AGENTS.md`, `crates/runvil-gateway-client/AGENTS.md`, `crates/runvil-workshop-server/AGENTS.md`. tool-picker, mcp-server, cli, and dev have no crate-level file - the root governs them. The new crate gets `crates/runvil-progress/AGENTS.md` written in the sibling convention as part of step 1.
 - **Scratch files**: `vibe-ledger.md` and `vibe-review.md` live in `cabinet/_scratch/progress-rollout/` (create the directory at run start).
-- **Workspace mechanics**: `members = ["crates/*"]` picks up the new crate automatically; add `promptforge-progress = { path = "crates/promptforge-progress", version = "0.1.0" }` to `[workspace.dependencies]` in the root `Cargo.toml` so members write `promptforge-progress.workspace = true`. Edition 2024, rust-version 1.89, license BSL-1.0, `[lints] workspace = true` in the member manifest - the workspace lints already match the rust rulebook.
-- **Test fixtures**: transcribe tests marked `#[ignore = "requires whisper test fixtures (tests/fixtures/)"]` need `crates/promptforge-transcribe/tests/fixtures/` populated (ggml-tiny.en.bin from the Hugging Face URL named in that crate's lib.rs, plus jfk.wav). Steps 2 and 14 name tests that need fixtures; without them those tests stay ignored and the non-fixture tests carry the step's verification.
+- **Workspace mechanics**: `members = ["crates/*"]` picks up the new crate automatically; add `runvil-progress = { path = "crates/runvil-progress", version = "0.1.0" }` to `[workspace.dependencies]` in the root `Cargo.toml` so members write `runvil-progress.workspace = true`. Edition 2024, rust-version 1.89, license BSL-1.0, `[lints] workspace = true` in the member manifest - the workspace lints already match the rust rulebook.
+- **Test fixtures**: transcribe tests marked `#[ignore = "requires whisper test fixtures (tests/fixtures/)"]` need `crates/runvil-transcribe/tests/fixtures/` populated (ggml-tiny.en.bin from the Hugging Face URL named in that crate's lib.rs, plus jfk.wav). Steps 2 and 14 name tests that need fixtures; without them those tests stay ignored and the non-fixture tests carry the step's verification.
 - **Commits**: one commit per step, message from the Message subagent, never push.
 
 ## Components
 
 In dependency order, with the reason for each placement:
 
-1. **promptforge-progress** - the vocabulary. Everything depends on it; it depends on no promptforge crate (the invariant core-support advertises, kept separate because core-support's domain is run execution and only core/parser/lua consume it).
+1. **runvil-progress** - the vocabulary. Everything depends on it; it depends on no runvil crate (the invariant core-support advertises, kept separate because core-support's domain is run execution and only core/parser/lua consume it).
 2. **Producers** (transcribe, gateway-local, tool-picker) - independent crates; build in parallel. Each only reports into handles; none knows about events or serde.
 3. **mcp-server** - consumes tool-picker; its two changes (BGE dedup, boot leaves) are sequenced dedup-first because they touch the same call sites.
 4. **gateway** - consumes gateway-local and the vocabulary; adds the process hub and the SSE export. Its three steps are sequenced endpoint-first because the migrations derive from it.
@@ -100,11 +100,11 @@ In dependency order, with the reason for each placement:
 6. **workshop-server** - consumes everything above; renderer before subscriber before provision migration, because each later step feeds the tree the earlier step renders.
 7. **cli / dev** - leaf binaries, TTY renderers only.
 
-## Step 1: New crate `promptforge-progress`
+## Step 1: New crate `runvil-progress`
 
-Lives at `crates/promptforge-progress/` with a sibling-convention `AGENTS.md`. Zero promptforge dependencies. Deps: `tokio` (sync only, for the broadcast), `tracing`; `serde` optional. Features: `default = []`, `serde = ["dep:serde"]` gating `#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]` on the wire types - producers never serialize. Member manifest carries `[lints] workspace = true` like its siblings.
+Lives at `crates/runvil-progress/` with a sibling-convention `AGENTS.md`. Zero runvil dependencies. Deps: `tokio` (sync only, for the broadcast), `tracing`; `serde` optional. Features: `default = []`, `serde = ["dep:serde"]` gating `#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]` on the wire types - producers never serialize. Member manifest carries `[lints] workspace = true` like its siblings.
 
-This step also writes the standing convention into the root `promptforge/AGENTS.md`, so any future code that needs progress knows what to do. Three sentences, approximately: "Long-running work reports progress through `promptforge-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub."
+This step also writes the standing convention into the root `runvil/AGENTS.md`, so any future code that needs progress knows what to do. Three sentences, approximately: "Long-running work reports progress through `runvil-progress`: attach an operation tree to the process `ProgressHub` - or register leaves on the current operation's tree when one exists - and report through the `ProgressHandle` it returns. Never invent a parallel progress channel: no ad-hoc callbacks, stage strings, or direct status-bus calls for fractional progress. Producers never format output; renderers subscribe to the hub."
 
 - `tree.rs`: `ProgressTree` - **operation-scoped, bounded lifetime**. The owner of one operation (startup provisioning, one profile switch, one cache download, one voice provision) creates the tree, registers every leaf up front (`register(label, weight) -> ProgressHandle`), then runs its own existing control flow and reports through the handles; the tree is destroyed when the operation ends. The tree measures, it does not schedule: leaves are not tree-invoked closures, because the stages have heterogeneous intermediate values flowing between them (a download's path feeds the spawn step, a verify feeds a digest) that no uniform `FnOnce(&ProgressHandle)` signature can carry, and because the owner chooses its own concurrency (parallel model loads, overlapping downloads). **Weights are proportional to expected time, not bytes or unit counts** (the Eclipse rule): a leaf's byte total is how *it* computes its own fraction internally; its weight is its share of the operation's expected duration. Weighted aggregate `fraction()`; interior mutability via `Arc` + `AtomicU64` fractions stored as fixed-point millionths (0..=1_000_000) so worker-thread reporters take no locks.
 - `hub.rs`: `ProgressHub` - one `Arc<ProgressHub>` per process, living in `AppState` forever; operations install and remove themselves by lifetime. Internals: `live: std::sync::Mutex<HashMap<OperationId, Arc<TreeState>>>` for membership plus a `tokio::sync::broadcast::Sender<ProgressEvent>` for the event stream, deliberately outside the lock. The Mutex guards membership only (attach, detach, snapshot walk) with microscopic critical sections and no guard crossing an `.await`; leaf fractions are `AtomicU64`s inside `TreeState`, so reporters on worker threads never touch the lock. No Arc cycle: the hub holds `Arc<TreeState>`, the owner's `ProgressTree` handle holds its `OperationId` plus a hub reference and detaches on `Drop` (infallible, non-blocking - a panicking operation still unregisters). Lock poisoning recovers the value, matching `VoiceSlot`'s posture. Conceptually `Arc<Option<ProgressTree>>` generalized to zero-or-more, because operations genuinely overlap (a cache download is per-request and unserialized, and can overlap a profile switch). The empty set is the idle state (there is no "empty tree" - an idle process simply runs no operations): the SSE endpoint then streams only keep-alives and snapshots return empty. This, not a long-lived tree, is what the SSE endpoint and the UI renderer subscribe to.
@@ -119,7 +119,7 @@ This step also writes the standing convention into the root `promptforge/AGENTS.
 
 ## Step 2: transcribe prewarm + progress handle
 
-[worker.rs](promptforge/crates/promptforge-transcribe/src/worker.rs), [engine.rs](promptforge/crates/promptforge-transcribe/src/engine.rs):
+[worker.rs](runvil/crates/runvil-transcribe/src/worker.rs), [engine.rs](runvil/crates/runvil-transcribe/src/engine.rs):
 
 - Add `prewarm(path, &ProgressHandle)`: chunked sequential read (4 MiB reused buffer, `set_units` per chunk) populating the page cache before `WhisperContext::new_with_params`; open/read failures map to the existing `TranscribeError::LoadModel` naming the path (preserves the test at engine.rs:243). Prewarm is unconditional: the product is designed on the assumption that every supported machine has enough memory for the transcription models, so the thrash case the research warns about (full-file prewarm when the model exceeds RAM - llama.cpp Discussion #18758, vs the ~2.8-3.5x cold-load win when it fits, PRs #734/#869) is excluded by design rather than by a runtime gate.
 - `VoiceEngine::new_with_progress(config, Option<ProgressHandle>)`; `new` delegates with `None`. Each worker thread prewarms then loads its own model, which also parallelizes the currently sequential interim/final loads (engine.rs:71-75) - both changes land in this one step.
@@ -128,7 +128,7 @@ This step also writes the standing convention into the root `promptforge/AGENTS.
 
 ## Step 3: gateway-local byte-measurable producers
 
-[artifacts/](promptforge/crates/promptforge-gateway-local/src/artifacts/):
+[artifacts/](runvil/crates/runvil-gateway-local/src/artifacts/):
 
 - Keep the `DownloadProgress` trait as the internal byte-counting seam; add one `TreeProgress` impl feeding a `ProgressHandle` (download bytes via Content-Length).
 - Add the same handle reporting to SHA-256 verify (bytes read - new callback in `verified.rs`/`digest.rs`) and archive extract (entry count).
@@ -137,14 +137,14 @@ This step also writes the standing convention into the root `promptforge/AGENTS.
 
 ## Step 4: gateway-local readiness leaf + runtime wiring
 
-[runtime.rs](promptforge/crates/promptforge-gateway-local/src/runtime.rs), [server.rs](promptforge/crates/promptforge-gateway-local/src/server.rs):
+[runtime.rs](runvil/crates/runvil-gateway-local/src/runtime.rs), [server.rs](runvil/crates/runvil-gateway-local/src/server.rs):
 
 - `LocalRuntime::start` takes `Option<&ProgressHandle>`; registers one subtree per local model (download/verify/extract children from step 3) plus an indeterminate readiness leaf per `llama-server` spawn (the bounded poll in server.rs:202-300 only gets `complete()`).
 - Tests: a runtime start over a mock layout registers the expected subtree shape.
 
 ## Step 5: tool-picker progress handles
 
-[picker.rs](promptforge/crates/promptforge-tool-picker/src/picker.rs), [embed.rs](promptforge/crates/promptforge-tool-picker/src/embed.rs):
+[picker.rs](runvil/crates/runvil-tool-picker/src/picker.rs), [embed.rs](runvil/crates/runvil-tool-picker/src/embed.rs):
 
 - `Model::load_with_progress(Option<&ProgressHandle>)` reports the safetensors copy in chunks (bytes); `Model::load` delegates with `None`.
 - `ToolPicker::build_with_model` gains `Option<&ProgressHandle>`, one fraction step per embedded tool; `build` threads it through.
@@ -152,7 +152,7 @@ This step also writes the standing convention into the root `promptforge/AGENTS.
 
 ## Step 6: fix the duplicate BGE embedding model load in mcp-server
 
-Boot currently loads the ~40-100 MiB BGE model twice: `Index::build` ([retrieval/index.rs:51](promptforge/crates/promptforge-mcp-server/src/retrieval/index.rs)) calls `ToolPicker::build`, and `PreparedTools::new` ([server/bind.rs:130](promptforge/crates/promptforge-mcp-server/src/server/bind.rs)) calls it again. The sharing seams already exist: `Model` is an `Arc`-shared cheap clone, `ToolPicker::build_with_model` is the documented multi-catalog path, and `Index::build_with` already exists gated `#[cfg(test)]` (index.rs:62-76). Call-site wiring only:
+Boot currently loads the ~40-100 MiB BGE model twice: `Index::build` ([retrieval/index.rs:51](runvil/crates/runvil-mcp-server/src/retrieval/index.rs)) calls `ToolPicker::build`, and `PreparedTools::new` ([server/bind.rs:130](runvil/crates/runvil-mcp-server/src/server/bind.rs)) calls it again. The sharing seams already exist: `Model` is an `Arc`-shared cheap clone, `ToolPicker::build_with_model` is the documented multi-catalog path, and `Index::build_with` already exists gated `#[cfg(test)]` (index.rs:62-76). Call-site wiring only:
 
 - Boot (`lib.rs` `run`) loads `Model::load()` once, before both consumers.
 - Promote `Index::build_with` from `#[cfg(test)]` to always available; `Retrieval::start` takes `&Model`.
@@ -162,11 +162,11 @@ Boot currently loads the ~40-100 MiB BGE model twice: `Index::build` ([retrieval
 
 ## Step 7: mcp-server boot progress leaves
 
-[lib.rs](promptforge/crates/promptforge-mcp-server/src/lib.rs): boot creates a hub and one operation tree with leaves - catalog resolve (file count), retrieval index (prompt count), tool build (tool count) - wired to the handles from step 5 and the shared model from step 6. mcp-server is a server with no TTY, so its renderer is a small subscriber task that logs leaf transitions through the crate's existing `tracing` posture (it already logs the retrieval index count at info). Tests: a boot over a fixture catalog drives all leaves to completion.
+[lib.rs](runvil/crates/runvil-mcp-server/src/lib.rs): boot creates a hub and one operation tree with leaves - catalog resolve (file count), retrieval index (prompt count), tool build (tool count) - wired to the handles from step 5 and the shared model from step 6. mcp-server is a server with no TTY, so its renderer is a small subscriber task that logs leaf transitions through the crate's existing `tracing` posture (it already logs the retrieval index count at info). Tests: a boot over a fixture catalog drives all leaves to completion.
 
 ## Step 8: gateway tree + GET /admin/progress
 
-[runner.rs](promptforge/crates/promptforge-gateway/src/runner.rs), [lib.rs](promptforge/crates/promptforge-gateway/src/lib.rs):
+[runner.rs](runvil/crates/runvil-gateway/src/runner.rs), [lib.rs](runvil/crates/runvil-gateway/src/lib.rs):
 
 - `AppState` gains a process-lifetime `ProgressHub`, built before `LocalRuntime::start` (runner.rs:434); startup provisioning creates the hub's first operation tree.
 - New `GET /admin/progress`: bearer-authed like the other admin routes, SSE stream of `ProgressEvent` from the hub (serde feature on), modeled on `switch_sse_response` (lib.rs:671): lossy intermediate samples, terminal events from join results. The stream emits heartbeat comment lines every 15-20 s so idle connections survive NAT/firewall timeouts, and a freshly connected subscriber first receives a snapshot of live operations so it can render current state without waiting for the next event.
@@ -174,11 +174,11 @@ Boot currently loads the ~40-100 MiB BGE model twice: `Index::build` ([retrieval
 
 ## Step 9: gateway run_switch migration
 
-[lib.rs](promptforge/crates/promptforge-gateway/src/lib.rs): replace the `stages: mpsc::Sender<&'static str>` channel with a per-switch operation tree attached to the hub (`loading-profile`, `stopping-models`, `starting-models` as weighted leaves, the middle one covering the VRAM-serialized teardown), created when the switch starts and destroyed when it ends. The per-request switch SSE response becomes a filtered view of hub events for that switch's operation id - one source of truth. Tests: the existing switch tests assert the same stage sequence, now read from hub events.
+[lib.rs](runvil/crates/runvil-gateway/src/lib.rs): replace the `stages: mpsc::Sender<&'static str>` channel with a per-switch operation tree attached to the hub (`loading-profile`, `stopping-models`, `starting-models` as weighted leaves, the middle one covering the VRAM-serialized teardown), created when the switch starts and destroyed when it ends. The per-request switch SSE response becomes a filtered view of hub events for that switch's operation id - one source of truth. Tests: the existing switch tests assert the same stage sequence, now read from hub events.
 
 ## Step 10: gateway cache leaves + TTY renderer
 
-[cache.rs](promptforge/crates/promptforge-gateway/src/cache.rs), gateway binary:
+[cache.rs](runvil/crates/runvil-gateway/src/cache.rs), gateway binary:
 
 - Each cache download creates a small operation tree attached to the hub; `ChannelProgress` reports into its leaf. The per-request SSE stays but derives from the tree's events.
 - The indicatif/tracing reporters move from gateway-local's `artifacts/progress.rs` into the gateway binary's renderer task, which renders `hub.snapshot()` to indicatif on a TTY or tracing lines otherwise. gateway-local drops its indicatif dependency; the library no longer chooses a presentation.
@@ -186,15 +186,15 @@ Boot currently loads the ~40-100 MiB BGE model twice: `Index::build` ([retrieval
 
 ## Step 11: gateway-client subscription
 
-[model/transport.rs](promptforge/crates/promptforge-gateway-client/src/model/transport.rs) pattern: add `subscribe_progress()` returning an SSE stream of deserialized `ProgressEvent`, bearer auth via the existing plumbing. Tests: against a mock axum SSE router (the provision.rs:419-434 pattern).
+[model/transport.rs](runvil/crates/runvil-gateway-client/src/model/transport.rs) pattern: add `subscribe_progress()` returning an SSE stream of deserialized `ProgressEvent`, bearer auth via the existing plumbing. Tests: against a mock axum SSE router (the provision.rs:419-434 pattern).
 
 ## Step 12: workshop-server tree + renderer
 
-[app.rs](promptforge/crates/promptforge-workshop-server/src/app.rs), new `progress.rs`:
+[app.rs](runvil/crates/runvil-workshop-server/src/app.rs), new `progress.rs`:
 
 - `AppState` gains the workshop `ProgressHub`. Operations with bounded lifetimes attach as they run: voice provisioning (one tree: model fetch leaves plus engine load leaves) and the gateway `RemoteOperation`.
 - Renderer task: watches hub snapshots, calls `Push::push_status_update` / `push_progress` with `headline()` label and aggregate fraction. Status texts ("Voice ready", failures) stay as explicit push calls - the tree owns only fractional progress. **Anti-flicker policy lives here, not in the UI**: the indicator is shown only once an operation has been live for ~1 s, stays up at least ~0.5 s once shown, and the displayed fraction is the monotonic aggregate from `render.rs` - the bar never stalls, lies, or resets mid-operation.
-- **The status bar progress indicator is the terminal renderer, and it already exists.** The chain is hub snapshot -> `headline()` label + aggregate fraction -> `Push::push_progress` -> `StatusFrame.progress` -> `/ws` -> the `<progress>` element in [status-bar.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/status-bar.ts) (`renderSlot`, lines 93-104: a frame carrying progress shows the bar at that fraction and hides the REC/LED group; a null progress restores it). No UI or protocol change is needed - the wiring is entirely the server-side renderer task feeding frames the bar already paints. When the hub's last tree detaches, the renderer calls `Push::push_idle()` (push.rs:99), which clears the bar and restores the indicators group.
+- **The status bar progress indicator is the terminal renderer, and it already exists.** The chain is hub snapshot -> `headline()` label + aggregate fraction -> `Push::push_progress` -> `StatusFrame.progress` -> `/ws` -> the `<progress>` element in [status-bar.ts](runvil/crates/runvil-workshop-server/ui/src/ui/status-bar.ts) (`renderSlot`, lines 93-104: a frame carrying progress shows the bar at that fraction and hides the REC/LED group; a null progress restores it). No UI or protocol change is needed - the wiring is entirely the server-side renderer task feeding frames the bar already paints. When the hub's last tree detaches, the renderer calls `Push::push_idle()` (push.rs:99), which clears the bar and restores the indicators group.
 - Tests: registered leaves produce the expected `StatusBarUpdate` sequence on the bus (the push.rs:130 wired() pattern).
 
 ## Step 13: workshop-server gateway subscriber
@@ -203,11 +203,11 @@ New task with the heartbeat's lifecycle posture: subscribes to `/admin/progress`
 
 ## Step 14: workshop-server provision migration
 
-[provision.rs](promptforge/crates/promptforge-workshop-server/src/provision.rs): `cache_fetch` applies `CacheEvent::Downloading` samples to a voice-download leaf instead of calling `push.push_progress` directly; `VoiceEngine::new_with_progress` wires the prewarm/init leaves (provision.rs:154, app.rs `startup_engine`). Note the test-expectation change this forces: the `/ws` end-to-end test at provision.rs:770 asserts `Downloading` frames for a mock download that completes in milliseconds, but the step 12 anti-flicker threshold suppresses the indicator for sub-second operations - update that test to assert the terminal sequence ("Download complete", "Voice ready") without the progress frames, and cover the threshold itself with a renderer unit test on paused time.
+[provision.rs](runvil/crates/runvil-workshop-server/src/provision.rs): `cache_fetch` applies `CacheEvent::Downloading` samples to a voice-download leaf instead of calling `push.push_progress` directly; `VoiceEngine::new_with_progress` wires the prewarm/init leaves (provision.rs:154, app.rs `startup_engine`). Note the test-expectation change this forces: the `/ws` end-to-end test at provision.rs:770 asserts `Downloading` frames for a mock download that completes in milliseconds, but the step 12 anti-flicker threshold suppresses the indicator for sub-second operations - update that test to assert the terminal sequence ("Download complete", "Voice ready") without the progress frames, and cover the threshold itself with a renderer unit test on paused time.
 
 ## Step 15: cli/dev TTY renderers
 
-[app.rs](promptforge/crates/promptforge-cli/src/app.rs), [run.rs](promptforge/crates/promptforge-dev/src/run.rs): a small tree around `ToolPicker::build` + catalog fetch, rendered with indicatif on a TTY. Small - these are per-run CLIs.
+[app.rs](runvil/crates/runvil-cli/src/app.rs), [run.rs](runvil/crates/runvil-dev/src/run.rs): a small tree around `ToolPicker::build` + catalog fetch, rendered with indicatif on a TTY. Small - these are per-run CLIs.
 
 ## Step 16: retirement + verification
 
@@ -231,8 +231,8 @@ Full path. The AGENTS.md manifest in Executor orientation is authoritative (it w
 
 ## Explicitly out of scope
 
-- `promptforge-gateway-build` (cargo build-time; progress belongs in build output).
-- `promptforge-core-support`'s `observe` module (run lifecycle events, a different vocabulary - no merge).
+- `runvil-gateway-build` (cargo build-time; progress belongs in build output).
+- `runvil-core-support`'s `observe` module (run lifecycle events, a different vocabulary - no merge).
 - Changing the `/ws` protocol: `StatusFrame`/`Progress` already carry what the UI needs.
 
 
@@ -246,7 +246,7 @@ Recovered from the producing chat sessions by the plan ledger on 2026-09-04. Eve
 
 ## Origin
 
-The plan grew out of a `promptforge-transcribe` API review, not a progress initiative. The user asked to tighten the crate's public surface; the first progress answer was negative. Model load is a single opaque mmap'd whisper call with no load-progress callback, so (paraphrase) "a progress bar would be fake" - only four milestones exist, and `VoiceSlot` plus `tracing` already cover them. The user's prewarm idea (sequentially reading the model file to populate the OS page cache before whisper maps it) flipped that verdict: the read is byte-countable, so it yields honest percentages where whisper's own load never could, and it also removes first-take stutter from demand page faults.
+The plan grew out of a `runvil-transcribe` API review, not a progress initiative. The user asked to tighten the crate's public surface; the first progress answer was negative. Model load is a single opaque mmap'd whisper call with no load-progress callback, so (paraphrase) "a progress bar would be fake" - only four milestones exist, and `VoiceSlot` plus `tracing` already cover them. The user's prewarm idea (sequentially reading the model file to populate the OS page cache before whisper maps it) flipped that verdict: the read is byte-countable, so it yields honest percentages where whisper's own load never could, and it also removes first-take stutter from demand page faults.
 
 ## The why
 
@@ -266,13 +266,13 @@ The two-consumer topology that justifies a standalone crate is the user's own: "
 
 4. **Prewarm gate removed.** The research-hardened draft gated prewarm on the model fitting comfortably in RAM (a `PREWARM_MAX_BYTES` constant). The user: "Forget 'fits comfortably.' The program is designed that everone will have enough memory for the transcription models." So prewarm is unconditional - the thrash case the research warned about is excluded by product design, not by a runtime check, and no `sysinfo` dependency was needed.
 
-5. **The standing convention.** "The plan should write 2 or 3 sentences somewhere (maybe agents.md?) so that any new code that comes later which needs progress will know what to do." Motivation (paraphrase): the convention exists so the next person who needs progress does not invent a fifth ad-hoc mechanism. Placed in the root `promptforge/AGENTS.md` because that is where a future contributor working anywhere in the tree will see it.
+5. **The standing convention.** "The plan should write 2 or 3 sentences somewhere (maybe agents.md?) so that any new code that comes later which needs progress will know what to do." Motivation (paraphrase): the convention exists so the next person who needs progress does not invent a fifth ad-hoc mechanism. Placed in the root `runvil/AGENTS.md` because that is where a future contributor working anywhere in the tree will see it.
 
 ## Discarded alternatives
 
 - Merging transcribe's eight files into one (Rust has no header/impl split; the re-export block already gives consumers one flat namespace).
 - Milestone-only observability via `VoiceSlot`/`tracing` instead of a progress API (the initial position, overtaken by prewarm plus the sweep).
-- Progress inside `promptforge-core-support` (rejected: the gateway stack does not depend on it and its documented domain is run execution; a zero-dependency crate preserves the invariant core-support advertises).
+- Progress inside `runvil-core-support` (rejected: the gateway stack does not depend on it and its documented domain is run execution; a zero-dependency crate preserves the invariant core-support advertises).
 - Process-lifetime trees with leaf retirement (the plan's own earlier draft; would have grown unboundedly and made `fraction()` meaningless at rest).
 - `Arc<Option<ProgressTree>>` (zero-or-one; cannot express two downloads overlapping a switch).
 - A single registered renderer callback (cannot express zero, one, or two consumers; the broadcast channel can).

@@ -6,7 +6,7 @@ todos:
     content: "Change `make_latest: false` to `true` in release-workshop.yml"
     status: completed
   - id: evergreen-downloads
-    content: Add rename + upload step for version-free installer names on the `promptforge-workshop-latest` rolling release
+    content: Add rename + upload step for version-free installer names on the `runvil-workshop-latest` rolling release
     status: completed
   - id: workshop-about-version
     content: Replace hardcoded APP_VERSION in about-dialog.ts with __APP_VERSION__ build-time define; ensure workshop-server build.rs passes the define
@@ -23,26 +23,26 @@ Four changes across the release workflow, the Workshop About dialog, and the Gat
 
 ## 1. Mark Workshop releases as GitHub "latest"
 
-In [release-workshop.yml](promptforge/.github/workflows/release-workshop.yml), line 354, change `make_latest: false` to `make_latest: true`. This gives an evergreen page URL at `/releases/latest`.
+In [release-workshop.yml](runvil/.github/workflows/release-workshop.yml), line 354, change `make_latest: false` to `make_latest: true`. This gives an evergreen page URL at `/releases/latest`.
 
 ## 2. Upload version-free installers to the rolling release
 
-In the existing `Publish the stable updater pointer` step of [release-workshop.yml](promptforge/.github/workflows/release-workshop.yml) (lines 366-379), extend it to also upload the installers with fixed names. Add a step before it that copies and renames:
+In the existing `Publish the stable updater pointer` step of [release-workshop.yml](runvil/.github/workflows/release-workshop.yml) (lines 366-379), extend it to also upload the installers with fixed names. Add a step before it that copies and renames:
 
-- `*-setup.exe` -> `PromptForge-setup.exe`
-- `*.dmg` (arm) -> `PromptForge-arm64.dmg`, (intel) -> `PromptForge-x64.dmg`
-- `*.deb` -> `PromptForge.deb`
-- `*.AppImage` -> `PromptForge.AppImage`
+- `*-setup.exe` -> `Runvil-setup.exe`
+- `*.dmg` (arm) -> `Runvil-arm64.dmg`, (intel) -> `Runvil-x64.dmg`
+- `*.deb` -> `Runvil.deb`
+- `*.AppImage` -> `Runvil.AppImage`
 
-Then `gh release upload promptforge-workshop-latest ... --clobber` with the renamed files alongside `latest.json`. This gives stable direct-download URLs like:
+Then `gh release upload runvil-workshop-latest ... --clobber` with the renamed files alongside `latest.json`. This gives stable direct-download URLs like:
 
 ```
-https://github.com/cppalliance/promptforge/releases/download/promptforge-workshop-latest/PromptForge-setup.exe
+https://github.com/cppalliance/runvil/releases/download/runvil-workshop-latest/Runvil-setup.exe
 ```
 
 ## 3. Fix Workshop About dialog version
 
-In [about-dialog.ts](promptforge/crates/promptforge-workshop-server/ui/src/ui/about-dialog.ts), the version is hardcoded at line 13:
+In [about-dialog.ts](runvil/crates/runvil-workshop-server/ui/src/ui/about-dialog.ts), the version is hardcoded at line 13:
 
 ```typescript
 const APP_VERSION = "0.2.0";
@@ -55,15 +55,15 @@ declare const __APP_VERSION__: string | undefined;
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 ```
 
-This requires the Workshop server's esbuild config to define `__APP_VERSION__`. Need to check whether [promptforge-workshop-server/build.rs](promptforge/crates/promptforge-workshop-server/build.rs) already passes this define via `ui-build`; if not, enable it (the config UI crate already does this with `define_app_version: true`).
+This requires the Workshop server's esbuild config to define `__APP_VERSION__`. Need to check whether [runvil-workshop-server/build.rs](runvil/crates/runvil-workshop-server/build.rs) already passes this define via `ui-build`; if not, enable it (the config UI crate already does this with `define_app_version: true`).
 
 This eliminates the manual "bump hardcoded version" step forever. The Tauri `getVersion()` path via `UpdateService` subscription remains as a secondary source but is no longer the only way to get the real version.
 
 ## 4. Show version in Gateway config UI header
 
-The config UI already shows `Version 0.2.0` in Settings > About ([settings-view.ts](promptforge/crates/promptforge-gateway-config-ui/ui/src/views/settings-view.ts) line 1674). Add it to the tab bar as well for visibility.
+The config UI already shows `Version 0.2.0` in Settings > About ([settings-view.ts](runvil/crates/runvil-gateway-config-ui/ui/src/views/settings-view.ts) line 1674). Add it to the tab bar as well for visibility.
 
-In [tab-bar.ts](promptforge/crates/promptforge-gateway-config-ui/ui/src/components/tab-bar.ts) (around line 92-105, the `.tab-actions` area), add a subtle version label element using the same `__APP_VERSION__` define. Style it as a muted `.tab-version` span in [layout.css](promptforge/crates/promptforge-gateway-config-ui/ui/src/styles/layout.css).
+In [tab-bar.ts](runvil/crates/runvil-gateway-config-ui/ui/src/components/tab-bar.ts) (around line 92-105, the `.tab-actions` area), add a subtle version label element using the same `__APP_VERSION__` define. Style it as a muted `.tab-version` span in [layout.css](runvil/crates/runvil-gateway-config-ui/ui/src/styles/layout.css).
 
 
 ---
@@ -86,7 +86,7 @@ Three approaches were laid out:
 
 1. GitHub's built-in `/releases/latest`, enabled by flipping `make_latest: false` to `true`. Simplest; gives a stable page URL. Catch: asset filenames keep the version baked in, so per-installer direct links still change every release. (Noted in chat: `true` is GitHub's default, so deleting the line would also work; the plan keeps it explicit.)
 2. A new dedicated rolling tag (e.g. `latest` or `stable`) with fixed-name assets, using the delete-and-recreate pattern the nightly workflow already uses. Fully stable URLs, but adds a second rolling release to maintain.
-3. Extend the existing `promptforge-workshop-latest` rolling release, which already existed solely to carry the Tauri updater manifest `latest.json`, to also carry the renamed installers.
+3. Extend the existing `runvil-workshop-latest` rolling release, which already existed solely to carry the Tauri updater manifest `latest.json`, to also carry the renamed installers.
 
 Discarded: option 2 as a standalone mechanism. The chosen design combines 1 and 3: `make_latest: true` for the evergreen page, plus version-free installer copies uploaded with `--clobber` onto the pre-existing updater release for stable direct-download URLs. The motivation for stable direct-download URLs (paraphrase): supporting things like a "Download" button on a website. User approval was verbatim: "I want those two things yes."
 
@@ -111,4 +111,4 @@ The version already existed in Settings > About; the user's ask was for visibili
 
 "do it all in one commit and adopt a light version of @tools-public/rulebooks/vibe-rulebook.md" - light meant a single Bounded step: one Coder subagent for all four changes, then Message, Review-and-Fix (zero findings, no amend), and a final Verify running the full suite (179/179 Rust, 57/57 workshop UI, 108/108 config UI tests). Result: commit `e6fa867a`, "Add evergreen release links and baked version display" (9 files, +91/-12).
 
-One operational note from the chat: the evergreen upload step only takes effect on the next `promptforge-workshop-v*` tag; nothing retroactively fixes already-published releases.
+One operational note from the chat: the evergreen upload step only takes effect on the next `runvil-workshop-v*` tag; nothing retroactively fixes already-published releases.

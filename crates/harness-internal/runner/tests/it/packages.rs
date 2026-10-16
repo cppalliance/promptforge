@@ -1,19 +1,19 @@
 //! The package registry and installs by name: a new registry holds the
-//! native `promptforge/subagents` and lists every package in name order,
+//! native `runvil/subagents` and lists every package in name order,
 //! `add` refuses a name that is not a vendor/name pair and a name the
 //! registry holds already, and install refuses a package the registry
 //! does not hold, keeps the native's name to the native, and refuses the
 //! native's second install as a taken name.
 
 use harness_runner::{HostContext, InstallError, PackageRegistry, PluginKind};
-use promptforge_plugin::{HostServices, PluginId, ServiceId, ServiceKey};
+use runvil_plugin::{HostServices, PluginId, ServiceId, ServiceKey};
 use serde_json::Value;
 
 use crate::prepare::echo_package;
 use crate::support::registry;
 
 /// The native's package name.
-const SUBAGENTS: &str = "promptforge/subagents";
+const SUBAGENTS: &str = "runvil/subagents";
 
 /// The test-only service a listed package needs.
 const GREETING: ServiceKey<str> = ServiceKey::new("tests/greeting");
@@ -95,7 +95,7 @@ fn install_refuses_a_package_the_registry_does_not_hold() {
         registry(&[echo_package("tests/tools", None)]),
         HostServices::new(),
     );
-    for missing in ["tests/other", "promptforge/tasks"] {
+    for missing in ["tests/other", "runvil/tasks"] {
         assert_eq!(
             host.install(missing, None, Value::Null),
             Err(InstallError::UnknownPackage {

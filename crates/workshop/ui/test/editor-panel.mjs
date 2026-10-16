@@ -90,7 +90,7 @@ for (const key of [
 globalThis.window = window;
 globalThis.document = window.document;
 
-const bundlePath = path.join(os.tmpdir(), "promptforge-editor-panel-test.mjs");
+const bundlePath = path.join(os.tmpdir(), "runvil-editor-panel-test.mjs");
 await writeFile(bundlePath, bundle.outputFiles[0].text);
 const { EditorPanel, CodeMirrorSurface, PanelTab } = await import(pathToFileURL(bundlePath).href);
 

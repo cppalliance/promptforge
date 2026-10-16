@@ -8,7 +8,7 @@
 //! each operation like any other. Both are synchronous, like the VFS, and
 //! the Harness runs them inline in the run's future.
 
-use promptforge::vfs::{Origin, VfsError, VfsOp, VfsOutcome, VfsRef, perform_vfs_op};
+use runvil::vfs::{Origin, VfsError, VfsOp, VfsOutcome, VfsRef, perform_vfs_op};
 
 use crate::recorder::RunOutcome;
 
