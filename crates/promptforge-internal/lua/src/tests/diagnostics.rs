@@ -71,7 +71,10 @@ fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
     )
     .expect("the schema builds");
     local
-        .register("grab".to_owned(), schema)
+        .register(
+            crate::alias::Alias::parse("grab".to_owned()).expect("a valid alias"),
+            schema,
+        )
         .expect("registration succeeds before the poison");
     let handle = local.entries_handle();
     let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -358,17 +361,21 @@ fn lua_compilation_reports_are_ordered_exact_and_payload_free() {
 }
 
 #[test]
-fn lua_runtime_error_preserves_its_mlua_source() {
-    // A Lua runtime failure is the source-bearing `LuaRuntime` variant and
-    // retains the originating `mlua` error as a private `source()` instead of
-    // flattening it to a string.
+fn lua_runtime_error_keeps_its_mlua_cause_out_of_the_source_chain() {
+    // A Lua runtime failure is the cause-bearing `LuaRuntime` variant: its
+    // message already holds the `mlua` error's text, so the originating
+    // error is kept behind `cause()` and a chain printer shows it once.
     let err = run("error('boom')", "").expect_err("an explicit error() must raise");
     assert!(
         matches!(err, Error::LuaRuntime { .. }),
-        "a Lua runtime failure must use the source-bearing variant, got {err:?}"
+        "a Lua runtime failure must use the cause-bearing variant, got {err:?}"
     );
     assert!(
-        std::error::Error::source(&err).is_some(),
-        "the originating mlua error must be preserved as the error source"
+        matches!(err.cause(), Some(cause) if cause.is::<mlua::Error>()),
+        "the originating mlua error must stay reachable as the cause"
+    );
+    assert!(
+        std::error::Error::source(&err).is_none(),
+        "the cause must not repeat as a chain segment"
     );
 }

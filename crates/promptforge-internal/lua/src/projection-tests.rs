@@ -65,7 +65,7 @@ fn lua_parse(lua: &Lua, messages: &str) -> Vec<MessageRecord> {
     request.raw_set("op", "chat").expect("raw_set");
     request.raw_set("messages", list).expect("raw_set");
     match Request::from_yield(lua, &Value::Table(request)) {
-        YieldParse::Request(Request::Chat { list, .. }) => list.records(),
+        YieldParse::Request(Request::Chat { list, .. }) => list.to_records(),
         other => panic!("expected a chat request, got {other:?}"),
     }
 }

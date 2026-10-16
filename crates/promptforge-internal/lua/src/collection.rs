@@ -34,8 +34,10 @@ pub(crate) fn collection_members(lua: &Lua, collection: &Value) -> Result<Table>
             "tasks.fanout's second parameter is a collection; for a list section use prompt.list(heading), which returns nil when no visible section has that heading".to_owned(),
         ));
     };
-    let members = lua.create_table().map_err(Error::lua)?;
     let border = table.raw_len();
+    let members = lua
+        .create_table_with_capacity(border, 0)
+        .map_err(Error::lua)?;
     for index in 1..=border {
         let member = table.raw_get::<Value>(index).map_err(Error::lua)?;
         check_member(&member, &index.to_string())?;
@@ -67,7 +69,7 @@ pub(crate) fn collection_members(lua: &Lua, collection: &Value) -> Result<Table>
     }
     pairs.sort_by(|left, right| left.0.compare(&right.0));
     for (position, (_, key, member)) in pairs.into_iter().enumerate() {
-        let entry = lua.create_table().map_err(Error::lua)?;
+        let entry = lua.create_table_with_capacity(0, 2).map_err(Error::lua)?;
         entry.raw_set("key", key).map_err(Error::lua)?;
         entry.raw_set("value", member).map_err(Error::lua)?;
         members

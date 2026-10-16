@@ -54,13 +54,13 @@ fn an_ok_spawn_answer_resumes_the_task_id_as_its_path_text() {
 fn an_err_answer_round_trips_and_retains_the_typed_error() {
     let lua = Lua::new();
     let (envelope, retained) = Answer::Call(Err(Error::LuaQuota {
-        resource: "instruction",
+        resource: crate::QuotaResource::Instruction,
     }))
     .into_envelope(&lua)
     .expect("the envelope renders");
     match retained {
         Some(Error::LuaQuota {
-            resource: "instruction",
+            resource: crate::QuotaResource::Instruction,
         }) => {}
         other => panic!("expected the retained LuaQuota error, got {other:?}"),
     }
@@ -82,14 +82,14 @@ fn a_join_any_delivery_of_a_failed_member_retains_the_members_typed_error() {
     let (envelope, retained) = Answer::<Error>::JoinAny(Ok(TaskDelivery {
         task,
         outcome: Err(Error::LuaQuota {
-            resource: "instruction",
+            resource: crate::QuotaResource::Instruction,
         }),
     }))
     .into_envelope(&lua)
     .expect("the envelope renders");
     match retained {
         Some(Error::LuaQuota {
-            resource: "instruction",
+            resource: crate::QuotaResource::Instruction,
         }) => {}
         other => panic!("expected the member's retained LuaQuota error, got {other:?}"),
     }
@@ -164,7 +164,7 @@ fn an_ok_structured_tool_call_answer_round_trips_as_a_table() {
 /// `grab`, registered through `tools.offer_local`.
 fn lua_with_local_grab() -> Lua {
     let lua = Lua::new();
-    crate::install_tools(
+    crate::tools::install_tools(
         &lua,
         &lua.globals(),
         &std::sync::Arc::new(crate::ToolSet::default()),
@@ -265,11 +265,14 @@ fn from_dispatch_classifies_by_the_declared_output_kind() {
     // Invalid JSON from a structured binding is the tool's error.
     match ToolCallOutcome::from_dispatch(ToolOutputKind::Structured, "form", "not json".to_owned())
     {
-        Err(Error::Tool { message, source }) => {
-            assert_eq!(message, "structured tool \"form\" returned invalid JSON");
-            assert!(
-                source.downcast_ref::<serde_json::Error>().is_some(),
-                "the parse failure must survive as the cause"
+        Err(Error::Tool { message, cause }) => {
+            let detail = cause
+                .downcast_ref::<serde_json::Error>()
+                .expect("the parse failure must survive as the cause");
+            assert_eq!(
+                message,
+                format!("structured tool \"form\" returned invalid JSON: {detail}"),
+                "the message holds the cause's text, which no chain segment repeats"
             );
         }
         other => panic!("expected the typed tool error, got {other:?}"),

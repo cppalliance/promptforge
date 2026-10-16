@@ -2,17 +2,18 @@
 //! and the switch that routes them to the yield shims once the shared
 //! library has loaded.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
-use mlua::Table;
-use promptforge_types::event::lifecycle::Lifecycle;
-
-use crate::protocol::VfsOp;
+use mlua::{FromLuaMulti, Function, IntoLuaMulti, Lua, Table};
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::lifecycle::{self, Lifecycle};
+use promptforge_vfs::{Access, VfsError};
 
 use super::{read_store, read_store_numbered};
-use crate::{
-    Access, Arc, Emitter, Error, Function, Lua, LuaProgram, Mutex, Result, SharedSource, lifecycle,
-};
+use crate::SharedSource;
+use crate::error::{Error, Result};
+use crate::program::LuaProgram;
+use crate::protocol::VfsOp;
 
 /// The store dispatcher chunk's name, `@`-prefixed as the shim chunks'
 /// names are, so its frames render as verbatim `file:line:` references.
@@ -43,9 +44,60 @@ struct StoreReporter {
 }
 
 impl StoreReporter {
-    fn report(&self, succeeded: bool, success: Lifecycle, failure: Lifecycle) {
-        self.emitter
-            .report(&self.section, if succeeded { success } else { failure });
+    /// Reports `success` for an `Ok` result and `failure` for an `Err`.
+    fn report<T>(
+        &self,
+        result: &std::result::Result<T, VfsError>,
+        success: Lifecycle,
+        failure: Lifecycle,
+    ) {
+        self.emitter.report(
+            &self.section,
+            if result.is_ok() { success } else { failure },
+        );
+    }
+}
+
+/// The Lua arguments of `read` and `read_numbered`: the path and the
+/// optional 1-based inclusive line bounds.
+type Bounds = (String, Option<i64>, Option<i64>);
+
+/// What every direct store closure shares: the section's one store view,
+/// the reporter, and the conflict slot.
+struct StoreShared {
+    view: Arc<Access>,
+    reporter: Arc<StoreReporter>,
+    conflicts: Arc<Mutex<Option<String>>>,
+}
+
+impl StoreShared {
+    /// Builds one direct store closure taking the Lua arguments `A`: it runs
+    /// `operation` over the store view, records a conflict, reports
+    /// `outcomes` (success first), and raises a failure as
+    /// [`Error::store`] under the operation `op` rebuilds from the
+    /// arguments.
+    fn closure<A, T>(
+        &self,
+        lua: &Lua,
+        outcomes: (Lifecycle, Lifecycle),
+        operation: impl Fn(&Access, &A) -> std::result::Result<T, VfsError> + Send + 'static,
+        op: impl Fn(A) -> VfsOp + Send + 'static,
+    ) -> Result<Function>
+    where
+        A: FromLuaMulti + 'static,
+        T: IntoLuaMulti + 'static,
+    {
+        let view = Arc::clone(&self.view);
+        let reporter = Arc::clone(&self.reporter);
+        let conflicts = Arc::clone(&self.conflicts);
+        let (success, failure) = outcomes;
+        lua.create_function(move |_, arguments: A| {
+            let result = operation(&view, &arguments);
+            record_store_conflict(&conflicts, &result);
+            reporter.report(&result, success, failure);
+            result.map_err(|source| mlua::Error::external(Error::store(&op(arguments), source)))
+        })
+        .map_err(Error::lua)
     }
 }
 
@@ -53,14 +105,9 @@ impl StoreReporter {
 /// when there is a fix, how to make it, so the text a model reads names
 /// both. The operation supplies the wording its call surface promises (a
 /// glob reports "invalid glob pattern", a path reports "invalid path"), and
-/// the structured [`VfsError`](promptforge_vfs::VfsError) supplies the
-/// path, rule, anchor, and count.
+/// the structured [`VfsError`] supplies the path, rule, anchor, and count.
 #[must_use]
-pub fn store_error_message(
-    op: &crate::protocol::VfsOp,
-    error: &promptforge_vfs::VfsError,
-) -> String {
-    use promptforge_vfs::VfsError;
+pub fn store_error_message(op: &VfsOp, error: &VfsError) -> String {
     match error {
         VfsError::NotFound { path } => format!("file not found in store: {path}"),
         VfsError::AlreadyExists { path } => format!("file already exists in store: {path}"),
@@ -71,7 +118,7 @@ pub fn store_error_message(
             format!("file in store is not UTF-8 after byte {valid_up_to}: {path}")
         }
         VfsError::InvalidPath { path, reason } => {
-            if matches!(op, crate::protocol::VfsOp::Glob { .. }) {
+            if matches!(op, VfsOp::Glob { .. }) {
                 format!("invalid glob pattern {path:?}: {reason}")
             } else {
                 format!("invalid path {path:?}: {reason}")
@@ -133,12 +180,12 @@ pub fn store_error_message(
 /// write it here rather than only raising it.
 fn record_store_conflict<T>(
     conflicts: &Mutex<Option<String>>,
-    result: &std::result::Result<T, promptforge_vfs::VfsError>,
+    result: &std::result::Result<T, VfsError>,
 ) {
-    if let Err(promptforge_vfs::VfsError::Conflict { detail, .. }) = result
-        && let Ok(mut slot) = conflicts.lock()
-    {
-        *slot = Some(detail.clone());
+    if let Err(VfsError::Conflict { detail, .. }) = result {
+        // A panic elsewhere cannot leave the slot half-written, so a
+        // poisoned lock still takes the conflict.
+        *conflicts.lock().unwrap_or_else(PoisonError::into_inner) = Some(detail.clone());
     }
 }
 
@@ -178,17 +225,10 @@ fn record_store_conflict<T>(
 /// function a prelude captured while it installed runs directly during
 /// the install and yields like `store.*` afterward.
 ///
-/// [`VfsError`]: promptforge_vfs::VfsError
-/// [`VfsError::Conflict`]: promptforge_vfs::VfsError::Conflict
-///
 /// # Errors
-/// Returns [`Error::Lua`] if the `store` table or any of its functions cannot
-/// be created or installed into the sandbox globals, or
+/// Returns [`Error::LuaRuntime`] if the `store` table or any of its
+/// functions cannot be created or installed into the sandbox globals, or
 /// [`Error::Store`] if the handle the access came from declares no store.
-#[expect(
-    clippy::too_many_lines,
-    reason = "one table installs all store operations beside their matching observation outcomes"
-)]
 pub(crate) fn install_store_table(
     lua: &Lua,
     globals: &mlua::Table,
@@ -198,19 +238,22 @@ pub(crate) fn install_store_table(
     conflicts: &Arc<Mutex<Option<String>>>,
 ) -> Result<()> {
     let table = lua.create_table().map_err(Error::lua)?;
-    let reporter = Arc::new(StoreReporter {
-        emitter: emitter.clone(),
-        section: section.to_owned(),
-    });
     // One store view for the section's whole life: derived once from the
     // chain's access, so the closures share it and the strict path rules
     // run on every operation through it.
-    let view = Arc::new(
-        promptforge_vfs::detail::store_view(access).map_err(|source| Error::Store {
-            message: "store operation failed".to_owned(),
-            source,
-        })?,
-    );
+    let shared = StoreShared {
+        view: Arc::new(
+            promptforge_vfs::detail::store_view(access).map_err(|cause| Error::Store {
+                message: format!("store operation failed: {cause}"),
+                cause,
+            })?,
+        ),
+        reporter: Arc::new(StoreReporter {
+            emitter: emitter.clone(),
+            section: section.to_owned(),
+        }),
+        conflicts: Arc::clone(conflicts),
+    };
     let program = STORE_PROGRAM.as_ref().map_err(Error::shared)?;
     let (dispatcher, phase): (Function, Table) = program.load(lua)?.call(()).map_err(Error::lua)?;
     lua.set_named_registry_value(STORE_PHASE_REGISTRY, phase)
@@ -220,153 +263,76 @@ pub(crate) fn install_store_table(
         table.raw_set(name, function).map_err(Error::lua)
     };
 
-    macro_rules! install_reported_store_fn {
+    let write = shared.closure(
+        lua,
+        (lifecycle::VFS_WRITE_SUCCEEDED, lifecycle::VFS_WRITE_FAILED),
+        |view, (path, contents): &(String, String)| view.write(path, contents.as_bytes()),
+        |(path, contents)| VfsOp::Write { path, contents },
+    )?;
+    install("write", write)?;
+    let append = shared.closure(
+        lua,
         (
-            $name:literal,
-            $handle:ident,
-            $arguments:pat_param,
-            $argument_type:ty,
-            $success:expr,
-            $failure:expr,
-            $op:expr,
-            $operation:block
-        ) => {{
-            let $handle = Arc::clone(&view);
-            let report = Arc::clone(&reporter);
-            let conflicts = Arc::clone(conflicts);
-            let function = lua
-                .create_function(move |_, $arguments: $argument_type| {
-                    let result = $operation;
-                    record_store_conflict(&conflicts, &result);
-                    report.report(result.is_ok(), $success, $failure);
-                    result.map_err(|source| mlua::Error::external(Error::store(&$op, source)))
-                })
-                .map_err(Error::lua)?;
-            install($name, function)?;
-        }};
-    }
-
-    install_reported_store_fn!(
-        "write",
-        handle,
-        (path, contents),
-        (String, String),
-        lifecycle::VFS_WRITE_SUCCEEDED,
-        lifecycle::VFS_WRITE_FAILED,
-        VfsOp::Write {
-            path: path.clone(),
-            contents: contents.clone(),
-        },
-        { handle.write(&path, contents.as_bytes()) }
-    );
-    install_reported_store_fn!(
-        "append",
-        handle,
-        (path, contents),
-        (String, String),
-        lifecycle::VFS_APPEND_SUCCEEDED,
-        lifecycle::VFS_APPEND_FAILED,
-        VfsOp::Append {
-            path: path.clone(),
-            contents: contents.clone(),
-        },
-        { handle.append(&path, contents.as_bytes()) }
-    );
-    install_reported_store_fn!(
-        "read",
-        handle,
-        (path, start, end),
-        (String, Option<i64>, Option<i64>),
-        lifecycle::VFS_READ_SUCCEEDED,
-        lifecycle::VFS_READ_FAILED,
-        VfsOp::Read {
-            path: path.clone(),
-            start,
-            end,
-        },
-        { read_store(&handle, &path, start, end) }
-    );
-    install_reported_store_fn!(
-        "read_numbered",
-        handle,
-        (path, start, end),
-        (String, Option<i64>, Option<i64>),
-        lifecycle::VFS_READ_NUMBERED_SUCCEEDED,
-        lifecycle::VFS_READ_NUMBERED_FAILED,
-        VfsOp::ReadNumbered {
-            path: path.clone(),
-            start,
-            end,
-        },
-        { read_store_numbered(&handle, &path, start, end) }
-    );
-    install_reported_store_fn!(
-        "str_replace",
-        handle,
-        (path, old, new),
-        (String, String, String),
-        lifecycle::VFS_REPLACE_SUCCEEDED,
-        lifecycle::VFS_REPLACE_FAILED,
-        VfsOp::StrReplace {
-            path: path.clone(),
-            old: old.clone(),
-            new: new.clone(),
-        },
-        { handle.str_replace(&path, &old, &new) }
-    );
-    install_reported_store_fn!(
-        "delete",
-        handle,
-        path,
-        String,
-        lifecycle::VFS_DELETE_SUCCEEDED,
-        lifecycle::VFS_DELETE_FAILED,
-        VfsOp::Delete { path: path.clone() },
-        { handle.remove(&path, false).map(|_| ()) }
-    );
-
-    let handle = Arc::clone(&view);
-    let report = Arc::clone(&reporter);
-    let glob_conflicts = Arc::clone(conflicts);
-    let glob = lua
-        .create_function(move |lua, pattern: String| {
-            let result = handle.glob(&pattern);
-            record_store_conflict(&glob_conflicts, &result);
-            report.report(
-                result.is_ok(),
-                lifecycle::VFS_GLOB_SUCCEEDED,
-                lifecycle::VFS_GLOB_FAILED,
-            );
-            let paths = result.map_err(|source| {
-                mlua::Error::external(Error::store(
-                    &VfsOp::Glob {
-                        pattern: pattern.clone(),
-                    },
-                    source,
-                ))
-            })?;
-            lua.create_sequence_from(paths)
-        })
-        .map_err(Error::lua)?;
+            lifecycle::VFS_APPEND_SUCCEEDED,
+            lifecycle::VFS_APPEND_FAILED,
+        ),
+        |view, (path, contents): &(String, String)| view.append(path, contents.as_bytes()),
+        |(path, contents)| VfsOp::Append { path, contents },
+    )?;
+    install("append", append)?;
+    let read = shared.closure(
+        lua,
+        (lifecycle::VFS_READ_SUCCEEDED, lifecycle::VFS_READ_FAILED),
+        |view, (path, start, end): &Bounds| read_store(view, path, *start, *end),
+        |(path, start, end)| VfsOp::Read { path, start, end },
+    )?;
+    install("read", read)?;
+    let read_numbered = shared.closure(
+        lua,
+        (
+            lifecycle::VFS_READ_NUMBERED_SUCCEEDED,
+            lifecycle::VFS_READ_NUMBERED_FAILED,
+        ),
+        |view, (path, start, end): &Bounds| read_store_numbered(view, path, *start, *end),
+        |(path, start, end)| VfsOp::ReadNumbered { path, start, end },
+    )?;
+    install("read_numbered", read_numbered)?;
+    let str_replace = shared.closure(
+        lua,
+        (
+            lifecycle::VFS_REPLACE_SUCCEEDED,
+            lifecycle::VFS_REPLACE_FAILED,
+        ),
+        |view, (path, old, new): &(String, String, String)| view.str_replace(path, old, new),
+        |(path, old, new)| VfsOp::StrReplace { path, old, new },
+    )?;
+    install("str_replace", str_replace)?;
+    let delete = shared.closure(
+        lua,
+        (
+            lifecycle::VFS_DELETE_SUCCEEDED,
+            lifecycle::VFS_DELETE_FAILED,
+        ),
+        |view, path: &String| view.remove(path, false).map(|_| ()),
+        |path| VfsOp::Delete { path },
+    )?;
+    install("delete", delete)?;
+    let glob = shared.closure(
+        lua,
+        (lifecycle::VFS_GLOB_SUCCEEDED, lifecycle::VFS_GLOB_FAILED),
+        |view, pattern: &String| view.glob(pattern),
+        |pattern| VfsOp::Glob { pattern },
+    )?;
     install("glob", glob)?;
-
-    let handle = Arc::clone(&view);
-    let exists_conflicts = Arc::clone(conflicts);
-    let report = Arc::clone(&reporter);
-    let exists = lua
-        .create_function(move |_, path: String| {
-            let result = handle.exists(&path);
-            record_store_conflict(&exists_conflicts, &result);
-            report.report(
-                result.is_ok(),
-                lifecycle::VFS_EXISTS_SUCCEEDED,
-                lifecycle::VFS_EXISTS_FAILED,
-            );
-            result.map_err(|source| {
-                mlua::Error::external(Error::store(&VfsOp::Exists { path: path.clone() }, source))
-            })
-        })
-        .map_err(Error::lua)?;
+    let exists = shared.closure(
+        lua,
+        (
+            lifecycle::VFS_EXISTS_SUCCEEDED,
+            lifecycle::VFS_EXISTS_FAILED,
+        ),
+        |view, path: &String| view.exists(path),
+        |path| VfsOp::Exists { path },
+    )?;
     install("exists", exists)?;
 
     globals.raw_set("store", table).map_err(Error::lua)?;
@@ -386,4 +352,34 @@ pub(crate) fn route_store_to_shims(lua: &Lua, shims: &Table) -> Result<()> {
         .named_registry_value(STORE_PHASE_REGISTRY)
         .map_err(Error::lua)?;
     phase.raw_set("shims", shims.clone()).map_err(Error::lua)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::{VfsError, record_store_conflict};
+
+    #[test]
+    fn a_conflict_reaches_a_poisoned_slot() {
+        let slot = Mutex::new(None::<String>);
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = slot.lock().expect("the first lock is not poisoned");
+            panic!("poison the store-conflict slot");
+        }));
+        assert!(poisoned.is_err(), "the panic must poison the slot");
+        let conflict: std::result::Result<(), VfsError> = Err(VfsError::Conflict {
+            path: "a.txt".to_owned(),
+            detail: "a.txt claimed by two identities".to_owned(),
+        });
+        record_store_conflict(&slot, &conflict);
+        let held = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(
+            held.as_deref(),
+            Some("a.txt claimed by two identities"),
+            "a poisoned slot must still record the conflict"
+        );
+    }
 }

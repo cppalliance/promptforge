@@ -3,6 +3,8 @@
 //! for variant, and the rebuild of a raised Lua error table into the
 //! variant it stands in for.
 
+use std::borrow::Cow;
+
 use promptforge_lua::Error as LuaError;
 use promptforge_model_client::model::ModelSetError;
 use promptforge_parser::Error as ParserError;
@@ -39,6 +41,13 @@ impl Error {
     /// at the broken invariant.
     #[track_caller]
     pub(crate) fn internal(message: &'static str) -> Error {
+        Error::internal_owned(Cow::Borrowed(message))
+    }
+
+    /// Builds an internal-invariant failure whose message may name a value,
+    /// capturing the call site as [`Error::internal`] does.
+    #[track_caller]
+    fn internal_owned(message: Cow<'static, str>) -> Error {
         let location = std::panic::Location::caller();
         Error::Internal {
             message,
@@ -86,12 +95,12 @@ impl From<crate::subst::SubstitutionError> for Error {
     }
 }
 
-/// Maps a poisoned model-set lock onto [`Error::Lua`]. The lock is the
-/// run's own mutex failing, not a model failure, so it never becomes an
-/// [`Error::Completion`].
+/// Maps a poisoned model-set lock onto [`Error::Internal`]. The lock is the
+/// run's own mutex failing, which no prompt author can cause and which is
+/// not a model failure, so it never becomes an [`Error::Completion`].
 impl From<ModelSetError> for Error {
-    fn from(error: ModelSetError) -> Error {
-        Error::Lua(error.to_string())
+    fn from(_: ModelSetError) -> Error {
+        Error::internal("model set mutex was poisoned")
     }
 }
 
@@ -150,26 +159,35 @@ impl From<LuaError> for Error {
     fn from(error: LuaError) -> Error {
         match error {
             LuaError::Lua(message) => Error::Lua(message),
-            LuaError::LuaRuntime { message, source } => Error::LuaRuntime { message, source },
+            LuaError::LuaRuntime { message, cause } => Error::LuaRuntime {
+                message,
+                source: cause,
+            },
             LuaError::LuaCompile {
                 location,
                 source_line,
                 lua_source,
                 message,
-                source,
+                cause,
             } => Error::LuaCompile {
                 location,
                 source_line,
                 lua_source,
                 message,
-                source,
+                source: cause,
             },
             LuaError::LuaQuota { resource } => Error::LuaQuota { resource },
             LuaError::ContextExhausted { reason } => Error::ContextExhausted { reason },
             LuaError::Interrupted => Error::Interrupted,
-            LuaError::Tool { message, source } => Error::Tool { message, source },
-            LuaError::Store { message, source } => Error::Store { message, source },
-            LuaError::Internal(message) => Error::internal(message),
+            LuaError::Tool { message, cause } => Error::Tool {
+                message,
+                source: cause,
+            },
+            LuaError::Store { message, cause } => Error::Store {
+                message,
+                source: cause,
+            },
+            LuaError::Internal(message) => Error::internal_owned(message),
             LuaError::Raised(raised) => Error::from_raised(raised),
         }
     }

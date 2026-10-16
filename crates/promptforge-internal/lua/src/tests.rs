@@ -4,15 +4,28 @@
 //! `recording`, `assert_chunk_name_resolves`, `refusal_line`, and the
 //! text-record builders serve the crate's other test modules too.
 
+use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::*;
-use crate::test_vm::{BuiltVm, TEST_SECTION, TestVm, fresh_access, test_nonce};
-use crate::vm::{LuaOutcome, run_chunk};
+use mlua::{Lua, Value};
 use promptforge_model_client::client::Role;
-use promptforge_types::tools::ToolDescriptor;
-use promptforge_vfs::{AcquireContext, ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef};
-use serde_json::json;
+use promptforge_model_client::model::ModelSet;
+use promptforge_types::emitter::Emitter;
+use promptforge_types::tools::{ToolDescriptor, ToolId};
+use promptforge_vfs::{
+    Access, AcquireContext, ExecId, Origin, Vfs, VfsAccess, VfsError, VfsPath, VfsRef,
+};
+use serde_json::{Value as Json, json};
+
+use super::*;
+use crate::engine_globals::LUA_LOG_CHARACTER_LIMIT;
+use crate::error::Result;
+use crate::handles::resolve_section_target;
+use crate::hardening::install_instruction_budget;
+use crate::sys::{guarded_var, var_snapshot_table, var_to_json};
+use crate::test_vm::{BuiltVm, TEST_SECTION, TestVm, fresh_access, test_nonce};
+use crate::vm::{DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, LuaOutcome, run_chunk};
 
 #[path = "tests-recording.rs"]
 pub(crate) mod recording;
@@ -23,6 +36,7 @@ mod argv;
 mod budgets;
 mod cancellation;
 mod diagnostics;
+mod engine_misuse;
 mod library_load;
 mod logging;
 mod require;
@@ -204,8 +218,10 @@ fn fixture_tool(name: &str) -> ToolDescriptor {
 /// `fixtures_<name>`. This is the shape the run's offering arrives in; no
 /// Lua runs to produce it.
 fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
-    ToolSet {
-        offered: tools
+    ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        tools
             .iter()
             .map(|(name, description)| {
                 ToolBinding::for_test(
@@ -215,8 +231,7 @@ fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
                 )
             })
             .collect(),
-        ..ToolSet::default()
-    }
+    )
 }
 
 /// A text record under `role`, with no tool calls and no call id.

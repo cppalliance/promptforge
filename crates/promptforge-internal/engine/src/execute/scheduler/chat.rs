@@ -126,7 +126,7 @@ impl Scheduler {
             list.push(notice_record(notice))
                 .map_err(|_| Error::internal("the list refused a notice's user record"))?;
         }
-        let messages = list.records();
+        let messages = list.to_records();
         if messages.is_empty() {
             return Err(Error::Lua("messages must not be empty".to_owned()));
         }

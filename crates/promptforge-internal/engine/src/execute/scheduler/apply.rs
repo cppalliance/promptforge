@@ -212,7 +212,7 @@ impl Scheduler {
                 Some(call.report),
             ) {
                 Ok(outcome) => ToolCallOutcome::from_dispatch(
-                    call.binding.output_kind,
+                    call.binding.output_kind(),
                     call.binding.alias(),
                     outcome.into_content(),
                 )

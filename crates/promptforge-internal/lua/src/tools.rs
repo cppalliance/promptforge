@@ -23,7 +23,7 @@ use mlua::{Function, Lua, MultiValue, Table, Value, Variadic};
 use promptforge_model_client::detail::tool_schema_new;
 use promptforge_types::tools::ToolId;
 
-use crate::alias::validate_alias;
+use crate::alias::Alias;
 use crate::error::{Error, Result};
 use crate::handles::{ToolBinding, ToolSet};
 use crate::scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
@@ -62,7 +62,7 @@ pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
     {
         Some(Value::Function(handler)) => Ok(handler),
         _ => Err(mlua::Error::external(Error::Internal(
-            "a local tool answer names a registered handler",
+            "a local tool answer names a registered handler".into(),
         ))),
     }
 }
@@ -240,14 +240,18 @@ fn install_offer_local(lua: &Lua, tools: &Table, local_tools: &LocalTools) -> Re
     let offer_local = lua
         .create_function(
             move |lua, (alias, description, params, handler): (String, String, Table, Function)| {
-                validate_alias(&alias).map_err(mlua::Error::external)?;
-                if local.contains(&alias).map_err(mlua::Error::external)? {
+                let alias = Alias::parse(alias).map_err(mlua::Error::external)?;
+                if local
+                    .contains(alias.as_str())
+                    .map_err(mlua::Error::external)?
+                {
                     return Err(mlua::Error::external(format!(
-                        "tools.offer_local alias {alias:?} is already registered"
+                        "tools.offer_local alias {:?} is already registered",
+                        alias.as_str()
                     )));
                 }
                 let parameters = local_params_schema(&params)?;
-                let schema = tool_schema_new(alias.clone(), description, parameters)
+                let schema = tool_schema_new(alias.as_str(), description, parameters)
                     .map_err(mlua::Error::external)?;
                 let handlers: Table = lua.named_registry_value(LOCAL_HANDLERS_REGISTRY)?;
                 handlers.raw_set(alias.as_str(), handler)?;

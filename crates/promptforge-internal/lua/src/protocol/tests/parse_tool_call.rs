@@ -138,7 +138,7 @@ fn a_tool_call_with_a_tool_object_decodes_to_its_id() {
         "echo tool",
         json!({ "type": "object" }),
     );
-    let handle = crate::LuaToolHandle::from_binding(&crate::ToolBinding::from_descriptor(
+    let handle = crate::tools::LuaToolHandle::from_binding(&crate::ToolBinding::from_descriptor(
         "tools_echo",
         &descriptor,
     ));

@@ -19,11 +19,13 @@
 //! checked for a collision, a table is sealed at its top level the way
 //! `sys` is, and each is raw-set into `_G`.
 
-use mlua::Table;
+use std::collections::BTreeMap;
+
 use mlua::chunk::ChunkMode;
+use mlua::{Lua, Table, Value};
 use promptforge_types::plugins::{PluginId, Prelude};
 
-use super::{BTreeMap, Error, Lua, Result, Value};
+use crate::error::{Error, Result};
 use crate::proxy::read_only_proxy;
 
 /// The `_G` names a prelude's environment reads, as bound when it installs.
@@ -246,7 +248,7 @@ fn load_failure(plugin: &PluginId, error: mlua::Error) -> Error {
     }
     Error::LuaRuntime {
         message,
-        source: Box::new(error),
+        cause: Box::new(error),
     }
 }
 

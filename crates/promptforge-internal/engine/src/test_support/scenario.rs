@@ -437,10 +437,11 @@ impl Prefill {
                 state = state.with_models_for_test(set);
             }
             if let Some(offered) = self.offering {
-                state = state.with_tool_set(ToolSet {
+                state = state.with_tool_set(ToolSet::new(
+                    Vec::new(),
+                    std::collections::BTreeMap::new(),
                     offered,
-                    ..ToolSet::default()
-                });
+                ));
             }
             if self.raw_shims {
                 state.expose_raw_shims_for_test();

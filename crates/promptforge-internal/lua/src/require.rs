@@ -17,11 +17,16 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
-use mlua::{AnyUserData, Function, Value};
+use mlua::{AnyUserData, Function, Lua, Value};
 use promptforge_types::emitter::{Emitter, LibraryLoad};
+use serde_json::Value as Json;
 
-use super::{Error, Json, Library, LibraryKey, Lua, LuaProgram, ProseState, Result, SharedSource};
+use crate::SharedSource;
+use crate::error::{Error, Result};
 use crate::error_value::install_error_value;
+use crate::handles::{Library, LibraryKey};
+use crate::program::LuaProgram;
+use crate::prose::ProseState;
 
 /// The loader chunk's name, `@`-prefixed as the shim chunks' names are.
 const REQUIRE_CHUNK_NAME: &str = "@crates/promptforge-internal/lua/src/__impl_require.lua";
@@ -219,7 +224,7 @@ fn end_load_capture(
     lua.create_function(move |_, finished: bool| {
         let Some((_, heading)) = lock(&loading, "library-load state")?.pop() else {
             return Err(mlua::Error::external(Error::Internal(
-                "require ended a library load that never began",
+                "require ended a library load that never began".into(),
             )));
         };
         depth.fetch_sub(1, Ordering::Relaxed);
@@ -235,10 +240,13 @@ fn end_load_capture(
 }
 
 /// Locks one of `require`'s shared slots, `what`, mapping a poisoned lock
-/// to a Lua error.
+/// to an internal error.
 fn lock<'a, T>(slot: &'a Mutex<T>, what: &str) -> mlua::Result<MutexGuard<'a, T>> {
-    slot.lock()
-        .map_err(|_| mlua::Error::external(Error::Lua(format!("require's {what} was poisoned"))))
+    slot.lock().map_err(|_| {
+        mlua::Error::external(Error::Internal(
+            format!("require's {what} was poisoned").into(),
+        ))
+    })
 }
 
 #[cfg(test)]

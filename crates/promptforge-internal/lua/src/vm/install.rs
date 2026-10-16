@@ -1,15 +1,29 @@
 //! Section VM setup: the Engine values and persistent Engine globals, the
 //! control globals and yield shims, and the `sys` and `prose` globals.
 
-use super::{SectionVm, pack_sequence};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use mlua::Value;
+use promptforge_types::emitter::Emitter;
+use promptforge_vfs::Access;
+use serde_json::Value as Json;
+
+use super::{NOT_INJECTED, SYS_LIVE_POISONED, SectionVm, pack_sequence};
+use crate::argv::Argv;
+use crate::compactors::install_compactors;
+use crate::coro::install_shim_prelude;
+use crate::engine_globals::{install_log, install_store_table};
+use crate::error::{Error, Result};
+use crate::handles::{Library, LibraryKey, SectionText, resolve_section_target};
+use crate::messages::install_messages;
+use crate::models::install_models;
+use crate::plugins::install_plugins;
+use crate::prose::ProseState;
 #[cfg(test)]
-use crate::var_to_json;
-use crate::{
-    Access, Arc, Argv, Emitter, Error, Json, Library, LibraryKey, Mutex, Ordering, ProseState,
-    Result, SectionText, Value, guarded_var, install_compactors, install_log, install_messages,
-    install_models, install_plugins, install_shim_prelude, install_store_table, install_tools,
-    resolve_section_target, seal_sys,
-};
+use crate::sys::var_to_json;
+use crate::sys::{guarded_var, seal_sys};
+use crate::tools::install_tools;
 
 impl SectionVm {
     /// Installs the section's Engine values, ahead of the Plugin preludes.
@@ -21,8 +35,8 @@ impl SectionVm {
     /// clone of the emitter rather than a per-chunk borrow.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values cannot be bridged or if Engine
-    /// values were already injected.
+    /// Returns [`Error::Internal`] if Engine values were already injected,
+    /// or the bridging failure if Engine values cannot be bridged.
     pub fn inject_values(&mut self, args: &str, sys: &Json, access: &Arc<Access>) -> Result<()> {
         self.inject_values_with_var(args, sys, access, None, Argv::Frozen(None))
     }
@@ -43,8 +57,8 @@ impl SectionVm {
     /// every other section.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values cannot be bridged or were
-    /// already injected.
+    /// Returns [`Error::Internal`] if Engine values were already injected,
+    /// or the bridging failure if Engine values cannot be bridged.
     #[expect(
         clippy::similar_names,
         reason = "args and argv are the spec'd global names; the pair is intentional"
@@ -58,8 +72,8 @@ impl SectionVm {
         argv: Argv<'_>,
     ) -> Result<()> {
         if self.values_injected {
-            return Err(Error::Lua(
-                "section VM Engine values were already injected".to_owned(),
+            return Err(Error::Internal(
+                "section VM Engine values were already injected".into(),
             ));
         }
 
@@ -75,7 +89,7 @@ impl SectionVm {
             let mut live = self
                 .sys_live
                 .lock()
-                .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+                .map_err(|_| Error::Internal(SYS_LIVE_POISONED.into()))?;
             *live = Some(sys.clone());
         }
         let var = guarded_var(&self.lua, initial_var)?;
@@ -114,13 +128,14 @@ impl SectionVm {
     /// [`take_store_conflict`](Self::take_store_conflict).
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values have not been injected or the
-    /// globals cannot be installed, or [`Error::Store`] if the handle
-    /// declares no store.
+    /// Returns [`Error::Internal`] if Engine values have not been injected,
+    /// [`Error::LuaRuntime`] if the globals cannot be installed, or
+    /// [`Error::Store`] if the handle declares no store.
     pub fn install_engine_globals(&self, emitter: &Emitter, section: &str) -> Result<()> {
-        let access = self.access.as_ref().ok_or_else(|| {
-            Error::Lua("section VM Engine values have not been injected".to_owned())
-        })?;
+        let access = self
+            .access
+            .as_ref()
+            .ok_or_else(|| Error::Internal(NOT_INJECTED.into()))?;
         install_log(
             &self.lua,
             emitter,
@@ -144,10 +159,18 @@ impl SectionVm {
     /// with `pcall` still ends the run with a determinism violation.
     #[must_use]
     pub fn take_store_conflict(&self) -> Option<String> {
+        // A panic elsewhere cannot leave the slot half-written, so a
+        // poisoned lock still holds the conflict to hand over.
         self.store_conflicts
             .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+
+    /// Shared store-conflict slot, for the poisoned-slot test.
+    #[cfg(test)]
+    pub(crate) fn store_conflicts_handle(&self) -> Arc<Mutex<Option<String>>> {
+        Arc::clone(&self.store_conflicts)
     }
 
     /// Installs `call`, `jump`, and the `prompt` reads (`prompt.section`
@@ -343,13 +366,12 @@ impl SectionVm {
     /// section's model binding is fixed.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values have not been injected or the
-    /// sealed table cannot be installed.
+    /// Returns [`Error::Internal`] if Engine values have not been injected
+    /// or the live slot is poisoned, or the install failure if the sealed
+    /// table cannot be installed.
     pub fn re_seal_sys(&self, sys: &Json) -> Result<()> {
         if !self.values_injected {
-            return Err(Error::Lua(
-                "section VM Engine values were not injected".to_owned(),
-            ));
+            return Err(Error::Internal(NOT_INJECTED.into()));
         }
         let globals = self.lua.globals();
         let sys_table = seal_sys(&self.lua, sys)?;
@@ -357,7 +379,7 @@ impl SectionVm {
         let mut live = self
             .sys_live
             .lock()
-            .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+            .map_err(|_| Error::Internal(SYS_LIVE_POISONED.into()))?;
         *live = Some(sys.clone());
         Ok(())
     }
@@ -377,16 +399,16 @@ impl SectionVm {
     /// Distinguishes the two non-value states rather than collapsing both to
     /// `fallback`: an *unset* live slot (before any [`Self::re_seal_sys`]) is a
     /// legitimate state and yields `Ok(fallback)`, while a *poisoned* lock is a
-    /// real failure and yields [`Error::Lua`] instead of silently masquerading
-    /// as the fallback.
+    /// real failure and yields [`Error::Internal`] instead of silently
+    /// masquerading as the fallback.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when the live `sys` mutex is poisoned.
+    /// Returns [`Error::Internal`] when the live `sys` mutex is poisoned.
     pub fn current_sys(&self, fallback: &Json) -> Result<Json> {
         let guard = self
             .sys_live
             .lock()
-            .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+            .map_err(|_| Error::Internal(SYS_LIVE_POISONED.into()))?;
         Ok(guard.clone().unwrap_or_else(|| fallback.clone()))
     }
 

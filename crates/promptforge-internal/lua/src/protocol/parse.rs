@@ -20,8 +20,11 @@ use tasks::{
     parse_status, parse_timer,
 };
 
+use crate::error::{Error, Result};
+use crate::handles::resolve_section_target;
+use crate::models::LuaModelHandle;
 use crate::tools::tool_name;
-use crate::{Error, LuaModelHandle, Result, resolve_section_target, scalar_return};
+use crate::vm::scalar_return;
 
 use super::answer::Answer;
 use super::request::{LocalToolOutcome, Request, ToolCallRecord};

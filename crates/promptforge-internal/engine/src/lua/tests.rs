@@ -59,10 +59,11 @@ fn stub_tool() -> ToolDescriptor {
 
 /// One tool set offering the stub tool under its wire name `tools_echo`.
 fn test_tools() -> ToolSet {
-    ToolSet {
-        offered: vec![ToolBinding::from_descriptor("tools_echo", &stub_tool())],
-        ..ToolSet::default()
-    }
+    ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![ToolBinding::from_descriptor("tools_echo", &stub_tool())],
+    )
 }
 
 /// Builds a section VM through the real setup path: construction, Engine

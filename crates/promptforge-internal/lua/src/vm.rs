@@ -13,19 +13,54 @@ mod install;
 mod run;
 mod state;
 
-use super::{
-    Access, Arc, AtomicU32, AtomicUsize, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Emitter,
-    Error, GuardNonce, InstructionBudget, Json, Lua, LuaOptions, LuaProgram, ModelRuntime,
-    ModelSet, Mutex, Ordering, Result, StdLib, ToolRuntime, ToolSet, harden,
-    install_deterministic_iteration, install_instruction_budget, install_untrusted, lifecycle,
-    log_byte_budget,
-};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+use mlua::{Lua, LuaOptions, StdLib};
 use promptforge_model_client::client::ToolSchema;
+use promptforge_model_client::model::ModelSet;
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::lifecycle;
+use promptforge_types::untrusted::GuardNonce;
+use promptforge_vfs::Access;
+use serde_json::Value as Json;
+
+use crate::alias::Alias;
+use crate::engine_globals::{LUA_LOG_CHARACTER_LIMIT, install_untrusted};
+use crate::error::{Error, Result};
+use crate::handles::ToolSet;
+use crate::hardening::{InstructionBudget, harden, install_instruction_budget};
+use crate::iteration::install_deterministic_iteration;
+use crate::models::{ModelRuntime, RawModelIds};
+use crate::program::LuaProgram;
+use crate::scope::ToolRuntime;
 
 pub use run::CoroStep;
+pub(crate) use run::scalar_return;
 #[cfg(test)]
 pub(crate) use run::{LuaOutcome, run_chunk};
 pub use state::{current_tool_bindings, resolve_model_binding};
+
+/// Default per-VM Lua heap ceiling, matching the executor's `RunLimits`.
+pub(crate) const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+
+/// Default per-VM `log()` event budget, matching the executor's `RunLimits`.
+pub(crate) const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
+
+/// The failure of a VM step taken before Engine injection.
+pub(crate) const NOT_INJECTED: &str = "section VM Engine values have not been injected";
+
+/// The failure of a poisoned live `sys` slot.
+pub(crate) const SYS_LIVE_POISONED: &str = "sys live slot was poisoned";
+
+/// Returns the cumulative `log()` byte ceiling derived from the event budget.
+///
+/// Bounds total log volume (bytes) even when each event is under the per-event
+/// character ceiling. Derived as `events * LUA_LOG_CHARACTER_LIMIT` so it scales
+/// with the configured event budget.
+fn log_byte_budget(log_events: u32) -> usize {
+    (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
+}
 
 /// Packs owned values into a 1-based Lua sequence table.
 fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<mlua::Table> {
@@ -103,12 +138,12 @@ pub struct SectionVm {
     /// The VM's instruction-budget counter, shared with every block
     /// coroutine's hook (hooks are per-coroutine in PUC Lua).
     instruction_budget: InstructionBudget,
-    /// The raw-model-id fallback, on whenever the caller passes an
-    /// application-state snapshot (`RunContext::ui`): when set, `models.get`
-    /// resolves an undeclared alias as a raw gateway catalog model id. Set by
-    /// [`allow_raw_model_ids`](Self::allow_raw_model_ids) before Engine
-    /// injection; unset everywhere else.
-    raw_model_ids: bool,
+    /// The raw-model-id fallback, resolved whenever the caller passes an
+    /// application-state snapshot (`RunContext::ui`): then `models.get`
+    /// resolves an undeclared alias as a raw gateway catalog model id. Set
+    /// by [`allow_raw_model_ids`](Self::allow_raw_model_ids) before Engine
+    /// injection; refused everywhere else.
+    raw_model_ids: RawModelIds,
     /// Test-support only: the live-section-VM tally guard. Its presence
     /// counts this VM as live from construction until the VM drops (its
     /// teardown); the Engine's scheduler suite reads the tally to pin the
@@ -191,31 +226,36 @@ pub fn section_vm_peak() -> usize {
 /// the VM is single-threaded, so the lock never contends.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LocalTools {
-    entries: Arc<Mutex<Vec<(String, ToolSchema)>>>,
+    entries: Arc<Mutex<Vec<(Alias, ToolSchema)>>>,
 }
 
 impl LocalTools {
+    /// Locks the registry.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] if the entries lock was poisoned.
+    fn entries(&self) -> Result<std::sync::MutexGuard<'_, Vec<(Alias, ToolSchema)>>> {
+        self.entries
+            .lock()
+            .map_err(|_| Error::Internal("local tools registry was poisoned".into()))
+    }
+
     /// Registers a local tool: alias and prebuilt schema.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the entries lock was poisoned.
-    pub(crate) fn register(&self, alias: String, schema: ToolSchema) -> Result<()> {
-        self.entries
-            .lock()
-            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
-            .push((alias, schema));
+    /// Returns [`Error::Internal`] if the entries lock was poisoned.
+    pub(crate) fn register(&self, alias: Alias, schema: ToolSchema) -> Result<()> {
+        self.entries()?.push((alias, schema));
         Ok(())
     }
 
     /// Returns the schemas of every registered local tool.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the entries lock was poisoned.
+    /// Returns [`Error::Internal`] if the entries lock was poisoned.
     pub(crate) fn schemas(&self) -> Result<Vec<ToolSchema>> {
         Ok(self
-            .entries
-            .lock()
-            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
+            .entries()?
             .iter()
             .map(|(_, schema)| schema.clone())
             .collect())
@@ -224,18 +264,16 @@ impl LocalTools {
     /// Returns whether `alias` names a registered local tool.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the entries lock was poisoned.
+    /// Returns [`Error::Internal`] if the entries lock was poisoned.
     pub(crate) fn contains(&self, alias: &str) -> Result<bool> {
         Ok(self
-            .entries
-            .lock()
-            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
+            .entries()?
             .iter()
-            .any(|(name, _)| name == alias))
+            .any(|(name, _)| name.as_str() == alias))
     }
 
     #[cfg(test)]
-    pub(crate) fn entries_handle(&self) -> Arc<Mutex<Vec<(String, ToolSchema)>>> {
+    pub(crate) fn entries_handle(&self) -> Arc<Mutex<Vec<(Alias, ToolSchema)>>> {
         Arc::clone(&self.entries)
     }
 }
@@ -291,7 +329,7 @@ impl SectionVm {
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
             instruction_budget: InstructionBudget::default(),
-            raw_model_ids: false,
+            raw_model_ids: RawModelIds::Refused,
             #[cfg(feature = "test-support")]
             _vm_tally: tally,
         };
@@ -351,7 +389,7 @@ impl SectionVm {
     /// snapshot never calls it, so it keeps strict declared-alias
     /// resolution.
     pub fn allow_raw_model_ids(&mut self) {
-        self.raw_model_ids = true;
+        self.raw_model_ids = RawModelIds::Resolved;
     }
 
     /// Applies the run's Lua resource limits to this VM.

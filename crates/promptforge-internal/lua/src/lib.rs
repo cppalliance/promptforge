@@ -53,141 +53,78 @@
 //!   installed shim; a direct or malformed yield fails the block without
 //!   changing scheduler state.
 
-// The shared surface that child modules pull with a single `use super::*;`.
-use std::collections::BTreeMap;
-use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
-
-use mlua::thread::ThreadStatus;
-use mlua::{
-    Function, HookTriggers, IntoLuaMulti, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Thread,
-    Value, VmState,
-};
-use serde_json::Value as Json;
-
-use promptforge_model_client::model::{ModelBinding, ModelSet, ModelView};
-use promptforge_types::emitter::Emitter;
-use promptforge_types::event::lifecycle;
-use promptforge_types::tools::ToolId;
-use promptforge_types::untrusted::GuardNonce;
-use promptforge_vfs::Access;
-
-use crate::compactors::install_compactors;
-use crate::error::Result;
-use crate::messages::install_messages;
-use crate::models::LuaModelHandle;
-use crate::models::install_models;
-
-pub use crate::error::{Error, SharedSource};
-
-/// How many instructions between hook firings.
-const HOOK_INTERVAL: u32 = 10_000;
-/// Hook-firing trip budget, effectively unlimited.
-///
-/// Long-running and infinite loops are legal: no instruction ceiling aborts a
-/// block, so the hook's job is the cancellation poll and the run's
-/// `CancelHandle` is the kill switch for a runaway loop. The typed quota
-/// errors remain for the memory and log budgets.
-const HOOK_BUDGET: u64 = u64::MAX;
-/// Maximum number of Unicode scalar values accepted by `log`.
-const LUA_LOG_CHARACTER_LIMIT: usize = 256;
-/// Default per-VM Lua heap ceiling, matching the executor's `RunLimits`.
-const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
-/// Default per-VM `log()` event budget, matching the executor's `RunLimits`.
-const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
-
-/// Cumulative `log()` byte ceiling derived from the event budget.
-///
-/// Bounds total log volume (bytes) even when each event is under the per-event
-/// character ceiling. Derived as `events * LUA_LOG_CHARACTER_LIMIT` so it scales
-/// with the configured event budget.
-fn log_byte_budget(log_events: u32) -> usize {
-    (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
-}
-
 mod alias;
 mod argv;
 mod collection;
 mod compactors;
-pub mod detail;
+mod coro;
+mod detail;
+mod dispatch;
+mod engine_globals;
 mod error;
 #[path = "error-value.rs"]
 mod error_value;
-pub use error_value::{
-    ErrorField, ErrorKind, ErrorValue, Raised, error_table, store_error_fields, store_error_reason,
-    store_error_value_fields,
-};
 mod globals;
-mod hardening;
-use hardening::{InstructionBudget, harden, install_instruction_budget, scalar_return};
-mod coro;
-mod iteration;
-use coro::{block_guard, install_shim_prelude, take_failure};
-use iteration::install_deterministic_iteration;
-mod dispatch;
-mod sys;
-use sys::{guarded_var, seal_sys, var_snapshot_table, var_to_json};
-mod engine_globals;
-pub use engine_globals::install_ui;
-use engine_globals::{install_log, install_store_table, install_untrusted, route_store_to_shims};
-mod tools;
-#[cfg(test)]
-use tools::LuaToolHandle;
-use tools::{install_tool_call_counts, install_tools};
-mod plugins;
-use plugins::install_plugins;
 mod handles;
+mod hardening;
+mod iteration;
 mod messages;
+mod models;
+mod models_loop;
+mod plugins;
 mod prelude;
 mod program;
 mod projection;
 mod prose;
+mod protocol;
 mod proxy;
 mod require;
 mod scope;
+mod sys;
+mod tools;
 mod vm;
-use handles::resolve_section_target;
-mod models;
-mod models_loop;
-mod protocol;
-
-// The executor-facing surface: every item `promptforge-engine` names crosses
-// here. The facade re-exports only `VfsOp` and `VfsOutcome`.
-pub use crate::argv::Argv;
-pub use collection::render_item;
-pub use compactors::{Compactor, OverflowReason, UsageAnchor, output_reserve, precheck};
-#[cfg(feature = "test-support")]
-pub use coro::install_model_tool_call_shim;
-pub use coro::{install_section_loop_shim, install_store_shims};
-pub use dispatch::{
-    ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
-};
-pub use engine_globals::{run_store_op, store_error_message};
-pub use globals::{RESERVED_NAMES, Reserved, reserved_name};
-pub use handles::{
-    Library, LibraryBlock, LibraryKey, LuaBlockResult, SectionText, ToolBinding, ToolOutputKind,
-    ToolSet,
-};
-pub use messages::MessageList;
-pub use models::ModelRuntime;
-pub use prelude::install_preludes;
-pub use projection::project_messages;
-pub use prose::ProseState;
-pub use protocol::{
-    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request,
-    TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
-};
-pub use scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
-pub use sys::enrich_sys_model;
-pub use vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
-#[cfg(feature = "test-support")]
-pub use vm::{reset_section_vm_peak, section_vm_peak};
-
-pub use program::LuaProgram;
 
 #[cfg(test)]
 pub(crate) mod test_vm;
 #[cfg(test)]
 mod tests;
+
+// The executor-facing surface: every item `promptforge-engine` names crosses
+// here. The facade re-exports only `VfsOp` and `VfsOutcome`.
+pub use crate::argv::Argv;
+pub use crate::collection::render_item;
+pub use crate::compactors::{
+    Compactor, OverflowReason, ParseOverflowReasonError, UsageAnchor, output_reserve, precheck,
+};
+#[cfg(feature = "test-support")]
+pub use crate::coro::install_model_tool_call_shim;
+pub use crate::coro::{install_section_loop_shim, install_store_shims};
+pub use crate::dispatch::{
+    ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
+};
+pub use crate::engine_globals::{install_ui, run_store_op, store_error_message};
+pub use crate::error::{Error, QuotaResource, SharedSource};
+pub use crate::error_value::{
+    ErrorField, ErrorKind, ErrorValue, ParseErrorKindError, Raised, error_table,
+    store_error_value_fields,
+};
+pub use crate::globals::{RESERVED_NAMES, Reserved, reserved_name};
+pub use crate::handles::{
+    Library, LibraryBlock, LibraryKey, LuaBlockResult, SectionText, ToolBinding, ToolOutputKind,
+    ToolSet,
+};
+pub use crate::messages::{ListEditError, MessageList};
+pub use crate::models::ModelRuntime;
+pub use crate::prelude::install_preludes;
+pub use crate::program::LuaProgram;
+pub use crate::projection::project_messages;
+pub use crate::prose::ProseState;
+pub use crate::protocol::{
+    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request,
+    TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
+};
+pub use crate::scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
+pub use crate::sys::enrich_sys_model;
+pub use crate::vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
+#[cfg(feature = "test-support")]
+pub use crate::vm::{reset_section_vm_peak, section_vm_peak};

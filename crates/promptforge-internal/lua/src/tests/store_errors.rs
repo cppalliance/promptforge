@@ -1,8 +1,38 @@
 //! The store error value: each failure's reason tag, fields, and message,
-//! as rendered through the Lua boundary and as caught from a direct store
-//! closure.
+//! as rendered through the Lua boundary, as caught from a direct store
+//! closure, and as the store table's install reports it.
 
 use super::*;
+
+#[test]
+fn a_store_install_without_a_store_names_why_in_its_message() {
+    let access = Arc::new(
+        VfsRef::new(promptforge_vfs::MemoryBackend::new())
+            .acquire(Origin::new("no store test"))
+            .expect("a handle without a store still acquires"),
+    );
+    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
+    vm.inject_values("", &json!({}), &access)
+        .expect("Engine values must inject");
+    let error = vm
+        .install_engine_globals(&null_emitter(), "Test")
+        .expect_err("a handle without a store cannot install the store table");
+    assert!(
+        matches!(
+            &error,
+            Error::Store {
+                cause: VfsError::NoStore,
+                ..
+            }
+        ),
+        "required a store error over NoStore, actual {error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "store operation failed: no store: the handle declares no store"
+    );
+    vm.teardown(&null_emitter(), "Test");
+}
 
 #[test]
 fn direct_store_failure_caught_by_pcall_carries_the_reason_tag() {
@@ -259,15 +289,28 @@ fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
     ];
 
     for case in cases {
-        let reason = crate::store_error_reason(&case.error);
-        let fields = crate::store_error_fields(&case.error);
+        let fields = crate::store_error_value_fields(&case.error);
+        let Some((reason, fields)) = fields.split_first() else {
+            panic!(
+                "the reason leads every store error's fields: {:?}",
+                case.error
+            );
+        };
         let op = crate::VfsOp::Read {
             path: "x".to_owned(),
             start: None,
             end: None,
         };
         let message = crate::store_error_message(&op, &case.error);
-        assert_eq!(reason, case.reason, "wrong reason for {:?}", case.error);
+        assert_eq!(
+            reason,
+            &(
+                "reason".to_owned(),
+                crate::ErrorField::String(case.reason.to_owned())
+            ),
+            "wrong reason for {:?}",
+            case.error
+        );
         assert_eq!(fields, case.fields, "wrong fields for {:?}", case.error);
         assert_eq!(message, case.message, "wrong message for {:?}", case.error);
     }

@@ -8,15 +8,16 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use mlua::FromLuaMulti;
+use promptforge_model_client::model::ModelSet;
+use promptforge_types::emitter::Emitter;
 use promptforge_types::seed::RunSeed;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
-use promptforge_vfs::{Origin, VfsRef};
-use serde_json::json;
+use promptforge_types::untrusted::GuardNonce;
+use promptforge_vfs::{Access, Origin, VfsRef};
+use serde_json::{Value as Json, json};
 
 use crate::tests::recording::null_emitter;
-use crate::{
-    Access, Argv, Emitter, GuardNonce, Json, MessageList, ModelSet, SectionText, SectionVm, ToolSet,
-};
+use crate::{Argv, MessageList, SectionText, SectionVm, ToolSet};
 
 /// The one guard-nonce seed of every test VM.
 pub(crate) const TEST_SEED: RunSeed = RunSeed::from_bytes([0x73; 32]);

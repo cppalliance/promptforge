@@ -158,14 +158,15 @@ fn an_unknown_id_fails_before_scope_closure() {
 
 #[test]
 fn tool_objects_install_without_payload_reports() {
-    let bindings = ToolSet {
-        offered: vec![ToolBinding::for_test(
+    let bindings = ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
             &fixture_tool("search"),
         )],
-        ..ToolSet::default()
-    };
+    );
     let recorder = Recorder::default();
     let _vm = TestVm::new()
         .tools(bindings)

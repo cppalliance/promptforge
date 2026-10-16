@@ -1,8 +1,12 @@
 //! Per-VM tool runtime state: call counts, the task allowlist, and the scoped tool set a section sees.
 
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use promptforge_types::plugins::PluginId;
 
-use super::{Arc, BTreeMap, Error, Mutex, Result};
+use crate::error::{Error, Result};
 
 /// Shared per-VM tool-call counts, seeded at 0 for every key the installer
 /// was given: a catalog tool's id, or a local tool's alias. A dispatch
@@ -28,13 +32,13 @@ impl ToolCallCounts {
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, u64>>> {
         self.inner
             .lock()
-            .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))
+            .map_err(|_| Error::Internal("tool call counts mutex was poisoned".into()))
     }
 
     /// Ensures `name` is present in the map, seeding it at 0 when new.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    /// Returns [`Error::Internal`] if the mutex is poisoned.
     pub fn ensure(&self, name: &str) -> Result<()> {
         let mut map = self.lock()?;
         map.entry(name.to_owned()).or_insert(0);
@@ -44,14 +48,14 @@ impl ToolCallCounts {
     /// Increments the count for `name`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned or `name` was never
-    /// seeded.
+    /// Returns [`Error::Internal`] if the mutex is poisoned or `name` was
+    /// never seeded.
     pub fn increment(&self, name: &str) -> Result<()> {
         let mut map = self.lock()?;
         let count = map.get_mut(name).ok_or_else(|| {
-            Error::Lua(format!(
+            Error::Internal(Cow::Owned(format!(
                 "tool call counts: name {name:?} was not pre-seeded"
-            ))
+            )))
         })?;
         *count += 1;
         Ok(())
@@ -61,7 +65,7 @@ impl ToolCallCounts {
     /// never seeded.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    /// Returns [`Error::Internal`] if the mutex is poisoned.
     pub fn get(&self, name: &str) -> Result<Option<u64>> {
         Ok(self.lock()?.get(name).copied())
     }
@@ -69,7 +73,7 @@ impl ToolCallCounts {
     /// Returns a snapshot of every seeded name.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    /// Returns [`Error::Internal`] if the mutex is poisoned.
     pub fn names(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
     }

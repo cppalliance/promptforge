@@ -19,7 +19,8 @@ use promptforge_types::tools::{OutputTrust, ToolError, ToolOutput};
 use promptforge_types::untrusted::GuardNonce;
 
 use crate::error::{Error, Result};
-use crate::{ToolBinding, ToolCallCounts};
+use crate::handles::ToolBinding;
+use crate::scope::ToolCallCounts;
 
 /// The run coordinates a script-initiated dispatch reports under.
 ///
@@ -155,7 +156,7 @@ pub fn prepare_dispatch(
 
 /// Applies the model-issued dispatch rules to one bound tool call's answer:
 /// [`prepare_dispatch`] under the model-loop failure rule, then the
-/// the `ToolResult` event report under the model's call id.
+/// `ToolResult` event report under the model's call id.
 ///
 /// A model-issued call always resumes with content: the tool's own failure
 /// ([`Error::Tool`]) becomes the call's result - the error message
@@ -166,7 +167,7 @@ pub fn prepare_dispatch(
 /// the Engine applies these rules to the answer.
 ///
 /// # Errors
-/// Returns the counts' own error when `binding`'s alias was never seeded.
+/// Returns the counts' own error when `binding`'s id was never seeded.
 pub fn prepare_model_dispatch(
     binding: &ToolBinding,
     call_result: std::result::Result<ToolOutput, ToolError>,

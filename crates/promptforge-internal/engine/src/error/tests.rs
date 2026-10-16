@@ -228,10 +228,33 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
 }
 
 #[test]
-fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
-    // The run's own model-set mutex failing is not a model failure: it
-    // keeps the Lua mapping it always had, and a caller never sees it as a
-    // retryable completion kind.
+fn an_owned_lua_internal_message_reaches_the_engine_error_whole() {
+    let message = format!(
+        "tool call counts: name {:?} was not pre-seeded",
+        "web/fetch"
+    );
+    let error = Error::from(LuaError::Internal(std::borrow::Cow::Owned(message.clone())));
+    match &error {
+        Error::Internal {
+            message: carried, ..
+        } => assert_eq!(carried, &message),
+        other => panic!("expected an internal error, got {other:?}"),
+    }
+    assert_eq!(
+        error.to_string(),
+        format!("internal invariant violated: {message}")
+    );
+    assert_eq!(
+        crate::RunError::from(error).kind(),
+        crate::RunErrorKind::Internal
+    );
+}
+
+#[test]
+fn a_poisoned_model_set_maps_to_an_internal_error_and_never_a_completion_error() {
+    // The run's own model-set mutex failing is not a model failure and no
+    // prompt author can cause it: it maps to an internal error, and a
+    // caller never sees it as a retryable completion kind.
     use crate::model::{ModelSet, ModelView};
     use std::sync::{Arc, Mutex};
 
@@ -246,8 +269,8 @@ fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
     let failure = set.bindings().expect_err("a poisoned set cannot be read");
     let error = Error::from(failure);
     assert!(
-        matches!(&error, Error::Lua(message) if message == "model set mutex was poisoned"),
-        "the lock failure is a Lua error: {error:?}"
+        matches!(&error, Error::Internal { message, .. } if message == "model set mutex was poisoned"),
+        "the lock failure is an internal error: {error:?}"
     );
     assert!(!crate::RunError::from(error).is_retryable());
 }

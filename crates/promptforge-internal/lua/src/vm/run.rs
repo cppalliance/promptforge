@@ -2,18 +2,31 @@
 //! their start through each resume to the classified end.
 
 #[cfg(test)]
-use promptforge_types::seed::RunSeed;
+use std::sync::Arc;
 
-use super::SectionVm;
-use crate::protocol::{Answer, Request, YieldParse};
-#[cfg(test)]
-use crate::{Access, Arc, GuardNonce, Json};
+use mlua::thread::ThreadStatus;
+use mlua::{IntoLuaMulti, MultiValue, Thread, Value};
 #[cfg(any(test, feature = "test-support"))]
-use crate::{Emitter, lifecycle};
-use crate::{
-    Error, IntoLuaMulti, LuaBlockResult, LuaProgram, MultiValue, Result, Thread, ThreadStatus,
-    Value, block_guard, scalar_return, take_failure,
-};
+use promptforge_types::emitter::Emitter;
+#[cfg(any(test, feature = "test-support"))]
+use promptforge_types::event::lifecycle;
+#[cfg(test)]
+use promptforge_types::seed::RunSeed;
+#[cfg(test)]
+use promptforge_types::untrusted::GuardNonce;
+#[cfg(test)]
+use promptforge_vfs::Access;
+#[cfg(test)]
+use serde_json::Value as Json;
+
+#[cfg(any(test, feature = "test-support"))]
+use super::NOT_INJECTED;
+use super::SectionVm;
+use crate::coro::{block_guard, take_failure};
+use crate::error::{Error, Result};
+use crate::handles::LuaBlockResult;
+use crate::program::LuaProgram;
+use crate::protocol::{Answer, Request, YieldParse};
 
 impl SectionVm {
     /// Executes a compiled Lua chunk in this VM's persistent environment.
@@ -28,8 +41,9 @@ impl SectionVm {
     /// already be installed by `install_control_globals`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values have not been injected, execution
-    /// fails, or the program returns a non-scalar value.
+    /// Returns [`Error::Internal`] if Engine values have not been injected,
+    /// or the chunk's own failure when execution fails or the program
+    /// returns a non-scalar value.
     ///
     /// A test helper for `promptforge-engine`'s executor tests, so it exists
     /// only under `test-support`.
@@ -42,7 +56,7 @@ impl SectionVm {
     ) -> Result<LuaBlockResult> {
         emitter.report(section, lifecycle::LUA_CHUNK_STARTED);
         if !self.values_injected {
-            let error = Error::Lua("section VM Engine values have not been injected".to_owned());
+            let error = Error::Internal(NOT_INJECTED.into());
             emitter.report(section, lifecycle::LUA_CHUNK_FAILED);
             return Err(error);
         }
@@ -62,24 +76,26 @@ impl SectionVm {
     /// rather than silently coercing the failure into "no jump".
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when the jump-slot mutex is poisoned.
+    /// Returns [`Error::Internal`] when the jump-slot mutex is poisoned.
     fn take_jump(&self) -> Result<Option<String>> {
         let mut slot = self
             .jump_slot
             .lock()
-            .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
+            .map_err(|_| Error::Internal(JUMP_SLOT_POISONED.into()))?;
         Ok(slot.take())
+    }
+
+    /// Clears any jump target an earlier chunk recorded.
+    ///
+    /// # Errors
+    /// Returns [`Error::Internal`] when the jump-slot mutex is poisoned.
+    fn clear_jump(&self) -> Result<()> {
+        self.take_jump().map(drop)
     }
 
     #[cfg(any(test, feature = "test-support"))]
     fn run_loaded_with_control(&self, program: &LuaProgram) -> Result<LuaBlockResult> {
-        {
-            let mut slot = self
-                .jump_slot
-                .lock()
-                .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
-            *slot = None;
-        }
+        self.clear_jump()?;
         let result = program.load(&self.lua)?.call(());
         // A recorded jump takes precedence over the chunk's error: that error
         // is the jump's own transfer marker, not a real failure. A poisoned
@@ -122,18 +138,12 @@ impl SectionVm {
     /// frames for the prompt-line mapping.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the jump slot is poisoned, the program
-    /// cannot load, the shim prelude never ran on this VM, or the thread
-    /// cannot be created or hooked; a block failure returns the mapped
-    /// runtime error.
+    /// Returns [`Error::Internal`] if the jump slot is poisoned, or
+    /// [`Error::LuaRuntime`] if the program cannot load, the shim prelude
+    /// never ran on this VM, or the thread cannot be created or hooked; a
+    /// block failure returns the mapped runtime error.
     pub fn start_block_coro(&self, program: &LuaProgram) -> Result<CoroStep> {
-        {
-            let mut slot = self
-                .jump_slot
-                .lock()
-                .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
-            *slot = None;
-        }
+        self.clear_jump()?;
         let function = program.load(&self.lua)?;
         let guard = block_guard(&self.lua)?;
         let thread = self.lua.create_thread(guard).map_err(Error::lua)?;
@@ -268,8 +278,39 @@ impl SectionVm {
         }
         match self.library_programs.lock() {
             Ok(libraries) => program.map_runtime_error_among(error, &libraries),
-            Err(_) => Error::Lua("require's loaded library programs were poisoned".to_owned()),
+            Err(_) => Error::Internal("require's loaded library programs were poisoned".into()),
         }
+    }
+}
+
+/// The failure of a poisoned jump slot.
+const JUMP_SLOT_POISONED: &str = "jump slot poisoned";
+
+/// Renders a returned Lua scalar as the section's result string. Tables and other
+/// non-scalar returns are errors.
+fn value_to_string(value: &Value) -> Result<String> {
+    match value {
+        Value::String(s) => Ok(s.to_string_lossy()),
+        Value::Integer(i) => Ok(i.to_string()),
+        Value::Number(n) => Ok(n.to_string()),
+        Value::Boolean(b) => Ok(b.to_string()),
+        other => Err(Error::Lua(format!(
+            "cannot return a {} as a result",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Converts only the first returned Lua value into an optional scalar string.
+///
+/// Later values are ignored. A missing or nil first value returns `None`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the first value is not a supported scalar.
+pub(crate) fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
+    match returned.into_iter().next() {
+        None | Some(Value::Nil) => Ok(None),
+        Some(value) => value_to_string(&value).map(Some),
     }
 }
 
@@ -278,13 +319,13 @@ impl SectionVm {
 /// error table, whose `tostring` is the message, so the inner `mlua`
 /// runtime message's first line (or the kept table's message) is exactly
 /// the retained error's display. The comparison reads the retained `mlua`
-/// source rather than the mapped message, whose `Display` includes mlua's
+/// cause rather than the mapped message, whose `Display` includes mlua's
 /// `runtime error: ` prefix. A block that caught the shim's error and
 /// failed on its own keeps its own error.
 fn coroutine_failure_is<E: std::fmt::Display>(failure: &Error, retained: &E) -> bool {
     let display = retained.to_string();
     match failure {
-        Error::LuaRuntime { source, .. } => match source.downcast_ref::<mlua::Error>() {
+        Error::LuaRuntime { cause, .. } => match cause.downcast_ref::<mlua::Error>() {
             Some(mlua::Error::RuntimeError(message)) => {
                 message.lines().next() == Some(display.as_str())
             }

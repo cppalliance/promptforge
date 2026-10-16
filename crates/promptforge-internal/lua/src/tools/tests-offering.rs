@@ -13,16 +13,16 @@ use crate::test_vm::{lua_over, scoped, tool_at};
 /// A set declaring the Plugin `web` and offering its two tools beside the
 /// two of the undeclared Plugin `gh`, in id order, under their wire names.
 fn offering_set() -> ToolSet {
-    ToolSet {
-        declared: vec![PluginId::parse("web").expect("valid Plugin")],
-        offered: vec![
+    ToolSet::new(
+        vec![PluginId::parse("web").expect("valid Plugin")],
+        std::collections::BTreeMap::new(),
+        vec![
             ToolBinding::from_descriptor("gh_issues_list", &tool_at("gh/issues.list")),
             ToolBinding::from_descriptor("gh_search", &tool_at("gh/search")),
             ToolBinding::from_descriptor("web_fetch", &tool_at("web/fetch")),
             ToolBinding::from_descriptor("web_search", &tool_at("web/search")),
         ],
-        ..ToolSet::default()
-    }
+    )
 }
 
 #[test]

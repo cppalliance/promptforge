@@ -3,6 +3,8 @@
 //! selects the binding's output kind. The tool set finds an offered
 //! binding by wire name or by canonical id.
 
+use std::collections::BTreeMap;
+
 use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
 
@@ -22,7 +24,7 @@ fn descriptor(structured: bool) -> ToolDescriptor {
 fn a_structured_descriptor_binds_with_structured_output() {
     let descriptor = descriptor(true);
     let binding = ToolBinding::from_descriptor("fetch_alias", &descriptor);
-    assert_eq!(binding.output_kind, ToolOutputKind::Structured);
+    assert_eq!(binding.output_kind(), ToolOutputKind::Structured);
     assert_eq!(binding.alias(), "fetch_alias");
     assert_eq!(binding.id(), &descriptor.id);
     assert_eq!(binding.description(), "Fetch a page");
@@ -32,7 +34,7 @@ fn a_structured_descriptor_binds_with_structured_output() {
 #[test]
 fn a_plain_descriptor_binds_with_plain_output() {
     let binding = ToolBinding::from_descriptor("fetch_alias", &descriptor(false));
-    assert_eq!(binding.output_kind, ToolOutputKind::Plain);
+    assert_eq!(binding.output_kind(), ToolOutputKind::Plain);
 }
 
 #[test]
@@ -41,7 +43,7 @@ fn the_test_seam_overrides_only_the_description() {
     let binding = ToolBinding::for_test("fetch_alias", "test double", &descriptor);
     assert_eq!(binding.description(), "test double");
     assert_eq!(
-        binding.output_kind,
+        binding.output_kind(),
         ToolOutputKind::Structured,
         "the output kind still follows the descriptor"
     );
@@ -50,10 +52,7 @@ fn the_test_seam_overrides_only_the_description() {
 #[test]
 fn an_offered_binding_is_found_by_its_wire_name_or_its_id_as_one_binding() {
     let offered = ToolBinding::from_descriptor("tools_fetch", &descriptor(false));
-    let set = ToolSet {
-        offered: vec![offered.clone()],
-        ..ToolSet::default()
-    };
+    let set = ToolSet::new(Vec::new(), BTreeMap::new(), vec![offered.clone()]);
     assert_eq!(set.offered(), std::slice::from_ref(&offered));
     assert_eq!(set.offered_binding("tools_fetch"), Some(&offered));
     assert_eq!(

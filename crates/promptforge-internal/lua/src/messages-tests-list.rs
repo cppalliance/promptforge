@@ -4,7 +4,7 @@
 use promptforge_model_client::client::{Message, Role};
 use serde_json::json;
 
-use crate::messages::MessageList;
+use crate::messages::{ListEditError, MessageList};
 use crate::protocol::{MessageContent, MessageRecord, ToolCallRecord};
 use crate::test_vm::{BuiltVm, TestVm};
 use crate::tests::{assistant, system, text, user};
@@ -33,7 +33,7 @@ pub(super) fn refusal(vm: &BuiltVm, source: &str) -> String {
 
 /// The list's records by role and text, for compact assertions.
 fn texts(list: &MessageList) -> Vec<(Role, String)> {
-    list.records()
+    list.to_records()
         .into_iter()
         .map(|record| match record.content {
             MessageContent::Text(content) => (record.role, content),
@@ -52,7 +52,7 @@ fn expect(entries: &[(Role, &str)]) -> Vec<(Role, String)> {
 
 /// The wire request a round would send for the list right now.
 fn request(list: &MessageList) -> Vec<Message> {
-    project_messages(&list.records()).expect("the test list projects")
+    project_messages(&list.to_records()).expect("the test list projects")
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn each_builder_chains_and_appends_its_record() {
     );
     assert!(same, "every builder must return the list it was called on");
     assert_eq!(
-        vm.messages().records(),
+        vm.messages().to_records(),
         vec![
             system("be terse"),
             user("hi"),
@@ -89,6 +89,24 @@ fn each_builder_chains_and_appends_its_record() {
             user("thanks"),
         ]
     );
+}
+
+#[test]
+fn push_refuses_a_late_system_record_as_a_typed_edit_error_naming_its_position() {
+    let list = MessageList::default();
+    list.push(system("lead")).expect("a leading system record");
+    list.push(user("hi")).expect("a user record after it");
+    let refusal = list
+        .push(system("late"))
+        .expect_err("a system record behind a user record");
+    assert_eq!(refusal, ListEditError::LateSystem { index: 3 });
+    assert!(
+        refusal
+            .to_string()
+            .starts_with("messages[3] is a system message"),
+        "the refusal names the position: {refusal}"
+    );
+    assert_eq!(list.to_records(), vec![system("lead"), user("hi")]);
 }
 
 /// Fills the list with `u1 a1 u2 a2`.
@@ -151,7 +169,7 @@ fn replace_out_of_bounds_is_refused_naming_the_bounds() {
     let vm = TestVm::new().messages().build();
     let list = vm.messages();
     four(&vm);
-    let before = list.records();
+    let before = list.to_records();
     for (call, range) in [
         ("msgs:replace(0, 0)", "replace(0, 0)"),
         ("msgs:replace(3, 1)", "replace(3, 1)"),
@@ -169,7 +187,7 @@ fn replace_out_of_bounds_is_refused_naming_the_bounds() {
         );
     }
     assert_eq!(
-        list.records(),
+        list.to_records(),
         before,
         "a refused replace leaves the list unchanged"
     );
@@ -180,7 +198,7 @@ fn replace_takes_integral_floats_and_refuses_other_bounds() {
     let vm = TestVm::new().messages().build();
     let list = vm.messages();
     four(&vm);
-    let before = list.records();
+    let before = list.to_records();
     assert_eq!(
         refusal(&vm, "msgs:replace(1.5, 2)"),
         "replace first must be an integer, got 1.5"
@@ -194,12 +212,12 @@ fn replace_takes_integral_floats_and_refuses_other_bounds() {
         "replace last must be an integer, got nil"
     );
     assert_eq!(
-        list.records(),
+        list.to_records(),
         before,
         "a refused replace leaves the list unchanged"
     );
     vm.exec("msgs:replace(2.0, 4.0)");
-    assert_eq!(list.records(), vec![user("u1")]);
+    assert_eq!(list.to_records(), vec![user("u1")]);
 }
 
 #[test]
@@ -207,7 +225,7 @@ fn a_system_record_after_a_non_system_record_is_refused_by_every_edit() {
     let vm = TestVm::new().messages().build();
     let list = vm.messages();
     vm.exec("msgs:system('s1'):system('s2'):user('u')");
-    let before = list.records();
+    let before = list.to_records();
     let late = |index: usize| {
         format!(
             "messages[{index}] is a system message after a non-system message; \
@@ -234,7 +252,7 @@ fn a_system_record_after_a_non_system_record_is_refused_by_every_edit() {
         late(2)
     );
     assert_eq!(
-        list.records(),
+        list.to_records(),
         before,
         "a refused edit leaves the list unchanged"
     );
@@ -243,7 +261,7 @@ fn a_system_record_after_a_non_system_record_is_refused_by_every_edit() {
          { role = 'system', content = 'two' }, { role = 'system', content = 'three' })",
     );
     assert_eq!(
-        list.records(),
+        list.to_records(),
         vec![system("one"), system("two"), system("three"), user("u")],
         "edits inside the leading block are allowed"
     );
@@ -258,7 +276,7 @@ fn a_record_that_breaks_a_per_record_rule_is_refused_at_its_position() {
         "messages[1] content must be a string or a non-empty array of content parts"
     );
     vm.exec("msgs:user('u')");
-    let before = list.records();
+    let before = list.to_records();
     assert_eq!(
         refusal(&vm, "msgs:tool('result')"),
         "messages[2] is a tool message and must set a string tool_call_id"
@@ -283,7 +301,7 @@ fn a_record_that_breaks_a_per_record_rule_is_refused_at_its_position() {
         "messages[2] content must be a string or a non-empty array of content parts"
     );
     assert_eq!(
-        list.records(),
+        list.to_records(),
         before,
         "a refused record leaves the list unchanged"
     );
@@ -294,7 +312,7 @@ fn a_value_that_cannot_convert_to_json_is_refused_naming_where_it_was_given() {
     let vm = TestVm::new().messages().build();
     let list = vm.messages();
     vm.exec("msgs:user('u')");
-    let before = list.records();
+    let before = list.to_records();
     let unsupported = "unsupported value type `function`";
     for (call, subject) in [
         ("msgs:system(tostring)", "messages[2] content"),
@@ -326,7 +344,7 @@ fn a_value_that_cannot_convert_to_json_is_refused_naming_where_it_was_given() {
         );
     }
     assert_eq!(
-        list.records(),
+        list.to_records(),
         before,
         "a refused value leaves the list unchanged"
     );
@@ -336,7 +354,7 @@ fn a_value_that_cannot_convert_to_json_is_refused_naming_where_it_was_given() {
 fn append_stores_a_record_without_its_extra_fields() {
     let vm = TestVm::new().messages().build();
     vm.exec("msgs:append({ role = 'user', content = 'raw', extra = 1, secret = 'key' })");
-    assert_eq!(vm.messages().records(), vec![user("raw")]);
+    assert_eq!(vm.messages().to_records(), vec![user("raw")]);
 }
 
 #[test]
@@ -356,5 +374,5 @@ fn index_assignment_is_refused_and_len_counts_the_records() {
     ] {
         assert_eq!(refusal(&vm, assignment), refused, "{assignment}");
     }
-    assert_eq!(vm.messages().records(), vec![user("u"), assistant("a")]);
+    assert_eq!(vm.messages().to_records(), vec![user("u"), assistant("a")]);
 }

@@ -19,17 +19,21 @@
 //! surfaces as a block coroutine's failure, so the kind survives the
 //! boundary in both directions.
 
+#[path = "error-value-classify.rs"]
+mod classify;
 #[path = "error-value-store.rs"]
 mod store;
 
 use std::collections::BTreeMap;
+use std::str::FromStr;
 
 use mlua::{Function, Lua, Table, Value};
 
 use crate::compactors::OverflowReason;
-use crate::error::Error;
+use crate::error::{Error, accepted_tags};
 
-pub use store::{store_error_fields, store_error_reason, store_error_value_fields};
+pub(crate) use classify::{install_normalize_failure, normalized};
+pub use store::store_error_value_fields;
 
 /// The registry key of the shared error metatable, created on first use per
 /// VM so every error table on that VM - Lua-built or Rust-built - shares
@@ -77,7 +81,24 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    /// The `kind` string the Lua table holds.
+    /// Every kind, in declaration order.
+    pub const ALL: &'static [ErrorKind] = &[
+        ErrorKind::ToolLoopExhausted,
+        ErrorKind::ContextExhausted,
+        ErrorKind::EmptyModelReply,
+        ErrorKind::OutOfScopeTool,
+        ErrorKind::UnboundTool,
+        ErrorKind::Tool,
+        ErrorKind::TaskNotOwned,
+        ErrorKind::TaskConsumed,
+        ErrorKind::TasksLive,
+        ErrorKind::Cancelled,
+        ErrorKind::Store,
+        ErrorKind::Lua,
+        ErrorKind::Internal,
+    ];
+
+    /// Returns the `kind` string the Lua table holds.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -122,6 +143,36 @@ impl ErrorKind {
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.tag())
+    }
+}
+
+impl FromStr for ErrorKind {
+    type Err = ParseErrorKindError;
+
+    /// Parses a kind from its exact tag, as [`ErrorKind::from_tag`] does.
+    fn from_str(tag: &str) -> Result<ErrorKind, ParseErrorKindError> {
+        ErrorKind::from_tag(tag).ok_or_else(|| ParseErrorKindError {
+            input: tag.to_owned(),
+        })
+    }
+}
+
+/// The error returned when text is not an [`ErrorKind`] tag.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "invalid error kind `{input}`: required one of {}",
+    accepted_tags(ErrorKind::ALL.iter().map(|kind| kind.tag()))
+)]
+pub struct ParseErrorKindError {
+    /// The rejected text.
+    input: String,
+}
+
+impl ParseErrorKindError {
+    /// Returns the rejected text.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
     }
 }
 
@@ -197,13 +248,19 @@ impl ErrorValue for Error {
                     ErrorField::String(reason.tag().to_owned()),
                 )]
             }
-            Error::Store { source, .. } => store_error_value_fields(source),
+            Error::Store { cause, .. } => store_error_value_fields(cause),
             Error::Raised(raised) => raised
                 .fields
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
-            _ => Vec::new(),
+            Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::LuaQuota { .. }
+            | Error::Interrupted
+            | Error::Tool { .. }
+            | Error::Internal(_) => Vec::new(),
         }
     }
 }
@@ -306,10 +363,8 @@ pub fn error_table(lua: &Lua, error: &impl ErrorValue) -> mlua::Result<Table> {
 /// Returns an `mlua` error if the function cannot be created.
 pub(crate) fn install_error_value(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (tag, fields): (String, Option<Table>)| {
-        let kind = ErrorKind::from_tag(&tag).ok_or_else(|| {
-            mlua::Error::external(Error::Lua(format!(
-                "unknown error kind {tag:?}; expected one of the protocol's kinds"
-            )))
+        let kind = tag.parse::<ErrorKind>().map_err(|error| {
+            mlua::Error::external(Error::Internal(format!("the shim raised {error}").into()))
         })?;
         let fields = match fields {
             Some(fields) => fields,
@@ -317,106 +372,6 @@ pub(crate) fn install_error_value(lua: &Lua) -> mlua::Result<Function> {
         };
         finish_table(lua, kind, fields)
     })
-}
-
-/// A Rust callback's failure classified for the error table: the kind, the
-/// message `tostring` rendered before (the root cause's display, without
-/// the traceback mlua appends), and the kind's fields.
-///
-/// mlua raises a callback's `Err` into Lua as an opaque userdata whose
-/// `tostring` is the error's display; author code cannot index it, so
-/// `err.kind` fails at exactly the call sites that fail directly from
-/// Rust. The classifier reads the typed [`Error`] back out of the mlua
-/// wrapper when the callback raised one, and otherwise sorts mlua's own
-/// variants: an authoring or argument failure (a runtime or syntax error,
-/// a bad argument, a value conversion, an external error of another type,
-/// an exhausted memory quota) is `lua`; anything else is mlua's own
-/// machinery failing, which the author cannot act on, so it is `internal`.
-struct Classified {
-    kind: ErrorKind,
-    message: String,
-    fields: Vec<(String, ErrorField)>,
-}
-
-impl Classified {
-    fn from_mlua(error: &mlua::Error) -> Classified {
-        if let Some(typed) = error.downcast_ref::<Error>() {
-            return Classified {
-                kind: typed.kind(),
-                message: typed.to_string(),
-                fields: typed.fields(),
-            };
-        }
-        let root = root_cause(error);
-        let kind = match root {
-            mlua::Error::RuntimeError(_)
-            | mlua::Error::SyntaxError { .. }
-            | mlua::Error::MemoryError(_)
-            | mlua::Error::BadArgument { .. }
-            | mlua::Error::FromLuaConversionError { .. }
-            | mlua::Error::SerializeError(_)
-            | mlua::Error::DeserializeError(_)
-            | mlua::Error::ExternalError(_) => ErrorKind::Lua,
-            _ => ErrorKind::Internal,
-        };
-        Classified {
-            kind,
-            message: root.to_string(),
-            fields: Vec::new(),
-        }
-    }
-}
-
-/// Strips mlua's wrapping layers (the callback frame and any context) down
-/// to the error a callback returned.
-fn root_cause(error: &mlua::Error) -> &mlua::Error {
-    match error {
-        mlua::Error::CallbackError { cause, .. } | mlua::Error::WithContext { cause, .. } => {
-            root_cause(cause)
-        }
-        other => other,
-    }
-}
-
-impl std::fmt::Display for Classified {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl ErrorValue for Classified {
-    fn kind(&self) -> ErrorKind {
-        self.kind
-    }
-
-    fn fields(&self) -> Vec<(String, ErrorField)> {
-        self.fields.clone()
-    }
-}
-
-/// Builds the `normalize_failure(value)` chunk capture for the shim's
-/// `pcall` and `xpcall` replacements: a Rust callback's failure (mlua's
-/// wrapped error) becomes the error table its classification names; any
-/// other caught value - a string, an author's own table, an error table
-/// already built - passes through unchanged.
-///
-/// # Errors
-/// Returns an `mlua` error if the function cannot be created.
-pub(crate) fn install_normalize_failure(lua: &Lua) -> mlua::Result<Function> {
-    lua.create_function(normalized)
-}
-
-/// What `normalize_failure` returns for `value`: a Rust callback's
-/// failure as the error table its classification names, anything else
-/// unchanged. The capture and the loop's compactor rule share it.
-pub(crate) fn normalized(lua: &Lua, value: Value) -> mlua::Result<Value> {
-    match value {
-        Value::Error(error) => Ok(Value::Table(error_table(
-            lua,
-            &Classified::from_mlua(&error),
-        )?)),
-        other => Ok(other),
-    }
 }
 
 /// Reads a raised Lua value back as a [`Raised`] when it is an error table
@@ -467,3 +422,7 @@ pub(crate) fn raised_from(lua: &Lua, value: &Value) -> mlua::Result<Option<Raise
         fields,
     }))
 }
+
+#[cfg(test)]
+#[path = "error-value-tests.rs"]
+mod tests;

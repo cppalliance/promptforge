@@ -224,7 +224,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
         matches!(
             error,
             Error::LuaQuota {
-                resource: "log byte"
+                resource: crate::QuotaResource::LogByte
             }
         ),
         "the byte ceiling must surface as a typed LuaQuota: {error:?}"

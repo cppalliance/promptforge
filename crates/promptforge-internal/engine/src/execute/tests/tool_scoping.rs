@@ -9,14 +9,15 @@ use crate::lua::{ToolBinding, ToolSet};
 /// The tool set offering `tool` under the wire name `alias`, described as
 /// `description`, for a test that reads the offering without a run.
 fn offering_of(alias: &str, description: &str, tool: &FnTool) -> ToolSet {
-    ToolSet {
-        offered: vec![ToolBinding::for_test(
+    ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![ToolBinding::for_test(
             alias,
             description,
             &tool.descriptor(),
         )],
-        ..ToolSet::default()
-    }
+    )
 }
 
 /// An offered tool stays out of the model-visible scope until

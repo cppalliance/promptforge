@@ -12,7 +12,8 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::metrics::ToolCallEvent;
 
 use crate::compactors::OverflowReason;
-use crate::{Error, Result, ToolOutputKind};
+use crate::error::{Error, Result};
+use crate::handles::ToolOutputKind;
 
 /// The result of one [`VfsOp`](super::VfsOp) run against the run's store
 /// view.
@@ -81,8 +82,8 @@ impl ToolCallOutcome {
             ToolOutputKind::Structured => match serde_json::from_str(&text) {
                 Ok(json) => Ok(ToolCallOutcome::Structured(json)),
                 Err(error) => Err(Error::Tool {
-                    message: format!("structured tool {alias:?} returned invalid JSON"),
-                    source: Box::new(error),
+                    message: format!("structured tool {alias:?} returned invalid JSON: {error}"),
+                    cause: Box::new(error),
                 }),
             },
         }

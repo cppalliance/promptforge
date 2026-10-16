@@ -46,7 +46,7 @@ fn handle(lua: &Lua) -> Value {
         std::num::NonZeroU32::MIN,
     );
     Value::UserData(
-        lua.create_userdata(LuaModelHandle::from_binding(&binding))
+        lua.create_userdata(LuaModelHandle::from_binding(binding))
             .unwrap(),
     )
 }

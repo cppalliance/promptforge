@@ -56,7 +56,7 @@ fn records(list: &MessageList) -> Vec<String> {
         let id = record.tool_call_id.as_deref().unwrap_or("");
         format!("{} {text}|{}|{id}", record.role.as_str(), calls.join(","))
     };
-    list.records().iter().map(line).collect()
+    list.to_records().iter().map(line).collect()
 }
 
 /// The `chat` answer `round`.

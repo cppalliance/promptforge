@@ -20,11 +20,11 @@ use super::super::config::RunContext;
 /// kind), so run-time execution never consults the catalog again and never
 /// holds an implementation.
 pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
-    ToolSet {
-        declared: prompt.frontmatter().plugins().to_vec(),
-        roster: ctx.roster.clone(),
-        offered: offered_bindings(ctx),
-    }
+    ToolSet::new(
+        prompt.frontmatter().plugins().to_vec(),
+        ctx.roster.clone(),
+        offered_bindings(ctx),
+    )
 }
 
 /// Binds the offering: every catalog tool, in tool id order, under its

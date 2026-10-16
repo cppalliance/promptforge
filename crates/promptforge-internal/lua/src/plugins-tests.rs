@@ -3,6 +3,8 @@
 //! object's `plugin` getter, and the roster's usable and unavailable
 //! Plugins.
 
+use std::collections::BTreeMap;
+
 use promptforge_types::plugins::PluginId;
 
 use crate::handles::ToolSet;
@@ -14,20 +16,20 @@ use crate::{SectionVm, ToolBinding};
 /// wire name.
 fn plugin_set() -> ToolSet {
     let bind = |id: &str| ToolBinding::from_descriptor(&id.replace(['/', '.'], "_"), &tool_at(id));
-    ToolSet {
-        declared: vec![
+    ToolSet::new(
+        vec![
             PluginId::parse("web").expect("valid Plugin"),
             PluginId::parse("mail").expect("valid Plugin"),
         ],
-        offered: vec![
+        BTreeMap::new(),
+        vec![
             bind("alpha/zed"),
             bind("gh/issues.list"),
             bind("gh/search"),
             bind("web/fetch"),
             bind("web/search"),
         ],
-        ..ToolSet::default()
-    }
+    )
 }
 
 /// [`plugin_set`] with a roster: `web` and `gh`, which also offer tools,
@@ -35,8 +37,10 @@ fn plugin_set() -> ToolSet {
 /// can't.
 fn roster_set() -> ToolSet {
     let plugin = |name: &str| PluginId::parse(name).expect("valid Plugin");
-    ToolSet {
-        roster: [
+    let base = plugin_set();
+    ToolSet::new(
+        base.declared().to_vec(),
+        [
             (plugin("gh"), None),
             (plugin("mcp"), Some("the mcp server is down".to_owned())),
             (plugin("subagents"), None),
@@ -44,8 +48,8 @@ fn roster_set() -> ToolSet {
         ]
         .into_iter()
         .collect(),
-        ..plugin_set()
-    }
+        base.offered().to_vec(),
+    )
 }
 
 /// The Plugins `plugins.offer` recorded on `vm`, by name.

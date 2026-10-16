@@ -243,13 +243,14 @@ fn the_shim_prelude_installs_tools_call_and_no_bare_global() {
 #[test]
 fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
     let echo = ToolBinding::from_descriptor("tools_echo", &echo_tool());
-    let vm = lua_over(ToolSet {
-        offered: vec![
+    let vm = lua_over(ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![
             echo.clone(),
             ToolBinding::from_descriptor("tools_other", &tool_at("tools/other")),
         ],
-        ..ToolSet::default()
-    });
+    ));
     let counts = vm
         .install_tool_call_counts(&[echo])
         .expect("the counts install");

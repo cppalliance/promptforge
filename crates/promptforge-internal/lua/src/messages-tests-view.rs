@@ -138,7 +138,7 @@ fn an_integral_float_index_reads_like_its_integer_and_other_keys_read_nil() {
 fn assigning_any_view_field_raises_the_read_only_error() {
     let vm = TestVm::new().messages().build();
     shapes(&vm);
-    let before = vm.messages().records();
+    let before = vm.messages().to_records();
     for field in ["role", "content", "tool_calls", "tool_call_id", "extra"] {
         assert_eq!(
             refusal(&vm, &format!("msgs[3].{field} = 'x'")),
@@ -147,7 +147,7 @@ fn assigning_any_view_field_raises_the_read_only_error() {
             "{field}"
         );
     }
-    assert_eq!(vm.messages().records(), before);
+    assert_eq!(vm.messages().to_records(), before);
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn a_view_appended_or_converted_gives_the_same_record_as_its_table_form() {
         )
         .expect("a global set cannot fail");
     vm.exec("for i = 1, #msgs do other:append(msgs[i]) end");
-    assert_eq!(other.records(), vm.messages().records());
+    assert_eq!(other.to_records(), vm.messages().to_records());
     for index in 1..=4 {
         let view = read(&vm, &format!("msgs[{index}]")).expect("the view is present");
         let table = read(&vm, &format!("shapes[{index}]")).expect("the table is present");
@@ -207,7 +207,7 @@ fn a_view_appended_or_converted_gives_the_same_record_as_its_table_form() {
 fn writing_into_a_views_nested_tables_leaves_the_record_unchanged() {
     let vm = TestVm::new().messages().build();
     shapes(&vm);
-    let before = vm.messages().records();
+    let before = vm.messages().to_records();
     let (content, tool_calls): (Value, Value) = vm.eval(
         "local parts_view, calls_view = msgs[2], msgs[3] \
          local parts = parts_view.content \
@@ -219,7 +219,7 @@ fn writing_into_a_views_nested_tables_leaves_the_record_unchanged() {
          calls[2] = calls[1] \
          return parts_view.content, calls_view.tool_calls",
     );
-    assert_eq!(vm.messages().records(), before);
+    assert_eq!(vm.messages().to_records(), before);
     let converted = |value: Value| -> Json {
         vm.lua()
             .from_value(value)

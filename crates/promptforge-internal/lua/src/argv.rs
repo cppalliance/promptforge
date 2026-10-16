@@ -14,7 +14,10 @@
 //! The table value itself is deep-frozen behind proxy tables whose
 //! `__newindex` rejects every write.
 
-use super::{Error, Json, Lua, LuaSerdeExt, Result, Value};
+use mlua::{Lua, LuaSerdeExt, Value};
+use serde_json::Value as Json;
+
+use crate::error::{Error, Result};
 use crate::proxy::read_only_proxy;
 
 /// How a section VM installs the `argv` global at Engine injection. `None`

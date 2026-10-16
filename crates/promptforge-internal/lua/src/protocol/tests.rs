@@ -15,7 +15,8 @@ use serde_json::json;
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
-use crate::{Error, LuaModelHandle};
+use crate::Error;
+use crate::models::LuaModelHandle;
 
 use super::*;
 
@@ -36,7 +37,7 @@ fn test_binding() -> ModelBinding {
 }
 
 fn handle_userdata(lua: &Lua) -> AnyUserData {
-    lua.create_userdata(LuaModelHandle::from_binding(&test_binding()))
+    lua.create_userdata(LuaModelHandle::from_binding(test_binding()))
         .expect("userdata creation cannot fail on a fresh VM")
 }
 

@@ -1,11 +1,12 @@
-//! Tool bindings, the shared tool set, and the per-binding output kind that shape how bound tools reach Lua, and the section text a prompt read sees.
+//! Tool bindings, the shared tool set, and the per-binding output kind that
+//! shape how bound tools reach Lua, and the section text a prompt read sees.
 
 use std::collections::BTreeMap;
 
+use mlua::Value;
 use promptforge_types::plugins::PluginId;
-use promptforge_types::tools::ToolDescriptor;
-
-use super::{Json, ToolId, Value};
+use promptforge_types::tools::{ToolDescriptor, ToolId};
+use serde_json::Value as Json;
 
 /// How a bound tool's output resumes into Lua at the `tools.call` boundary.
 ///
@@ -34,17 +35,17 @@ pub enum ToolOutputKind {
 pub struct ToolBinding {
     /// The model-facing name: an offered tool's wire name, or the full id
     /// of a catalog tool a script reaches without an offer.
-    pub alias: String,
+    alias: String,
     /// The tool's own catalog description.
-    pub description: String,
+    description: String,
     /// The selected stable live identity.
-    pub id: ToolId,
+    id: ToolId,
     /// The JSON-Schema `object` the tool's arguments must match, advertised
     /// under the alias.
-    pub schema: Json,
+    schema: Json,
     /// How a script-initiated `tools.call` resumes this binding's output;
     /// the model tool loop ignores it.
-    pub output_kind: ToolOutputKind,
+    output_kind: ToolOutputKind,
 }
 
 impl ToolBinding {
@@ -103,6 +104,13 @@ impl ToolBinding {
     pub fn schema(&self) -> &Json {
         &self.schema
     }
+
+    /// Returns how a script-initiated `tools.call` resumes this binding's
+    /// output.
+    #[must_use]
+    pub fn output_kind(&self) -> ToolOutputKind {
+        self.output_kind
+    }
 }
 
 /// Outcome of a Lua block that may invoke `jump`.
@@ -146,13 +154,13 @@ pub struct SectionText {
 pub struct LibraryKey(String);
 
 impl LibraryKey {
-    /// A key whose stable identity is `identity`.
+    /// Builds a key whose stable identity is `identity`.
     #[must_use]
     pub fn new(identity: String) -> Self {
         Self(identity)
     }
 
-    /// The identity the key was built from.
+    /// Returns the identity the key was built from.
     #[must_use]
     pub fn identity(&self) -> &str {
         &self.0
@@ -187,21 +195,43 @@ pub struct LibraryBlock {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolSet {
     /// The Plugins the frontmatter declares, in declaration order.
-    pub declared: Vec<PluginId>,
+    declared: Vec<PluginId>,
     /// Every installed Plugin the caller reports, declared or not, with or
     /// without tools: no reason when it can serve the run, and the reason,
     /// written for the model, when it can't.
-    pub roster: BTreeMap<PluginId, Option<String>>,
+    roster: BTreeMap<PluginId, Option<String>>,
     /// Every catalog tool the run can offer, in id order, each bound under
     /// its wire name.
-    pub offered: Vec<ToolBinding>,
+    offered: Vec<ToolBinding>,
 }
 
 impl ToolSet {
+    /// Builds the run's tool set from the declared Plugins in declaration
+    /// order, the roster, and the offering in tool id order.
+    #[must_use]
+    pub fn new(
+        declared: Vec<PluginId>,
+        roster: BTreeMap<PluginId, Option<String>>,
+        offered: Vec<ToolBinding>,
+    ) -> Self {
+        Self {
+            declared,
+            roster,
+            offered,
+        }
+    }
+
     /// Returns the declared plugins in declaration order.
     #[must_use]
     pub fn declared(&self) -> &[PluginId] {
         &self.declared
+    }
+
+    /// Returns every installed Plugin the caller reports, with the reason,
+    /// written for the model, when it cannot serve the run.
+    #[must_use]
+    pub fn roster(&self) -> &BTreeMap<PluginId, Option<String>> {
+        &self.roster
     }
 
     /// Returns the offering in tool id order.
@@ -210,25 +240,25 @@ impl ToolSet {
         &self.offered
     }
 
-    /// The offered binding whose wire name or canonical id is `name`. Wire
-    /// names and local aliases never contain `/` and ids always do, so a
-    /// name matches at most one way.
+    /// Returns the offered binding whose wire name or canonical id is
+    /// `name`, which matches at most one way because wire names and local
+    /// aliases never contain `/` and ids always do.
     #[must_use]
     pub fn offered_binding(&self, name: &str) -> Option<&ToolBinding> {
         if name.contains('/') {
             let id = ToolId::parse(name).ok()?;
-            self.offered.iter().find(|binding| binding.id == id)
+            self.offered.iter().find(|binding| *binding.id() == id)
         } else {
-            self.offered.iter().find(|binding| binding.alias == name)
+            self.wire_binding(name)
         }
     }
 
-    /// The offered binding whose wire name is `name`, never matching a
-    /// canonical id: a model reaches tools only by the wire names a round
-    /// advertised.
+    /// Returns the offered binding whose wire name is `name`, never matching
+    /// a canonical id, because a model reaches tools only by the wire names
+    /// a round advertised.
     #[must_use]
     pub fn wire_binding(&self, name: &str) -> Option<&ToolBinding> {
-        self.offered.iter().find(|binding| binding.alias == name)
+        self.offered.iter().find(|binding| binding.alias() == name)
     }
 }
 

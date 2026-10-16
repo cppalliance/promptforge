@@ -186,7 +186,7 @@ fn pairs(lua: &Lua, value: Value) -> mlua::Result<MultiValue> {
 /// [`SortKey`], then any non-scalar keys.
 fn ordered_keys(table: &Table) -> mlua::Result<Vec<WalkKey>> {
     let border = table.raw_len();
-    let mut keys: Vec<WalkKey> = Vec::new();
+    let mut keys: Vec<WalkKey> = Vec::with_capacity(border);
     for index in 1..=border {
         let value: Value = table.raw_get(index)?;
         if matches!(value, Value::Nil) {

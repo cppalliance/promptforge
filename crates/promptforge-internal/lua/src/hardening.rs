@@ -1,13 +1,24 @@
-//! Sandbox hardening for section VMs: the `_G` guard, global removal, the instruction-budget hook, and scalar return rendering.
+//! Sandbox hardening for section VMs: the `_G` guard, global removal, and
+//! the instruction-budget hook.
 
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
+use mlua::{HookTriggers, Lua, Thread, Value, VmState};
 use promptforge_types::cancel::CancelHandle;
 
-use super::{
-    Arc, AtomicU64, Error, HOOK_BUDGET, HOOK_INTERVAL, HookTriggers, Lua, MultiValue, Ordering,
-    Result, Thread, Value, VmState,
-};
+use crate::error::{Error, Result};
+
+/// How many instructions between hook firings.
+const HOOK_INTERVAL: u32 = 10_000;
+
+/// Hook-firing trip budget, effectively unlimited.
+///
+/// Long-running and infinite loops are legal: no instruction ceiling aborts a
+/// block, so the hook's job is the cancellation poll and the run's
+/// `CancelHandle` is the kill switch for a runaway loop. The typed quota
+/// errors remain for the memory and log budgets.
+const HOOK_BUDGET: u64 = u64::MAX;
 
 /// Removes code-loading, direct output, and reflection globals the base library
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
@@ -125,28 +136,28 @@ impl InstructionBudget {
         let _ = self.cancel.set(cancel);
     }
 
-    /// Whether the installed cancel flag is set. `false` when no executor
-    /// installed one.
+    /// Returns whether the installed cancel flag is set, `false` when no
+    /// executor installed one.
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancel.get().is_some_and(CancelHandle::is_cancelled)
     }
 
-    /// How many hook firings have counted. A firing under a set cancel
-    /// flag aborts before it counts.
+    /// Returns how many hook firings have counted, which leaves out a
+    /// firing that a set cancel flag aborted.
     #[cfg(test)]
     pub(crate) fn fired(&self) -> u64 {
         self.fired.load(Ordering::Relaxed)
     }
 }
 
-/// Whether `cancel` holds a set flag: the hook's poll, one `OnceLock` read
-/// and a handful of atomic loads.
+/// Returns whether `cancel` holds a set flag, the hook's poll of one
+/// `OnceLock` read and a handful of atomic loads.
 fn cancelled(cancel: &OnceLock<CancelHandle>) -> bool {
     cancel.get().is_some_and(CancelHandle::is_cancelled)
 }
 
-/// The every-Nth-instruction hook body shared by the main state and every
-/// block coroutine: the cancellation poll, plus a trip budget that is
+/// Builds the every-Nth-instruction hook body shared by the main state and
+/// every block coroutine: the cancellation poll, plus a trip budget that is
 /// effectively unlimited ([`HOOK_BUDGET`]) and never fires in practice.
 fn budget_hook(
     fired: Arc<AtomicU64>,
@@ -185,32 +196,4 @@ pub(crate) fn install_instruction_budget(lua: &Lua) -> Result<InstructionBudget>
     )
     .map_err(Error::lua)?;
     Ok(budget)
-}
-
-/// Renders a returned Lua scalar as the section's result string. Tables and other
-/// non-scalar returns are errors.
-fn value_to_string(value: &Value) -> Result<String> {
-    match value {
-        Value::String(s) => Ok(s.to_string_lossy()),
-        Value::Integer(i) => Ok(i.to_string()),
-        Value::Number(n) => Ok(n.to_string()),
-        Value::Boolean(b) => Ok(b.to_string()),
-        other => Err(Error::Lua(format!(
-            "cannot return a {} as a result",
-            other.type_name()
-        ))),
-    }
-}
-
-/// Converts only the first returned Lua value into an optional scalar string.
-///
-/// Later values are ignored. A missing or nil first value returns `None`.
-///
-/// # Errors
-/// Returns [`Error::Lua`] when the first value is not a supported scalar.
-pub(crate) fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
-    match returned.into_iter().next() {
-        None | Some(Value::Nil) => Ok(None),
-        Some(value) => value_to_string(&value).map(Some),
-    }
 }

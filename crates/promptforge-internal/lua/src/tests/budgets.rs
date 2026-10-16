@@ -33,7 +33,7 @@ fn the_first_chunk_consumes_the_configured_log_budget() {
         matches!(
             error,
             Error::LuaQuota {
-                resource: "log event"
+                resource: crate::QuotaResource::LogEvent
             }
         ),
         "log-budget exhaustion must surface as a typed LuaQuota: {error:?}"

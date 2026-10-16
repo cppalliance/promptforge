@@ -559,7 +559,7 @@ Paths starting `V/` are under `crates/promptforge-internal/vfs/src/`.
 </step-2>
 <step-3>
 
-### Step 3: lua core part A and the lua error model
+### Step 3: lua core part A and the lua error model [completed]
 
 - Component: `lua-core`
 - Tests: Verify runs these from the repository root in PowerShell, in this order.

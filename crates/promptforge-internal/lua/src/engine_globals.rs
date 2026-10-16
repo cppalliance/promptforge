@@ -1,19 +1,36 @@
-//! Engine globals installed into every section VM: `log`, `untrusted`, `ui`, and the `store` table.
+//! Engine globals installed into every section VM: `log`, `untrusted`, `ui`,
+//! and the `store` table.
 
 #[path = "engine_globals-store.rs"]
 mod store;
 
 use std::fmt::Write as _;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
-use super::{
-    Access, Arc, AtomicU32, AtomicUsize, Emitter, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua,
-    LuaSerdeExt, MultiValue, Ordering, Result, Value,
-};
+use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
+use promptforge_types::emitter::Emitter;
+use promptforge_types::untrusted::GuardNonce;
+use promptforge_vfs::Access;
+
+use crate::error::{Error, Result};
 
 pub use store::store_error_message;
 pub(crate) use store::{install_store_table, route_store_to_shims};
 
-/// Shared body of the persistent per-section `log(message)` Engine function.
+/// Maximum number of Unicode scalar values accepted by `log`.
+pub(crate) const LUA_LOG_CHARACTER_LIMIT: usize = 256;
+
+/// Whether a store read prefixes each line with its absolute line number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineNumbers {
+    /// The file's text verbatim.
+    Omitted,
+    /// Each line right-aligned behind its number and `"| "`.
+    Prefixed,
+}
+
+/// Runs the persistent per-section `log(message)` Engine function.
 fn log_checkpoint(
     emitter: &Emitter,
     section: &str,
@@ -135,7 +152,8 @@ pub fn install_ui(lua: &Lua, snapshot: Arc<serde_json::Value>) -> Result<()> {
     lua.globals().raw_set("ui", snapshot).map_err(Error::lua)
 }
 
-/// Shared body of the persistent per-section `store.read` Engine function.
+/// Reads the file at `path` under the optional line bounds `store.read`
+/// and `store.read_numbered` share, numbering lines as `numbers` says.
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
 /// inclusive line range. A negative bound converts to 0, which the range
@@ -146,16 +164,13 @@ fn read_store_bounded(
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
-    numbered: bool,
+    numbers: LineNumbers,
 ) -> std::result::Result<String, promptforge_vfs::VfsError> {
     match start {
-        None if end.is_none() => {
-            if numbered {
-                read_range_numbered(view, path, 1, None)
-            } else {
-                view.read_string(path)
-            }
-        }
+        None if end.is_none() => match numbers {
+            LineNumbers::Prefixed => read_range_numbered(view, path, 1, None),
+            LineNumbers::Omitted => view.read_string(path),
+        },
         None => Err(promptforge_vfs::VfsError::InvalidRange {
             path: path.to_owned(),
             reason: "start is required when end is given",
@@ -163,33 +178,32 @@ fn read_store_bounded(
         Some(start) => {
             let start = usize::try_from(start).unwrap_or(0);
             let end = end.map(|line| usize::try_from(line).unwrap_or(0));
-            if numbered {
-                read_range_numbered(view, path, start, end)
-            } else {
-                read_range(view, path, start, end)
+            match numbers {
+                LineNumbers::Prefixed => read_range_numbered(view, path, start, end),
+                LineNumbers::Omitted => read_range(view, path, start, end),
             }
         }
     }
 }
 
-/// Shared body of the persistent per-section `store.read` Engine function.
+/// Runs the `store.read` operation both store paths share.
 fn read_store(
     view: &Access,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, promptforge_vfs::VfsError> {
-    read_store_bounded(view, path, start, end, false)
+    read_store_bounded(view, path, start, end, LineNumbers::Omitted)
 }
 
-/// Shared body of the persistent per-section `store.read_numbered` callback.
+/// Runs the `store.read_numbered` operation both store paths share.
 fn read_store_numbered(
     view: &Access,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, promptforge_vfs::VfsError> {
-    read_store_bounded(view, path, start, end, true)
+    read_store_bounded(view, path, start, end, LineNumbers::Prefixed)
 }
 
 /// Reads lines `start..=end` of the file at `path`, 1-based and inclusive,

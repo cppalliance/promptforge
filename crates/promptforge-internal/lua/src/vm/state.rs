@@ -2,29 +2,36 @@
 //! counts, the shared tool and model sets, and the section's effective
 //! tool and model bindings.
 
-use promptforge_model_client::client::ToolSchema;
-
-use super::SectionVm;
+use std::borrow::Cow;
 #[cfg(any(test, feature = "test-support"))]
-use crate::{Arc, ModelSet};
-use crate::{
-    Error, Json, Lua, LuaSerdeExt, ModelBinding, ModelRuntime, ModelView, Mutex, Result,
-    ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
-    install_tool_call_counts as install_tool_call_counts_impl, var_to_json,
-};
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use mlua::{Lua, LuaSerdeExt, Value};
+use promptforge_model_client::client::ToolSchema;
+#[cfg(any(test, feature = "test-support"))]
+use promptforge_model_client::model::ModelSet;
+use promptforge_model_client::model::{ModelBinding, ModelView};
+use serde_json::Value as Json;
+
+use super::{NOT_INJECTED, SectionVm};
+use crate::error::{Error, Result};
+use crate::handles::{ToolBinding, ToolSet};
+use crate::models::ModelRuntime;
+use crate::scope::{ToolCallCounts, ToolRuntime};
+use crate::sys::var_to_json;
+use crate::tools::install_tool_call_counts as install_tool_call_counts_impl;
 
 impl SectionVm {
     /// Returns the current `var` table as JSON, read from the hidden data
     /// table behind the guarded proxy (not the proxy, which stays empty).
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if Engine values have not been injected or `var`
-    /// cannot be represented as JSON.
+    /// Returns [`Error::Internal`] if Engine values have not been injected,
+    /// or [`Error::Lua`] if `var` cannot be represented as JSON.
     pub fn var(&self) -> Result<Json> {
         if !self.values_injected {
-            return Err(Error::Lua(
-                "section VM Engine values have not been injected".to_owned(),
-            ));
+            return Err(Error::Internal(NOT_INJECTED.into()));
         }
         var_to_json(&self.lua)
     }
@@ -123,13 +130,13 @@ impl SectionVm {
     /// `test-support`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the shared model set's mutex is poisoned.
+    /// Returns [`Error::Internal`] if the shared model set's mutex is poisoned.
     #[cfg(any(test, feature = "test-support"))]
     pub fn model_bag_handles(&self) -> Result<(ModelSet, Arc<Mutex<ModelRuntime>>)> {
         let models = self
             .bound_models
             .lock()
-            .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))?
+            .map_err(|_| Error::Internal("model set mutex was poisoned".into()))?
             .clone();
         Ok((models, Arc::clone(&self.model_runtime)))
     }
@@ -142,8 +149,9 @@ impl SectionVm {
     }
 
     /// Returns the schemas of every registered local tool.
+    ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
+    /// Returns [`Error::Internal`] if the local-tools registry was poisoned.
     pub fn local_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
         self.local_tools.schemas()
     }
@@ -151,7 +159,7 @@ impl SectionVm {
     /// Returns whether `alias` names a registered local tool.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
+    /// Returns [`Error::Internal`] if the local-tools registry was poisoned.
     pub fn has_local_tool(&self, alias: &str) -> Result<bool> {
         self.local_tools.contains(alias)
     }
@@ -173,7 +181,7 @@ impl SectionVm {
 /// `tools.offer_local` calls between blocks reach the next model turn.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the tool runtime's mutex is poisoned or an
+/// Returns [`Error::Internal`] if the tool runtime's mutex is poisoned or an
 /// offered wire name has no binding.
 pub fn current_tool_bindings(
     bindings: &ToolSet,
@@ -181,7 +189,7 @@ pub fn current_tool_bindings(
 ) -> Result<Vec<ToolBinding>> {
     let runtime = runtime
         .lock()
-        .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
+        .map_err(|_| Error::Internal("tool declaration runtime was poisoned".into()))?;
     let plugin_tools = runtime.plugins.iter().flat_map(|plugin| {
         bindings
             .offered()
@@ -198,10 +206,9 @@ pub fn current_tool_bindings(
     names
         .into_iter()
         .map(|name| {
-            bindings
-                .offered_binding(name)
-                .cloned()
-                .ok_or_else(|| Error::Lua(format!("tool {name:?} has no offered binding")))
+            bindings.offered_binding(name).cloned().ok_or_else(|| {
+                Error::Internal(Cow::Owned(format!("tool {name:?} has no offered binding")))
+            })
         })
         .collect()
 }
@@ -211,8 +218,8 @@ pub fn current_tool_bindings(
 /// its options applied, else the prompt-wide `models.default` baseline.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the model runtime's mutex is poisoned or the
-/// selected alias has no frozen binding.
+/// Returns [`Error::Internal`] if the model runtime's mutex or the shared
+/// model set is poisoned, or the selected alias has no frozen binding.
 pub fn resolve_model_binding(
     bindings: &dyn ModelView,
     runtime: &Mutex<ModelRuntime>,
@@ -220,15 +227,17 @@ pub fn resolve_model_binding(
     let selection = {
         let runtime = runtime
             .lock()
-            .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
+            .map_err(|_| Error::Internal("model declaration runtime was poisoned".into()))?;
         runtime
             .selection()
-            .map(|(alias, options)| (alias.to_owned(), options))
+            .map(|(alias, options)| (alias.as_str().to_owned(), options))
     };
     let frozen = |alias: &str| -> Result<ModelBinding> {
-        bindings
-            .binding(alias)?
-            .ok_or_else(|| Error::Lua(format!("model alias {alias:?} has no frozen binding")))
+        bindings.binding(alias)?.ok_or_else(|| {
+            Error::Internal(Cow::Owned(format!(
+                "model alias {alias:?} has no frozen binding"
+            )))
+        })
     };
     match selection {
         Some((alias, options)) => Ok(Some(options.apply(frozen(&alias)?))),

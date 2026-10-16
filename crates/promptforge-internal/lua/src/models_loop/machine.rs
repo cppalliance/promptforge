@@ -343,9 +343,9 @@ impl<V: Clone> Machine<V> {
         next: impl FnOnce(&mut Self) -> Then<V>,
     ) -> Then<V> {
         for record in records {
-            if let Err(message) = self.list.push(record) {
+            if let Err(refused) = self.list.push(record) {
                 self.phase = Phase::Done;
-                return Then::RaiseNew(raised(ErrorKind::Internal, &message));
+                return Then::RaiseNew(raised(ErrorKind::Internal, &refused.to_string()));
             }
         }
         next(self)

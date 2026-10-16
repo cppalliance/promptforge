@@ -311,8 +311,9 @@ pub(crate) enum Error {
     #[error("internal invariant violated: {message}")]
     #[non_exhaustive]
     Internal {
-        /// The violated invariant, as a noun phrase.
-        message: &'static str,
+        /// The violated invariant, as a noun phrase; owned when it names a
+        /// value, as a Lua internal message passed through whole may.
+        message: std::borrow::Cow<'static, str>,
         /// The Rust source file of the construction site (from `file!()`).
         file: &'static str,
         /// The 1-based line of the construction site (from `line!()`).
@@ -325,8 +326,8 @@ pub(crate) enum Error {
     #[error("lua {resource} quota exceeded")]
     #[non_exhaustive]
     LuaQuota {
-        /// The exhausted resource: `"log event"`, `"log byte"`, or `"instruction"`.
-        resource: &'static str,
+        /// The exhausted resource.
+        resource: crate::lua::QuotaResource,
     },
 
     /// The selected compactor exhausted the model's context window: the

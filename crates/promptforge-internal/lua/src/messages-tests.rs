@@ -89,17 +89,17 @@ fn a_non_empty_list_parses_to_a_chat_request_holding_that_list() {
         .expect("msgs is the list userdata")
         .borrow::<MessageList>()
         .expect("msgs is a MessageList")
-        .records();
-    assert_eq!(list.records(), held);
+        .to_records();
+    assert_eq!(list.to_records(), held);
     assert_eq!(
-        list.records(),
+        list.to_records(),
         vec![text(Role::System, "be terse"), text(Role::User, "hi")]
     );
     lua.load("msgs:user('more')")
         .exec()
         .expect("test source runs");
     assert_eq!(
-        list.records().len(),
+        list.to_records().len(),
         3,
         "the request holds the author's list, not a copy"
     );

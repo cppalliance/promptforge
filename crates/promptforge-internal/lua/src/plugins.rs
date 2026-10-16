@@ -199,7 +199,7 @@ fn plugin_name(lua: &Lua, set: &ToolSet, value: &Value) -> mlua::Result<PluginId
         Value::String(text) => {
             let text = text.to_string_lossy();
             let name = PluginId::parse(&text).map_err(|_| rejected(format!("{text:?}")))?;
-            if let Some(Some(reason)) = set.roster.get(&name) {
+            if let Some(Some(reason)) = set.roster().get(&name) {
                 return Err(mlua::Error::external(format!(
                     "plugins.offer: the {name} Plugin is unavailable in this run: {reason}"
                 )));
@@ -227,7 +227,7 @@ fn plugin_name(lua: &Lua, set: &ToolSet, value: &Value) -> mlua::Result<PluginId
 /// offers one.
 fn plugin_tools(set: &ToolSet) -> BTreeMap<PluginId, Vec<String>> {
     let usable = set
-        .roster
+        .roster()
         .iter()
         .filter(|(_, reason)| reason.is_none())
         .map(|(name, _)| name);

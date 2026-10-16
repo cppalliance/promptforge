@@ -55,14 +55,14 @@ fn offering() -> ToolSet {
             ),
         )
     };
-    ToolSet {
-        declared: vec![PluginId::parse("web").expect("valid Plugin")],
-        offered: vec![
+    ToolSet::new(
+        vec![PluginId::parse("web").expect("valid Plugin")],
+        std::collections::BTreeMap::new(),
+        vec![
             bind("gh_search", "gh/search"),
             bind("web_search", "web/search"),
         ],
-        ..ToolSet::default()
-    }
+    )
 }
 
 /// Builds a section VM through the real setup path with every conditional

@@ -8,7 +8,10 @@ use promptforge_model_client::detail::message_from_validated_parts;
 use promptforge_types::metrics::Usage;
 use serde_json::{Value, json};
 
-use super::{Compactor, OverflowReason, UsageAnchor, install_compactors, output_reserve, precheck};
+use super::{
+    Compactor, OverflowReason, ParseOverflowReasonError, UsageAnchor, install_compactors,
+    output_reserve, precheck,
+};
 use crate::Error;
 
 fn lua_with_compactors() -> Lua {
@@ -130,6 +133,28 @@ fn compactors_fail_rejects_an_unknown_reason() {
         ),
         "a bad tag is an authoring error, never context exhaustion"
     );
+}
+
+#[test]
+fn an_overflow_reason_tag_parses_back_and_a_bad_one_lists_the_accepted_tags() {
+    for reason in OverflowReason::ALL {
+        assert_eq!(reason.tag().parse::<OverflowReason>(), Ok(*reason));
+    }
+    let error: ParseOverflowReasonError = "bogus"
+        .parse::<OverflowReason>()
+        .expect_err("an unknown tag is not a reason");
+    assert_eq!(error.input(), "bogus");
+    assert_eq!(
+        error.to_string(),
+        "invalid overflow reason `bogus`: required one of `precheck`, `provider`"
+    );
+}
+
+#[test]
+fn an_overflow_reason_is_a_standard_error_whose_text_is_its_display() {
+    let reason: &dyn std::error::Error = &OverflowReason::Provider;
+    assert_eq!(reason.to_string(), OverflowReason::Provider.to_string());
+    assert!(reason.source().is_none());
 }
 
 #[test]

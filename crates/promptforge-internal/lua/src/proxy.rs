@@ -1,9 +1,7 @@
 //! The read-only proxy every seal builds on: `sys`, a frozen `argv` table,
 //! a sealed prelude global, and a prelude's `var` view.
 
-use mlua::{MaybeSend, Table};
-
-use super::{Lua, Value};
+use mlua::{Lua, MaybeSend, Table, Value};
 
 /// Builds an empty proxy whose `__index` is `index`, whose `__newindex`
 /// raises the text `refusal` builds from the refused key, and whose

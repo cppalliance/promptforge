@@ -16,13 +16,16 @@
 //! classification depend on it, and the loop shim's compactor invocation
 //! runs in Lua over the `compactors` global installed here.
 
-use mlua::{Function, Table};
+use std::num::NonZeroU32;
+use std::str::FromStr;
+
+use mlua::{Function, Lua, Table};
+use promptforge_model_client::client::{Message, Role};
+use promptforge_model_client::detail::{message_content_value, message_raw_tool_calls};
 use promptforge_types::metrics::Usage;
 use serde_json::Value;
 
-use super::{Error, Lua, NonZeroU32, Result};
-use promptforge_model_client::client::{Message, Role};
-use promptforge_model_client::detail::{message_content_value, message_raw_tool_calls};
+use crate::error::{Error, Result, accepted_tags};
 
 /// Why a request cannot fit the model's context window.
 ///
@@ -40,6 +43,10 @@ pub enum OverflowReason {
 }
 
 impl OverflowReason {
+    /// Every reason, in declaration order.
+    pub const ALL: &'static [OverflowReason] =
+        &[OverflowReason::Precheck, OverflowReason::Provider];
+
     /// Parses the invocation tag the compactor callback receives.
     pub(crate) fn from_tag(tag: &str) -> Option<OverflowReason> {
         match tag {
@@ -71,6 +78,39 @@ impl std::fmt::Display for OverflowReason {
             }
         };
         formatter.write_str(detail)
+    }
+}
+
+impl std::error::Error for OverflowReason {}
+
+impl FromStr for OverflowReason {
+    type Err = ParseOverflowReasonError;
+
+    /// Parses a reason from its exact tag, as [`OverflowReason::tag`]
+    /// renders it.
+    fn from_str(tag: &str) -> std::result::Result<OverflowReason, ParseOverflowReasonError> {
+        OverflowReason::from_tag(tag).ok_or_else(|| ParseOverflowReasonError {
+            input: tag.to_owned(),
+        })
+    }
+}
+
+/// The error returned when text is not an [`OverflowReason`] tag.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "invalid overflow reason `{input}`: required one of {}",
+    accepted_tags(OverflowReason::ALL.iter().map(|reason| reason.tag()))
+)]
+pub struct ParseOverflowReasonError {
+    /// The rejected text.
+    input: String,
+}
+
+impl ParseOverflowReasonError {
+    /// Returns the rejected text.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
     }
 }
 
@@ -255,11 +295,9 @@ fn message_chars(message: &Message) -> u64 {
 pub(crate) fn install_compactors(lua: &Lua, globals: &Table) -> Result<()> {
     let fail: Function = lua
         .create_function(|_lua, tag: String| {
-            let reason = OverflowReason::from_tag(&tag).ok_or_else(|| {
-                mlua::Error::external(Error::Lua(format!(
-                    "unknown overflow reason {tag:?}; expected \"precheck\" or \"provider\""
-                )))
-            })?;
+            let reason = tag
+                .parse::<OverflowReason>()
+                .map_err(|error| mlua::Error::external(Error::Lua(error.to_string())))?;
             Err::<(), _>(mlua::Error::external(Error::ContextExhausted { reason }))
         })
         .map_err(Error::lua)?;

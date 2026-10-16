@@ -1,6 +1,12 @@
 //! The sealed `sys` table and the guarded `var` proxy that sandboxed author code reads and writes.
 
-use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
+use std::borrow::Cow;
+
+use mlua::{Lua, LuaSerdeExt, Value};
+use promptforge_model_client::model::ModelBinding;
+use serde_json::Value as Json;
+
+use crate::error::{Error, Result};
 use crate::proxy::read_only_proxy;
 
 /// The registry key holding the `var` proxy's hidden data table.
@@ -150,7 +156,9 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
     let data = match sys {
         Json::Object(map) => map.clone(),
         other => {
-            return Err(Error::Lua(format!("sys must be a table, got {other}")));
+            return Err(Error::Internal(Cow::Owned(format!(
+                "sys must be a table, got {other}"
+            ))));
         }
     };
 
@@ -207,10 +215,10 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
     let initial = match initial {
         Some(Json::Object(values)) => Json::Object(values.clone()),
         Some(other) => {
-            return Err(Error::Lua(format!(
+            return Err(Error::Internal(Cow::Owned(format!(
                 "var must seed from a JSON object, got {}",
                 lua.to_value(other).map_err(Error::lua)?.type_name()
-            )));
+            ))));
         }
         None => Json::Object(serde_json::Map::new()),
     };
@@ -218,13 +226,13 @@ pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Tab
     let Value::Table(proxy) =
         guarded_json_value(lua, &initial, "var", &guarded_data).map_err(Error::lua)?
     else {
-        return Err(Error::Internal("guarded var root was not a table"));
+        return Err(Error::Internal("guarded var root was not a table".into()));
     };
     let Value::Table(data) = guarded_data
         .raw_get::<Value>(proxy.clone())
         .map_err(Error::lua)?
     else {
-        return Err(Error::Internal("guarded var data table was missing"));
+        return Err(Error::Internal("guarded var data table was missing".into()));
     };
     // The named registry entries keep the data table alive and reachable for
     // Engine read-back, and the proxy reachable for the reassignment check in
@@ -269,7 +277,9 @@ pub(crate) fn var_snapshot_table(lua: &Lua) -> Result<mlua::Table> {
     match materialize_guarded_value(lua, Value::Table(data), &guarded_data).map_err(Error::lua)? {
         Value::Table(plain) => Ok(plain),
         // The root data value is always a table; `guarded_var` builds it.
-        _ => Err(Error::Internal("guarded var data table was not a table")),
+        _ => Err(Error::Internal(
+            "guarded var data table was not a table".into(),
+        )),
     }
 }
 

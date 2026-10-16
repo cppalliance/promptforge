@@ -1,14 +1,21 @@
 //! Tests for the `models` namespace: `use`, `default`, `get`, and the model runtime selection.
 
 use super::{ModelRuntime, UseOptions};
+use crate::alias::Alias;
 use crate::test_vm::{BuiltVm, TestVm};
 use promptforge_model_client::model::ModelBinding;
 use promptforge_model_client::model::{ModelId, ModelInvocation, ModelSet, Temperature};
 use std::sync::Arc;
 
+/// The validated alias `text` names.
+#[track_caller]
+fn alias(text: &str) -> Alias {
+    Alias::parse(text.to_owned()).expect("a valid alias")
+}
+
 /// The runtime's selected label, if any.
 fn used(runtime: &ModelRuntime) -> Option<&str> {
-    runtime.selection().map(|(label, _)| label)
+    runtime.selection().map(|(label, _)| label.as_str())
 }
 
 #[test]
@@ -17,9 +24,9 @@ fn model_runtime_select_allows_reselection() {
     // earlier one and steers the next model round.
     let mut runtime = ModelRuntime::new();
     assert!(used(&runtime).is_none());
-    runtime.select("writer".to_owned(), UseOptions::default());
+    runtime.select(alias("writer"), UseOptions::default());
     assert_eq!(used(&runtime), Some("writer"));
-    runtime.select("other".to_owned(), UseOptions::default());
+    runtime.select(alias("other"), UseOptions::default());
     assert_eq!(
         used(&runtime),
         Some("other"),
@@ -353,12 +360,12 @@ fn the_raw_id_fallback_still_validates_the_gateway_id() {
 }
 
 #[test]
-fn a_poisoned_model_set_reaches_the_caller_as_a_lua_error() {
+fn a_poisoned_model_set_reaches_the_caller_as_an_internal_error() {
     let vm = models_vm();
     vm.model_runtime
         .lock()
         .expect("runtime lock")
-        .select("writer".to_owned(), UseOptions::default());
+        .select(alias("writer"), UseOptions::default());
     let poisoner = Arc::clone(&vm.models);
     let _ = std::thread::spawn(move || {
         let _guard = poisoner.lock();
@@ -369,7 +376,7 @@ fn a_poisoned_model_set_reaches_the_caller_as_a_lua_error() {
     let error = crate::resolve_model_binding(vm.models.as_ref(), &vm.model_runtime)
         .expect_err("a poisoned model set cannot resolve a binding");
     assert!(
-        matches!(&error, crate::Error::Lua(message) if message == "model set mutex was poisoned"),
-        "the lock failure is a Lua error, not a model failure: {error:?}"
+        matches!(&error, crate::Error::Internal(message) if message == "model set mutex was poisoned"),
+        "the lock failure is Engine misuse, neither an authoring nor a model failure: {error:?}"
     );
 }

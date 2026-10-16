@@ -1,6 +1,12 @@
 //! Compiled Lua chunks: bytecode compilation with debug info and chunk-line to prompt-line mapping.
 
-use super::{Emitter, Error, Function, Lua, LuaOptions, NonZeroU32, Result, StdLib, lifecycle};
+use std::num::NonZeroU32;
+
+use mlua::{Function, Lua, LuaOptions, StdLib};
+use promptforge_types::emitter::Emitter;
+use promptforge_types::event::lifecycle;
+
+use crate::error::{Error, QuotaResource, Result};
 
 /// Identifies whether temporary compiler setup or chunk compilation failed.
 enum CompilerError {
@@ -108,7 +114,7 @@ impl LuaProgram {
                     source_line: source_line.get(),
                     lua_source: source.to_owned(),
                     message: error.to_string(),
-                    source: Box::new(error),
+                    cause: Box::new(error),
                 });
             }
         };
@@ -216,7 +222,7 @@ impl LuaProgram {
         // mapped prompt-location message, instead of flattening it to a string.
         Error::LuaRuntime {
             message: mapped,
-            source: Box::new(error.clone()),
+            cause: Box::new(error.clone()),
         }
     }
 
@@ -232,14 +238,14 @@ impl LuaProgram {
 ///
 /// Recognizes the stable quota messages our Engine functions emit so a refusal
 /// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
-fn quota_resource(raw: &str) -> Option<&'static str> {
+fn quota_resource(raw: &str) -> Option<QuotaResource> {
     use crate::error::lua_quota;
     if raw.contains(lua_quota::LOG_EVENT) {
-        Some("log event")
+        Some(QuotaResource::LogEvent)
     } else if raw.contains(lua_quota::LOG_BYTE) {
-        Some("log byte")
+        Some(QuotaResource::LogByte)
     } else if raw.contains(lua_quota::INSTRUCTION) {
-        Some("instruction")
+        Some(QuotaResource::Instruction)
     } else {
         None
     }

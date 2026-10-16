@@ -19,12 +19,10 @@ pub(crate) struct LuaModelHandle {
 }
 
 impl LuaModelHandle {
-    /// Builds a handle from a frozen [`ModelBinding`].
+    /// Builds a handle that holds the frozen `binding`.
     #[must_use]
-    pub(crate) fn from_binding(binding: &ModelBinding) -> Self {
-        Self {
-            binding: binding.clone(),
-        }
+    pub(crate) fn from_binding(binding: ModelBinding) -> Self {
+        Self { binding }
     }
 
     /// Returns the frozen binding this handle holds.

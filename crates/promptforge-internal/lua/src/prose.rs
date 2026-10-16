@@ -20,7 +20,14 @@
 //! `prose` between a [`swap`] and a [`restore`], which hands the caller's
 //! read back with its memo.
 
-use super::{Arc, Error, Json, Lua, LuaSerdeExt, Mutex, Result, Value, var_to_json};
+use std::sync::{Arc, Mutex};
+
+use mlua::{Lua, LuaSerdeExt, Value};
+use serde_json::Value as Json;
+
+use crate::error::{Error, Result};
+use crate::sys::var_to_json;
+use crate::vm::{NOT_INJECTED, SYS_LIVE_POISONED};
 
 /// The refusal an assignment of the `prose` global raises.
 pub(crate) const ASSIGNMENT_REFUSAL: &str =
@@ -110,23 +117,19 @@ where
     let sys_live = Arc::clone(sys_live);
     lua.create_function(move |lua, ()| {
         {
-            let guard = memo.lock().map_err(|_| {
-                mlua::Error::external(Error::Lua("prose memo slot was poisoned".to_owned()))
-            })?;
+            let guard = memo.lock().map_err(|_| memo_poisoned())?;
             if let Some(rendered) = guard.as_ref() {
                 return lua.create_string(rendered);
             }
         }
         let var = var_to_json(lua).map_err(mlua::Error::external)?;
         let sys = {
-            let guard = sys_live.lock().map_err(|_| {
-                mlua::Error::external(Error::Lua("sys live slot was poisoned".to_owned()))
-            })?;
-            guard.clone().ok_or_else(|| {
-                mlua::Error::external(Error::Lua(
-                    "section VM Engine values have not been injected".to_owned(),
-                ))
-            })?
+            let guard = sys_live
+                .lock()
+                .map_err(|_| mlua::Error::external(Error::Internal(SYS_LIVE_POISONED.into())))?;
+            guard
+                .clone()
+                .ok_or_else(|| mlua::Error::external(Error::Internal(NOT_INJECTED.into())))?
         };
         let globals_lookup = |name: &str| -> Result<Option<Json>> {
             if name == "prose" {
@@ -151,12 +154,15 @@ where
             sys,
             globals: &globals_lookup,
         })?;
-        let mut guard = memo.lock().map_err(|_| {
-            mlua::Error::external(Error::Lua("prose memo slot was poisoned".to_owned()))
-        })?;
+        let mut guard = memo.lock().map_err(|_| memo_poisoned())?;
         *guard = Some(rendered.clone());
         drop(guard);
         lua.create_string(&rendered)
     })
     .map_err(Error::lua)
+}
+
+/// Returns the failure of a poisoned memo slot.
+fn memo_poisoned() -> mlua::Error {
+    mlua::Error::external(Error::Internal("prose memo slot was poisoned".into()))
 }

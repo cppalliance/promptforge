@@ -58,7 +58,7 @@ fn chat_parses_every_message_shape() {
     match request {
         Request::Chat { list, binding } => {
             assert!(binding.is_none(), "a round without a handle has no binding");
-            let messages = list.records();
+            let messages = list.to_records();
             assert_eq!(messages.len(), 4);
             assert_eq!(messages[0].role, Role::System);
             assert_eq!(
@@ -104,7 +104,7 @@ fn an_assistant_message_holds_visible_text_plus_multiple_normalized_tool_calls()
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Chat { list, .. } => {
-            let messages = list.records();
+            let messages = list.to_records();
             assert_eq!(
                 messages[0].content,
                 MessageContent::Text("working on it".to_owned()),
@@ -148,7 +148,7 @@ fn correlated_tool_results_hold_the_matching_call_ids() {
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Chat { list, .. } => {
-            let messages = list.records();
+            let messages = list.to_records();
             assert_eq!(messages[1].role, Role::Tool);
             assert_eq!(messages[1].tool_call_id.as_deref(), Some("call_1"));
             assert_eq!(messages[2].role, Role::Tool);

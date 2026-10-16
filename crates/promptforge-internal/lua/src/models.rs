@@ -18,13 +18,23 @@ use promptforge_model_client::model::{
     ModelBinding, ModelId, ModelInvocation, ModelSet, Temperature, TemperatureError,
 };
 
-use crate::alias::validate_alias;
-use crate::{Error, Result};
+use crate::alias::Alias;
+use crate::error::{Error, Result};
 
 #[path = "models-userdata.rs"]
 mod userdata;
 
 pub(crate) use userdata::{LuaModelHandle, is_handle};
+
+/// Whether `models.get` resolves an alias no role declares as a raw
+/// gateway catalog model id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RawModelIds {
+    /// An undeclared alias is an error.
+    Refused,
+    /// An undeclared alias resolves as a raw gateway catalog model id.
+    Resolved,
+}
 
 /// The context window a raw gateway-id binding records: catalog metadata
 /// the hack never sees, so a conservative default keeps the compactor
@@ -189,7 +199,7 @@ fn parse_use_options(options: Value, rest: &MultiValue) -> mlua::Result<UseOptio
 /// options it set.
 #[derive(Debug)]
 pub struct ModelRuntime {
-    used: Option<(String, UseOptions)>,
+    used: Option<(Alias, UseOptions)>,
 }
 
 impl ModelRuntime {
@@ -197,17 +207,15 @@ impl ModelRuntime {
         ModelRuntime { used: None }
     }
 
-    /// The current `models.use` label and its options, if any.
-    pub(crate) fn selection(&self) -> Option<(&str, UseOptions)> {
-        self.used
-            .as_ref()
-            .map(|(label, options)| (label.as_str(), *options))
+    /// Returns the current `models.use` label and its options, if any.
+    pub(crate) fn selection(&self) -> Option<(&Alias, UseOptions)> {
+        self.used.as_ref().map(|(label, options)| (label, *options))
     }
 
     /// Records a `models.use` selection, replacing any prior label and
     /// options: the selection is read at call time, so the latest call
     /// steers the next model round.
-    fn select(&mut self, alias: String, options: UseOptions) {
+    fn select(&mut self, alias: Alias, options: UseOptions) {
         self.used = Some((alias, options));
     }
 }
@@ -226,11 +234,12 @@ impl ModelRuntime {
 /// naming a different label errors. There is no `models.bind`: binding is the
 /// frontmatter's, and an unknown label is a hard error.
 ///
-/// `raw_ids` is the raw-model-id fallback, on whenever the caller passes an
-/// application-state snapshot (`RunContext::ui`): when set, `models.get` resolves
-/// an undeclared alias as a raw gateway catalog model id, so the built-in
-/// chat prompt can run `models.get(ui().selected_model)` without declaring
-/// its model. Unset, an undeclared alias is the usual error.
+/// `raw_ids` is the raw-model-id fallback, resolved whenever the caller
+/// passes an application-state snapshot (`RunContext::ui`): then
+/// `models.get` resolves an undeclared alias as a raw gateway catalog model
+/// id, so the built-in chat prompt can run `models.get(ui().selected_model)`
+/// without declaring its model. Refused, an undeclared alias is the usual
+/// error.
 ///
 /// The coroutine shim layer installs the suspending `models.infer` and
 /// `models.loop`, because yield cannot cross the Rust callback boundary.
@@ -243,7 +252,7 @@ pub(crate) fn install_models(
     globals: &Table,
     set: &Arc<Mutex<ModelSet>>,
     runtime: &Arc<Mutex<ModelRuntime>>,
-    raw_ids: bool,
+    raw_ids: RawModelIds,
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;
 
@@ -254,13 +263,14 @@ pub(crate) fn install_models(
             move |_,
                   (label, options, rest): (String, Value, MultiValue)|
                   -> mlua::Result<LuaModelHandle> {
-                validate_alias(&label).map_err(mlua::Error::external)?;
+                let label = Alias::parse(label).map_err(mlua::Error::external)?;
                 let binding = lock_models(&frozen)?
-                    .binding(&label)
+                    .binding(label.as_str())
                     .cloned()
                     .ok_or_else(|| {
                         mlua::Error::external(format!(
-                            "models.use label {label:?} is not a bound model role"
+                            "models.use label {:?} is not a bound model role",
+                            label.as_str()
                         ))
                     })?;
                 let options = parse_use_options(options, &rest)?;
@@ -268,7 +278,7 @@ pub(crate) fn install_models(
                     .lock()
                     .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
                 state.select(label, options);
-                Ok(LuaModelHandle::from_binding(&options.apply(binding)))
+                Ok(LuaModelHandle::from_binding(options.apply(binding)))
             },
         )
         .map_err(Error::lua)?;
@@ -277,29 +287,30 @@ pub(crate) fn install_models(
     let frozen = Arc::clone(set);
     let default_fn = lua
         .create_function(move |_, label: String| -> mlua::Result<LuaModelHandle> {
-            validate_alias(&label).map_err(mlua::Error::external)?;
+            let label = Alias::parse(label).map_err(mlua::Error::external)?;
             let mut set = lock_models(&frozen)?;
             let binding = set
-                .binding(&label)
+                .binding(label.as_str())
                 .cloned()
                 .ok_or_else(|| {
                     mlua::Error::external(format!(
-                        "models.default label {label:?} is not a bound model role"
+                        "models.default label {:?} is not a bound model role",
+                        label.as_str()
                     ))
                 })?;
             match set.default_alias() {
                 // Idempotent under `require`: every section that requires
                 // a library re-runs it, so naming the same default again is
                 // a no-op.
-                Some(existing) if existing == label => {}
+                Some(existing) if existing == label.as_str() => {}
                 Some(existing) => {
                     return Err(mlua::Error::external(format!(
                         "models.default is already {existing:?}: the prompt-wide default cannot change mid-run"
                     )));
                 }
-                None => set.set_default_alias(label),
+                None => set.set_default_alias(label.into()),
             }
-            Ok(LuaModelHandle::from_binding(&binding))
+            Ok(LuaModelHandle::from_binding(binding))
         })
         .map_err(Error::lua)?;
     models.set("default", default_fn).map_err(Error::lua)?;
@@ -308,20 +319,23 @@ pub(crate) fn install_models(
     let get_fn = lua
         .create_function(move |_, alias: String| -> mlua::Result<LuaModelHandle> {
             if let Some(binding) = lock_models(&frozen)?.binding(&alias).cloned() {
-                return Ok(LuaModelHandle::from_binding(&binding));
+                return Ok(LuaModelHandle::from_binding(binding));
             }
-            // The raw-model-id fallback: with the raw-id opt-in on, an
+            // The raw-model-id fallback: with raw ids resolved, an
             // undeclared alias resolves as a raw gateway catalog model id
             // under the fallback context window. The alias grammar does not
             // apply - gateway ids include `/`, `.`, and `:` - so the id's own
             // validation is the only gate.
-            if raw_ids {
-                let binding = raw_gateway_binding(&alias)?;
-                return Ok(LuaModelHandle::from_binding(&binding));
+            match raw_ids {
+                RawModelIds::Resolved => {
+                    return Ok(LuaModelHandle::from_binding(raw_gateway_binding(&alias)?));
+                }
+                RawModelIds::Refused => {}
             }
-            validate_alias(&alias).map_err(mlua::Error::external)?;
+            let alias = Alias::parse(alias).map_err(mlua::Error::external)?;
             Err(mlua::Error::external(format!(
-                "models.get alias {alias:?} is not a bound model role"
+                "models.get alias {:?} is not a bound model role",
+                alias.as_str()
             )))
         })
         .map_err(Error::lua)?;

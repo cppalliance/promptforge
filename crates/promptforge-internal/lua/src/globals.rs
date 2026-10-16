@@ -34,9 +34,11 @@
 use std::fmt;
 use std::sync::LazyLock;
 
-use mlua::{Function, Table};
+use mlua::{Function, Lua, Table, Value};
 
-use super::{Error, Lua, LuaProgram, Result, SharedSource, Value};
+use crate::SharedSource;
+use crate::error::{Error, Result};
+use crate::program::LuaProgram;
 
 /// The guard chunk's name, `@`-prefixed so PUC renders it verbatim as a
 /// file path, as the shim chunks' names are.

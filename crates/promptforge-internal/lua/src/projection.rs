@@ -37,8 +37,7 @@ use promptforge_model_client::client::{Message, Role};
 use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::Value;
 
-use crate::Error;
-use crate::Result;
+use crate::error::{Error, Result};
 use crate::protocol::{ContentPart, MessageContent, MessageRecord};
 
 /// Validates and projects one author-built message list into the wire
