@@ -8,7 +8,7 @@ const EXECUTION: &str = "lua-test";
 
 #[test]
 fn logs_are_correlated_and_ordered_across_chunks() {
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new()
         .tools(fixture_set(&[("search", "search the web")]))
         .emitter(recorder.emitter())
@@ -36,7 +36,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_CHUNK_STARTED,
+                boundary::LUA_CHUNK_STARTED,
             ),
             (
                 EXECUTION.to_owned(),
@@ -46,12 +46,12 @@ fn logs_are_correlated_and_ordered_across_chunks() {
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_CHUNK_SUCCEEDED,
+                boundary::LUA_CHUNK_SUCCEEDED,
             ),
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_CHUNK_STARTED,
+                boundary::LUA_CHUNK_STARTED,
             ),
             (
                 EXECUTION.to_owned(),
@@ -61,17 +61,17 @@ fn logs_are_correlated_and_ordered_across_chunks() {
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_CHUNK_SUCCEEDED,
+                boundary::LUA_CHUNK_SUCCEEDED,
             ),
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_TEARDOWN_STARTED,
+                boundary::LUA_TEARDOWN_STARTED,
             ),
             (
                 EXECUTION.to_owned(),
                 "Gather".to_owned(),
-                detail::LUA_TEARDOWN_SUCCEEDED,
+                boundary::LUA_TEARDOWN_SUCCEEDED,
             ),
         ]
     );
@@ -79,7 +79,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
 
 #[test]
 fn compatibility_chunk_logs_interleave_with_engine_operations() {
-    let recorder = Arc::new(Recorder::for_execution("compatibility-run"));
+    let recorder = Recorder::for_execution("compatibility-run");
     let observer = recorder.emitter().clone();
     run_chunk(
         "log('before write')\n\
@@ -104,7 +104,7 @@ fn compatibility_chunk_logs_interleave_with_engine_operations() {
             (
                 "compatibility-run".to_owned(),
                 "Compatibility".to_owned(),
-                detail::VFS_WRITE_SUCCEEDED.clone(),
+                boundary::VFS_WRITE_SUCCEEDED.clone(),
             ),
             (
                 "compatibility-run".to_owned(),
@@ -139,7 +139,7 @@ fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
         ),
     ];
     for (source, expected) in invalid {
-        let recorder = Arc::new(Recorder::default());
+        let recorder = Recorder::default();
         let observer = recorder.emitter().clone();
         let error = run_chunk(
             source,
@@ -177,7 +177,7 @@ fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
         "log({})",
         serde_json::to_string(&maximum).expect("test string must serialize")
     );
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let observer = recorder.emitter().clone();
     run_chunk(
         &source,
@@ -205,7 +205,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
     // 400-byte messages (200 two-byte chars each) exceed it on the third
     // call, while only three of the four events have been spent - so the
     // BYTE ceiling, not the event ceiling, is what refuses the call.
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new()
         .limits(DEFAULT_LUA_MEMORY_BYTES, 4)
         .emitter(recorder.emitter())
@@ -249,7 +249,7 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
                       return var.answer";
     let recorded_access = fresh_access();
     let recorded_store = store_view(&recorded_access);
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let observer = recorder.emitter().clone();
     let observed_outcome = run_chunk(
         source,
@@ -288,7 +288,7 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
 fn installed_log_persists_across_chunks() {
     // `log` is installed once per section by `install_engine_globals`, so a saved
     // reference stays live for every later chunk in the same VM.
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new().emitter(recorder.emitter()).build();
     run_scalar(
         &vm,
@@ -309,7 +309,7 @@ fn installed_log_persists_across_chunks() {
     let details = recorder
         .records()
         .into_iter()
-        .map(|(_, _, detail)| detail.to_string())
+        .map(|(_, _, observation)| observation.to_string())
         .collect::<Vec<_>>();
     assert!(details.contains(&"Lua: first chunk".to_owned()));
     assert!(details.contains(&"Lua: retained call".to_owned()));
@@ -344,7 +344,7 @@ fn concurrent_logs_keep_execution_ids_and_local_order() {
             records
                 .iter()
                 .filter(|(actual, _, _)| actual == execution)
-                .map(|(_, section, detail)| (section.clone(), detail.to_string()))
+                .map(|(_, section, observation)| (section.clone(), observation.to_string()))
                 .collect::<Vec<_>>(),
             [
                 ("Concurrent".to_owned(), "Lua: first".to_owned()),

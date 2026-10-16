@@ -923,7 +923,7 @@ Paths starting `X/` are under `crates/promptforge-internal/engine/src/execute/te
 </step-9>
 <step-10>
 
-### Step 10: lua tests
+### Step 10: lua tests [completed]
 
 - Component: `lua-tests`
 - Tests: Verify runs these from the repository root in PowerShell, in this order. A search passes only when it prints nothing.

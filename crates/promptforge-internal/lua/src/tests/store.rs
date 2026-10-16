@@ -15,7 +15,9 @@ fn store_exists_returns_boolean() {
             .as_deref(),
         Some("false")
     );
-    store.write("a.txt", b"hi").expect("write");
+    store
+        .write("a.txt", b"hi")
+        .expect("the memory store can seed a file");
     assert_eq!(
         run_with("return tostring(store.exists('a.txt'))", &access)
             .unwrap()
@@ -182,7 +184,9 @@ fn store_read_numbered_numbers_a_slice_absolutely() {
         use std::fmt::Write as _;
         let _ = writeln!(body, "line{n}");
     }
-    store.write("a.txt", body.as_bytes()).expect("write");
+    store
+        .write("a.txt", body.as_bytes())
+        .expect("the memory store can seed a file");
     let out = run_with("return store.read_numbered('a.txt', 84, 85)", &access).unwrap();
     assert_eq!(out.returned.as_deref(), Some("84| line84\n85| line85"));
 }
@@ -196,7 +200,9 @@ fn store_read_numbered_pads_across_the_hundred_boundary() {
         use std::fmt::Write as _;
         let _ = writeln!(body, "line{n}");
     }
-    store.write("a.txt", body.as_bytes()).expect("write");
+    store
+        .write("a.txt", body.as_bytes())
+        .expect("the memory store can seed a file");
     let out = run_with("return store.read_numbered('a.txt', 99, 100)", &access).unwrap();
     assert_eq!(out.returned.as_deref(), Some(" 99| line99\n100| line100"));
 }
@@ -365,7 +371,9 @@ fn store_writes_are_visible_on_the_shared_handle() {
     let store = store_view(&access);
     run_with("store.write('shared.txt', 'from lua')", &access).unwrap();
     assert_eq!(
-        store.read_string("shared.txt").expect("read"),
+        store
+            .read_string("shared.txt")
+            .expect("the file the chunk wrote reads back"),
         "from lua",
         "a Lua write must land in the shared store"
     );

@@ -50,9 +50,10 @@ fn lua_parse(lua: &Lua, messages: &str) -> Vec<MessageRecord> {
     let source = format!("local l = ...\nfor _, r in ipairs({messages}) do l:append(r) end");
     let appended: mlua::Result<()> = lua.load(source).call(list.clone());
     appended.expect("the test records build a list");
-    let request = lua.create_table().expect("table creation cannot fail");
-    request.raw_set("op", "chat").expect("raw_set");
-    request.raw_set("messages", list).expect("raw_set");
+    let request: mlua::Table = lua
+        .load("return { op = 'chat', messages = ... }")
+        .call(list)
+        .expect("the chat request table builds around the list");
     match Request::from_yield(lua, &Value::Table(request)) {
         YieldParse::Request(Request::Chat { list, .. }) => list.to_records(),
         other => panic!("expected a chat request, got {other:?}"),

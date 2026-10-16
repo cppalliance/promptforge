@@ -6,7 +6,7 @@ use promptforge_types::tools::{OutputTrust, ToolDescriptor, ToolError, ToolError
 
 use super::*;
 use crate::test_vm::{TEST_SECTION, echo_tool, test_nonce, tool_at};
-use crate::tests::recording::{Recorder, detail};
+use crate::tests::recording::{Recorder, boundary};
 
 fn binding(alias: &str, tool: &ToolDescriptor) -> ToolBinding {
     ToolBinding::for_test(alias, "fixture capability", tool)
@@ -45,7 +45,7 @@ fn prepare_dispatch_wraps_a_canned_untrusted_output_counts_it_and_reports_it() {
     );
     assert_eq!(
         recorder.kinds(),
-        vec![detail::TOOL_CALL_SUCCEEDED],
+        vec![boundary::TOOL_CALL_SUCCEEDED],
         "a canned Ok output reports the succeeded observation"
     );
     assert_eq!(
@@ -86,7 +86,7 @@ fn prepare_dispatch_turns_a_canned_tool_error_into_the_typed_error() {
     );
     assert_eq!(
         recorder.kinds(),
-        vec![detail::TOOL_CALL_FAILED],
+        vec![boundary::TOOL_CALL_FAILED],
         "a canned Err output reports the failed observation"
     );
 }
@@ -134,7 +134,7 @@ fn a_model_issued_tool_failure_becomes_untrusted_failure_text_under_its_call_id(
         )],
         "ToolResult fires once, under the model's call id"
     );
-    assert_eq!(recorder.kinds(), vec![detail::TOOL_CALL_FAILED],);
+    assert_eq!(recorder.kinds(), vec![boundary::TOOL_CALL_FAILED],);
 }
 
 #[test]

@@ -10,7 +10,7 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
     // `store.exists` must report its pair there for both a present and an
     // absent file, and for a failure the chunk catches with `pcall`.
     let checks = program("store.exists('seed.txt')\nstore.exists('missing.txt')");
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new()
         .emitter(recorder.emitter())
         .section("Direct")
@@ -23,15 +23,15 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
     assert_eq!(
         recorder.observations(),
         [
-            detail::LUA_CHUNK_STARTED,
-            detail::VFS_EXISTS_SUCCEEDED,
-            detail::VFS_EXISTS_SUCCEEDED,
-            detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_TEARDOWN_STARTED,
-            detail::LUA_TEARDOWN_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::VFS_EXISTS_SUCCEEDED,
+            boundary::VFS_EXISTS_SUCCEEDED,
+            boundary::LUA_CHUNK_SUCCEEDED,
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Direct".to_owned(), detail.clone()))
+        .map(|boundary| ("Direct".to_owned(), boundary.clone()))
         .collect::<Vec<_>>()
     );
 
@@ -39,7 +39,7 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
         "local ok = pcall(function() return store.exists('a.txt') end)\n\
          assert(not ok, 'the failing backend must refuse the check')",
     );
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new()
         .access(failing_access())
         .emitter(recorder.emitter())
@@ -51,21 +51,21 @@ fn store_exists_reports_its_pair_through_the_direct_closures() {
     assert_eq!(
         recorder.observations(),
         [
-            detail::LUA_CHUNK_STARTED,
-            detail::VFS_EXISTS_FAILED,
-            detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_TEARDOWN_STARTED,
-            detail::LUA_TEARDOWN_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::VFS_EXISTS_FAILED,
+            boundary::LUA_CHUNK_SUCCEEDED,
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Direct".to_owned(), detail.clone()))
+        .map(|boundary| ("Direct".to_owned(), boundary.clone()))
         .collect::<Vec<_>>()
     );
 }
 
 #[test]
 fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let observer = recorder.emitter().clone();
     let access = fresh_access();
     let source = "store.write('secret/path.txt', 'private contents')\n\
@@ -82,28 +82,15 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
     .expect_err("the missing anchor must fail");
     assert!(matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }));
 
-    let observations = recorder.observations();
     assert_eq!(
-        observations,
+        recorder.observations(),
         vec![
-            ("Gather".to_string(), detail::VFS_WRITE_SUCCEEDED.clone()),
-            ("Gather".to_string(), detail::VFS_READ_SUCCEEDED.clone()),
-            ("Gather".to_string(), detail::VFS_REPLACE_FAILED.clone()),
+            ("Gather".to_string(), boundary::VFS_WRITE_SUCCEEDED.clone()),
+            ("Gather".to_string(), boundary::VFS_READ_SUCCEEDED.clone()),
+            ("Gather".to_string(), boundary::VFS_REPLACE_FAILED.clone()),
         ]
     );
-    let trace = format!("{observations:?}");
-    for payload in [
-        "secret/path.txt",
-        "private contents",
-        "missing secret",
-        "replacement",
-        "private input",
-    ] {
-        assert!(
-            !trace.contains(payload),
-            "observation leaked payload {payload:?}: {trace}"
-        );
-    }
+    assert_identity_only(&recorder);
 }
 
 /// One store operation's success and failure observation pair, driven
@@ -133,62 +120,62 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
     let cases = [
         Case {
             source: "store.write('a.txt', 'new')",
-            success: detail::VFS_WRITE_SUCCEEDED,
-            failure: detail::VFS_WRITE_FAILED,
+            success: boundary::VFS_WRITE_SUCCEEDED,
+            failure: boundary::VFS_WRITE_FAILED,
             prepare: empty,
         },
         Case {
             source: "store.append('a.txt', 'new')",
-            success: detail::VFS_APPEND_SUCCEEDED,
-            failure: detail::VFS_APPEND_FAILED,
+            success: boundary::VFS_APPEND_SUCCEEDED,
+            failure: boundary::VFS_APPEND_FAILED,
             prepare: empty,
         },
         Case {
             source: "store.read('a.txt')",
-            success: detail::VFS_READ_SUCCEEDED,
-            failure: detail::VFS_READ_FAILED,
+            success: boundary::VFS_READ_SUCCEEDED,
+            failure: boundary::VFS_READ_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read('a.txt', 1, 1)",
-            success: detail::VFS_READ_SUCCEEDED,
-            failure: detail::VFS_READ_FAILED,
+            success: boundary::VFS_READ_SUCCEEDED,
+            failure: boundary::VFS_READ_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read_numbered('a.txt')",
-            success: detail::VFS_READ_NUMBERED_SUCCEEDED,
-            failure: detail::VFS_READ_NUMBERED_FAILED,
+            success: boundary::VFS_READ_NUMBERED_SUCCEEDED,
+            failure: boundary::VFS_READ_NUMBERED_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.read_numbered('a.txt', 1, 1)",
-            success: detail::VFS_READ_NUMBERED_SUCCEEDED,
-            failure: detail::VFS_READ_NUMBERED_FAILED,
+            success: boundary::VFS_READ_NUMBERED_SUCCEEDED,
+            failure: boundary::VFS_READ_NUMBERED_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.str_replace('a.txt', 'old', 'new')",
-            success: detail::VFS_REPLACE_SUCCEEDED,
-            failure: detail::VFS_REPLACE_FAILED,
+            success: boundary::VFS_REPLACE_SUCCEEDED,
+            failure: boundary::VFS_REPLACE_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.delete('a.txt')",
-            success: detail::VFS_DELETE_SUCCEEDED,
-            failure: detail::VFS_DELETE_FAILED,
+            success: boundary::VFS_DELETE_SUCCEEDED,
+            failure: boundary::VFS_DELETE_FAILED,
             prepare: existing,
         },
         Case {
             source: "local matches = store.glob('*.txt')",
-            success: detail::VFS_GLOB_SUCCEEDED,
-            failure: detail::VFS_GLOB_FAILED,
+            success: boundary::VFS_GLOB_SUCCEEDED,
+            failure: boundary::VFS_GLOB_FAILED,
             prepare: existing,
         },
         Case {
             source: "store.exists('a.txt')",
-            success: detail::VFS_EXISTS_SUCCEEDED,
-            failure: detail::VFS_EXISTS_FAILED,
+            success: boundary::VFS_EXISTS_SUCCEEDED,
+            failure: boundary::VFS_EXISTS_FAILED,
             prepare: existing,
         },
     ];
@@ -196,7 +183,7 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
     for case in cases {
         let access = fresh_access();
         (case.prepare)(&access);
-        let recorder = Arc::new(Recorder::default());
+        let recorder = Recorder::default();
         let observer = recorder.emitter().clone();
         run_chunk(case.source, "", &json!({}), &access, &observer, "Store")
             .expect("the memory store operation succeeds");
@@ -208,7 +195,7 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
         );
 
         let access = failing_access();
-        let recorder = Arc::new(Recorder::default());
+        let recorder = Recorder::default();
         let observer = recorder.emitter().clone();
         let error = run_chunk(case.source, "", &json!({}), &access, &observer, "Store")
             .expect_err("the failing backend rejects every operation");
@@ -232,7 +219,7 @@ fn store_observations_happen_before_later_lua_side_effects() {
     // between the two writes must land between their two reports. Reports
     // buffered until chunk end would put the checkpoint first.
     let access = fresh_access();
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let observer = recorder.emitter().clone();
 
     run_chunk(
@@ -248,9 +235,9 @@ fn store_observations_happen_before_later_lua_side_effects() {
     assert_eq!(
         recorder.observations(),
         vec![
-            ("Store".to_owned(), detail::VFS_WRITE_SUCCEEDED),
+            ("Store".to_owned(), boundary::VFS_WRITE_SUCCEEDED),
             ("Store".to_owned(), Observation::Lua("mark".to_owned())),
-            ("Store".to_owned(), detail::VFS_WRITE_SUCCEEDED),
+            ("Store".to_owned(), boundary::VFS_WRITE_SUCCEEDED),
         ],
         "each write's report lands before the next Lua statement runs"
     );

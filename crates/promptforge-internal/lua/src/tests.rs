@@ -17,6 +17,7 @@ use promptforge_vfs::{
 };
 use serde_json::{Value as Json, json};
 
+use self::recording::{Observation, Recorder, boundary, null_emitter};
 use super::*;
 use crate::engine_globals::LUA_LOG_CHARACTER_LIMIT;
 use crate::error::Result;
@@ -30,8 +31,6 @@ use crate::vm::{DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES};
 
 #[path = "tests-recording.rs"]
 pub(crate) mod recording;
-
-use recording::{Observation, Recorder, detail, null_emitter};
 
 mod argv;
 mod budgets;
@@ -53,6 +52,28 @@ mod tool_scoping;
 /// table's closures operate through, for seeding and extraction.
 fn store_view(access: &Access) -> Access {
     promptforge_vfs::detail::store_view(access).expect("the handle declares a store")
+}
+
+/// The fields every event carries ahead of its payload, sorted: its
+/// `kind` tag and the three coordinates.
+const IDENTITY_FIELDS: [&str; 4] = ["execution", "kind", "provenance", "section"];
+
+/// Asserts that every event `recorder` drained serializes to the identity
+/// fields alone, so no argument, path, content, or source text reached a
+/// report in any field.
+#[track_caller]
+fn assert_identity_only(recorder: &Recorder) {
+    for event in recorder.serialized() {
+        let Some(object) = event.as_object() else {
+            panic!("required an event serialized as a JSON object, actual {event}");
+        };
+        let mut fields: Vec<&str> = object.keys().map(String::as_str).collect();
+        fields.sort_unstable();
+        assert_eq!(
+            fields, IDENTITY_FIELDS,
+            "required an event holding only identity fields, actual {event}"
+        );
+    }
 }
 
 /// Returns the message held by either Lua-category error representation.
@@ -208,7 +229,8 @@ fn program(source: &str) -> LuaProgram {
 /// yields calls; no implementation is ever reached here.
 fn fixture_tool(name: &str) -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse(&format!("fixtures/{name}")).expect("valid id"),
+        ToolId::parse(&format!("fixtures/{name}"))
+            .expect("a fixtures/<name> id is a valid tool id"),
         "fixture",
         json!({}),
     )

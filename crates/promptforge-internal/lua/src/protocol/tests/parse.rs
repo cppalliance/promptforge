@@ -9,8 +9,7 @@ use super::*;
 #[test]
 fn infer_without_a_handle_parses() {
     let lua = Lua::new();
-    let table = request_table(&lua, "infer");
-    table.raw_set("prompt", "summarize this").expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'infer', prompt = 'summarize this' }");
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Infer { prompt, binding } => {
@@ -24,11 +23,11 @@ fn infer_without_a_handle_parses() {
 #[test]
 fn infer_with_a_handle_clones_its_frozen_binding() {
     let lua = Lua::new();
-    let table = request_table(&lua, "infer");
-    table.raw_set("prompt", "hi").expect("raw_set");
-    table
-        .raw_set("handle", handle_userdata(&lua))
-        .expect("raw_set");
+    let table = lua_table_with(
+        &lua,
+        "local handle = ...\nreturn { op = 'infer', prompt = 'hi', handle = handle }",
+        handle_userdata(&lua),
+    );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Infer {
@@ -45,10 +44,10 @@ fn infer_with_a_handle_clones_its_frozen_binding() {
 #[test]
 fn call_parses_target_input_and_var_snapshot() {
     let lua = Lua::new();
-    let table = request_table(&lua, "call");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("input", "override").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'call', target = '## Child', input = 'override', var = { k = 1 } }",
+    );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Call { target, input, var } => {
@@ -63,9 +62,10 @@ fn call_parses_target_input_and_var_snapshot() {
 #[test]
 fn call_without_input_yields_none() {
     let lua = Lua::new();
-    let table = request_table(&lua, "call");
-    table.raw_set("target", "## Child").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'call', target = '## Child', var = { k = 1 } }",
+    );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Call { input, .. } => assert_eq!(input, None),
@@ -78,15 +78,10 @@ fn a_fanout_op_is_no_longer_a_request() {
     // The fanout shim is Lua over `spawn` and `join_any`; a yield naming
     // a `fanout` op is a hand-built yield and fails as one.
     let lua = Lua::new();
-    let table = request_table(&lua, "fanout");
-    table.raw_set("worker", "### Worker").expect("raw_set");
-    table
-        .raw_set(
-            "collection",
-            lua.create_table().expect("table creation cannot fail"),
-        )
-        .expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'fanout', worker = '### Worker', collection = {}, var = { k = 1 } }",
+    );
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
@@ -125,10 +120,10 @@ fn a_tool_calls_yield_missing_its_turn_a_table_per_call_or_a_call_id_is_a_malfor
 /// Parses a `local_tool_done` yield with `ok = true` and `value` set to
 /// what `source` evaluates to, returning the outcome.
 fn local_tool_done_returning(lua: &Lua, source: &str) -> LocalToolOutcome {
-    let table = request_table(lua, "local_tool_done");
-    table.raw_set("ok", true).expect("raw_set");
-    let value: Value = lua.load(source).eval().expect("the value evaluates");
-    table.raw_set("value", value).expect("raw_set");
+    let table = lua_table(
+        lua,
+        &format!("{{ op = 'local_tool_done', ok = true, value = {source} }}"),
+    );
     match expect_request(Request::from_yield(lua, &Value::Table(table))) {
         Request::LocalToolDone { outcome } => outcome,
         other => panic!("expected a local_tool_done request, got {other:?}"),
@@ -160,9 +155,10 @@ fn a_local_tool_done_table_return_is_a_bad_return() {
 #[test]
 fn a_local_tool_done_with_ok_false_is_raised() {
     let lua = Lua::new();
-    let table = request_table(&lua, "local_tool_done");
-    table.raw_set("ok", false).expect("raw_set");
-    table.raw_set("value", "ignored").expect("raw_set");
+    let table = lua_table(
+        &lua,
+        "{ op = 'local_tool_done', ok = false, value = 'ignored' }",
+    );
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::LocalToolDone {
             outcome: LocalToolOutcome::Raised,
@@ -174,34 +170,36 @@ fn a_local_tool_done_with_ok_false_is_raised() {
 #[test]
 fn a_local_tool_done_without_a_boolean_ok_is_a_malformed_yield() {
     let lua = Lua::new();
-    let missing = request_table(&lua, "local_tool_done");
-    missing.raw_set("value", "hi").expect("raw_set");
-    assert_direct_yield(Request::from_yield(&lua, &Value::Table(missing)));
-    let truthy = request_table(&lua, "local_tool_done");
-    truthy.raw_set("ok", 1).expect("raw_set");
-    truthy.raw_set("value", "hi").expect("raw_set");
-    assert_direct_yield(Request::from_yield(&lua, &Value::Table(truthy)));
+    for source in [
+        "{ op = 'local_tool_done', value = 'hi' }",
+        "{ op = 'local_tool_done', ok = 1, value = 'hi' }",
+    ] {
+        let table = lua_table(&lua, source);
+        assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
+    }
 }
 
 #[test]
 fn a_non_table_yield_is_rejected() {
     let lua = Lua::new();
     assert_direct_yield(Request::from_yield(&lua, &Value::Integer(1)));
-    let text = lua.create_string("infer").expect("string creation");
+    let text = lua
+        .create_string("infer")
+        .expect("a fresh VM creates a short string");
     assert_direct_yield(Request::from_yield(&lua, &Value::String(text)));
 }
 
 #[test]
 fn a_yield_without_an_op_is_rejected() {
     let lua = Lua::new();
-    let table = lua.create_table().expect("table creation cannot fail");
+    let table = lua_table(&lua, "{}");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
 fn an_unknown_op_is_rejected() {
     let lua = Lua::new();
-    let table = request_table(&lua, "teleport");
+    let table = lua_table(&lua, "{ op = 'teleport' }");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
@@ -211,20 +209,20 @@ fn an_infer_with_a_missing_or_non_string_prompt_is_the_calls_error() {
     // so the shim raises it at the call site, where an author `pcall`
     // catches it.
     let lua = Lua::new();
-    let missing = request_table(&lua, "infer");
-    match Request::from_yield(&lua, &Value::Table(missing)) {
-        YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
-            assert_eq!(message, "prompt must be a string, got nil");
+    for (source, expected) in [
+        ("{ op = 'infer' }", "prompt must be a string, got nil"),
+        (
+            "{ op = 'infer', prompt = 42 }",
+            "prompt must be a string, got integer",
+        ),
+    ] {
+        let table = lua_table(&lua, source);
+        match Request::from_yield(&lua, &Value::Table(table)) {
+            YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
+                assert_eq!(message, expected, "{source}");
+            }
+            other => panic!("expected the prompt call error for {source}, got {other:?}"),
         }
-        other => panic!("expected the prompt call error, got {other:?}"),
-    }
-    let typed_wrong = request_table(&lua, "infer");
-    typed_wrong.raw_set("prompt", 42).expect("raw_set");
-    match Request::from_yield(&lua, &Value::Table(typed_wrong)) {
-        YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
-            assert_eq!(message, "prompt must be a string, got integer");
-        }
-        other => panic!("expected the prompt call error, got {other:?}"),
     }
 }
 
@@ -234,11 +232,10 @@ fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
     // wrong shape is the call's error (pcall-able at the call site), not
     // a malformed-yield block failure.
     let lua = Lua::new();
-    let as_string = request_table(&lua, "infer");
-    as_string.raw_set("prompt", "hi").expect("raw_set");
-    as_string
-        .raw_set("handle", "not a handle")
-        .expect("raw_set");
+    let as_string = lua_table(
+        &lua,
+        "{ op = 'infer', prompt = 'hi', handle = 'not a handle' }",
+    );
     match Request::from_yield(&lua, &Value::Table(as_string)) {
         YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
             assert_eq!(
@@ -248,12 +245,14 @@ fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
         }
         other => panic!("expected the handle call error, got {other:?}"),
     }
-    let as_other_userdata = request_table(&lua, "infer");
-    as_other_userdata.raw_set("prompt", "hi").expect("raw_set");
     let wrong = lua
         .create_userdata(OtherUserData)
         .expect("userdata creation cannot fail on a fresh VM");
-    as_other_userdata.raw_set("handle", wrong).expect("raw_set");
+    let as_other_userdata = lua_table_with(
+        &lua,
+        "local handle = ...\nreturn { op = 'infer', prompt = 'hi', handle = handle }",
+        wrong,
+    );
     match Request::from_yield(&lua, &Value::Table(as_other_userdata)) {
         YieldParse::Call(Answer::Infer(Err(Error::Lua(message)))) => {
             assert_eq!(message, "models.infer handle must be a model handle");
@@ -265,9 +264,7 @@ fn an_infer_with_a_wrong_handle_type_is_the_calls_error() {
 #[test]
 fn a_call_with_a_non_string_target_keeps_the_resolve_error() {
     let lua = Lua::new();
-    let table = request_table(&lua, "call");
-    table.raw_set("target", 42).expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(&lua, "{ op = 'call', target = 42, var = { k = 1 } }");
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Call(Err(Error::LuaRuntime { message, .. }))) => {
             assert!(
@@ -282,22 +279,16 @@ fn a_call_with_a_non_string_target_keeps_the_resolve_error() {
 #[test]
 fn a_request_without_a_var_snapshot_is_rejected() {
     let lua = Lua::new();
-    let table = request_table(&lua, "call");
-    table.raw_set("target", "## Child").expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'call', target = '## Child' }");
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
 fn metatable_spoofed_fields_are_not_read() {
     let lua = Lua::new();
-    let table = lua.create_table().expect("table creation cannot fail");
-    let index = lua.create_table().expect("table creation cannot fail");
-    index.raw_set("op", "infer").expect("raw_set");
-    index.raw_set("prompt", "hi").expect("raw_set");
-    let metatable = lua.create_table().expect("table creation cannot fail");
-    metatable.raw_set("__index", index).expect("raw_set");
-    table
-        .set_metatable(Some(metatable))
-        .expect("set_metatable on a fresh table cannot fail");
+    let table = lua_table(
+        &lua,
+        "setmetatable({}, { __index = { op = 'infer', prompt = 'hi' } })",
+    );
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }

@@ -21,9 +21,10 @@ mod view;
 /// Parses `messages` through the chat protocol boundary, as a
 /// `models.loop` round's yield would.
 fn chat_parse(lua: &Lua, messages: Value) -> YieldParse {
-    let request = lua.create_table().expect("table creation cannot fail");
-    request.raw_set("op", "chat").expect("raw_set");
-    request.raw_set("messages", messages).expect("raw_set");
+    let request: mlua::Table = lua
+        .load("return { op = 'chat', messages = ... }")
+        .call(messages)
+        .expect("the chat request table builds around any messages value");
     Request::from_yield(lua, &Value::Table(request))
 }
 

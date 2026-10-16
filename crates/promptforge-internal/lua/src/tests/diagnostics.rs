@@ -330,13 +330,17 @@ fn lua_compilation_reports_are_ordered_exact_and_payload_free() {
     assert_eq!(
         recorder.observations(),
         vec![
-            ("Gather".to_owned(), detail::LUA_COMPILATION_STARTED.clone(),),
             (
                 "Gather".to_owned(),
-                detail::LUA_COMPILATION_SUCCEEDED.clone(),
+                boundary::LUA_COMPILATION_STARTED.clone(),
+            ),
+            (
+                "Gather".to_owned(),
+                boundary::LUA_COMPILATION_SUCCEEDED.clone(),
             ),
         ]
     );
+    assert_identity_only(&recorder);
 
     let recorder = Recorder::default();
     LuaProgram::compile(
@@ -347,17 +351,20 @@ fn lua_compilation_reports_are_ordered_exact_and_payload_free() {
         "Gather",
     )
     .expect_err("malformed Lua must fail");
-    let observations = recorder.observations();
     assert_eq!(
-        observations,
+        recorder.observations(),
         vec![
-            ("Gather".to_owned(), detail::LUA_COMPILATION_STARTED.clone(),),
-            ("Gather".to_owned(), detail::LUA_COMPILATION_FAILED.clone(),),
+            (
+                "Gather".to_owned(),
+                boundary::LUA_COMPILATION_STARTED.clone(),
+            ),
+            (
+                "Gather".to_owned(),
+                boundary::LUA_COMPILATION_FAILED.clone(),
+            ),
         ]
     );
-    let trace = format!("{observations:?}");
-    assert!(!trace.contains("private"));
-    assert!(!trace.contains(location));
+    assert_identity_only(&recorder);
 }
 
 #[test]

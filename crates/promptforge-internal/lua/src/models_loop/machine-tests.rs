@@ -2,10 +2,11 @@
 //! place of the Lua values it passes along, and a plain list read back
 //! through `records()`.
 
-use super::super::tests::{echo_call, round};
 use super::{Input, Machine, Phase, Then};
 use crate::compactors::OverflowReason;
+use crate::error_value::ErrorField;
 use crate::messages::MessageList;
+use crate::models_loop::tests::{echo_call, round};
 use crate::protocol::{ChatOutcome, ChatResult, MessageContent, MessageRecord};
 
 type V = &'static str;
@@ -31,7 +32,12 @@ fn show(then: &Then<V>) -> String {
         Then::Raise(value) => format!("raise {value}"),
         Then::RaiseNormalized(value) => format!("normalize {value}"),
         Then::RaiseNew(raised) => match raised.fields.get("finish_reason") {
-            Some(reason) => format!("new {}|{}|{reason:?}", raised.kind, raised.message),
+            Some(ErrorField::String(reason)) => {
+                format!("new {}|{}|{reason}", raised.kind, raised.message)
+            }
+            Some(ErrorField::Integer(reason)) => {
+                panic!("finish_reason must be a string field, actual the integer {reason}")
+            }
             None => format!("new {}|{}", raised.kind, raised.message),
         },
     }
@@ -151,11 +157,11 @@ fn each_round_outcome_is_judged_overflow_calls_reply_or_empty() {
         (finished(ChatOutcome::Reply("text".to_owned())), "return"),
         (
             finished(ChatOutcome::Reply(String::new())),
-            r#"new empty_model_reply|empty model reply|String("stop")"#,
+            "new empty_model_reply|empty model reply|stop",
         ),
         (
             finished(ChatOutcome::Empty(Some("nothing".to_owned()))),
-            r#"new empty_model_reply|nothing|String("stop")"#,
+            "new empty_model_reply|nothing|stop",
         ),
     ];
     for (answer, expected) in cases {
@@ -240,7 +246,7 @@ fn the_clean_exit_counts_answered_calls_across_batches_and_resets_per_call() {
     let mut fresh = chatting(4, &list);
     assert_eq!(
         show(&fresh.step(stop())),
-        r#"new empty_model_reply|empty model reply|String("stop")"#,
+        "new empty_model_reply|empty model reply|stop",
         "a new call starts its count at zero"
     );
 }
@@ -268,7 +274,7 @@ fn an_empty_reply_raises_its_detail_or_the_fallback() {
     let mut machine = chatting(2, &MessageList::default());
     assert_eq!(
         show(&machine.step(answered(detailed))),
-        r#"new empty_model_reply|the reply was empty|String("length")"#
+        "new empty_model_reply|the reply was empty|length"
     );
     let mut machine = chatting(2, &MessageList::default());
     assert_eq!(

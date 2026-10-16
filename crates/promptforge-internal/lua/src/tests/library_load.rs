@@ -1,8 +1,9 @@
 //! Library-load reports: each phase folds to its own kind with the library
 //! section it names.
 
-use super::*;
 use promptforge_types::emitter::LibraryLoad;
+
+use super::*;
 
 #[test]
 fn a_library_load_folds_to_its_kind_with_the_library() {

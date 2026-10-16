@@ -18,8 +18,8 @@ fn plugin_set() -> ToolSet {
     let bind = |id: &str| ToolBinding::from_descriptor(&id.replace(['/', '.'], "_"), &tool_at(id));
     ToolSet::new(
         vec![
-            PluginId::parse("web").expect("valid Plugin"),
-            PluginId::parse("mail").expect("valid Plugin"),
+            PluginId::parse("web").expect("`web` is a valid Plugin id"),
+            PluginId::parse("mail").expect("`mail` is a valid Plugin id"),
         ],
         BTreeMap::new(),
         vec![
@@ -36,7 +36,7 @@ fn plugin_set() -> ToolSet {
 /// and `subagents`, which offers none, can serve the run, and `mcp`
 /// can't.
 fn roster_set() -> ToolSet {
-    let plugin = |name: &str| PluginId::parse(name).expect("valid Plugin");
+    let plugin = |name: &str| PluginId::parse(name).expect("each roster name is a valid Plugin id");
     let base = plugin_set();
     ToolSet::new(
         base.declared().to_vec(),

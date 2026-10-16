@@ -14,7 +14,7 @@ use crate::test_vm::{lua_over, scoped, tool_at};
 /// two of the undeclared Plugin `gh`, in id order, under their wire names.
 fn offering_set() -> ToolSet {
     ToolSet::new(
-        vec![PluginId::parse("web").expect("valid Plugin")],
+        vec![PluginId::parse("web").expect("`web` is a valid Plugin id")],
         std::collections::BTreeMap::new(),
         vec![
             ToolBinding::from_descriptor("gh_issues_list", &tool_at("gh/issues.list")),
@@ -201,10 +201,15 @@ fn the_tools_namespace_installs_its_six_functions() {
 #[test]
 fn tools_entries_name_the_calling_function_in_every_shape_error() {
     let lua = Lua::new();
-    let string = |text: &str| Value::String(lua.create_string(text).expect("string"));
+    let string = |text: &str| {
+        Value::String(
+            lua.create_string(text)
+                .expect("a fresh VM creates a short string"),
+        )
+    };
     let array = lua
         .create_sequence_from(vec![string("web/search")])
-        .expect("array");
+        .expect("a fresh VM creates the offer array");
     for (args, fragment) in [
         (
             vec![Value::Integer(42)],

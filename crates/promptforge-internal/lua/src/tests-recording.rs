@@ -45,7 +45,7 @@ impl std::fmt::Display for Observation {
 macro_rules! lifecycle_kinds {
     ($($name:ident => $kind:literal),* $(,)?) => {
         /// The payload-free boundaries the suites assert on.
-        pub(crate) mod detail {
+        pub(crate) mod boundary {
             use super::Observation;
             $(pub(crate) const $name: Observation = Observation::Lifecycle($kind);)*
         }
@@ -83,12 +83,19 @@ lifecycle_kinds! {
     VFS_EXISTS_FAILED => "vfs_exists_failed",
 }
 
+/// An event serialized as the caller receives it.
+fn serialize(event: &Event) -> serde_json::Value {
+    serde_json::to_value(event)
+        .unwrap_or_else(|error| panic!("every event serializes, but {event:?} failed: {error}"))
+}
+
 /// The `kind` label an event serializes under.
 fn kind(event: &Event) -> String {
-    serde_json::to_value(event)
-        .ok()
-        .and_then(|value| value.get("kind")?.as_str().map(str::to_owned))
-        .unwrap_or_default()
+    let value = serialize(event);
+    let Some(kind) = value.get("kind").and_then(serde_json::Value::as_str) else {
+        panic!("every serialized event carries a string `kind` tag, actual {value}");
+    };
+    kind.to_owned()
 }
 
 /// Folds one event to the record a suite compares.
@@ -165,6 +172,12 @@ impl Recorder {
             .expect("the recorder mutex must not be poisoned");
         seen.extend(self.sink.take());
         seen.clone()
+    }
+
+    /// Every event reported so far, serialized as the caller receives it,
+    /// so a suite can assert on fields the fold to [`Observation`] drops.
+    pub(super) fn serialized(&self) -> Vec<serde_json::Value> {
+        self.events().iter().map(serialize).collect()
     }
 
     /// Every report so far as `(execution, section, observation)`.

@@ -161,7 +161,9 @@ fn assigning_nil_to_a_var_field_removes_it_from_var_and_its_snapshot() {
     let lua = Lua::new();
     let var = guarded_var(&lua, Some(&json!({ "k": 1, "kept": "yes" })))
         .expect("the guarded var builds from a JSON object");
-    lua.globals().raw_set("var", var).expect("var installs");
+    lua.globals()
+        .raw_set("var", var)
+        .expect("a fresh VM's globals take the var table");
     let reads_nil: bool = lua
         .load("var.k = nil\nreturn var.k == nil")
         .eval()

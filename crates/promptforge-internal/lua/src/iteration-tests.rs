@@ -185,7 +185,7 @@ fn next_resumes_after_a_cleared_boolean_key_without_replaying_the_array_part() {
 
 #[test]
 fn next_visits_a_live_boolean_key_after_array_elements_are_cleared() {
-    // D-1. `next` resumed using the live `#t` as the array border: clearing an
+    // `next` resumed using the live `#t` as the array border: clearing an
     // array element shrinks that border, so a cleared integer key reclassified
     // as a scalar number and the resume stopped before the boolean hash key.
     // An integer key must stay in the array segment regardless of the mutable
@@ -301,11 +301,11 @@ fn pairs_skips_the_key_cleared_by_the_current_step() {
 
 #[test]
 fn pairs_does_not_revisit_the_array_part_when_a_boolean_key_is_cleared() {
-    // D-003. A boolean hash key ranks below numbers in `SortKey`, so a
-    // resumption that compares raw sort positions places the array part after
-    // the boolean key and replays it. The array part, the boolean key, and the
-    // clear must all coexist for the defect to surface; each key must still be
-    // yielded exactly once.
+    // A boolean hash key ranks below numbers in `SortKey`, so a resumption
+    // that compares raw sort positions places the array part after the
+    // boolean key and replays it. The array part, the boolean key, and the
+    // clear must all coexist for the defect to surface; each key must still
+    // be yielded exactly once.
     let vm = TestVm::new().build();
     let source = "local t = {10, 20, [false] = 'f'} \
                   local out = {} \
@@ -322,9 +322,9 @@ fn pairs_does_not_revisit_the_array_part_when_a_boolean_key_is_cleared() {
 
 #[test]
 fn pairs_visits_remaining_non_scalar_keys_after_one_is_cleared() {
-    // D-002. Two non-scalar keys sort after every scalar key; clearing the
-    // current table-valued key mid-loop must not end the walk, so the other
-    // table key is still visited. Both clear, so the count pins the fix without
+    // Two non-scalar keys sort after every scalar key; clearing the current
+    // table-valued key mid-loop must not end the walk, so the other table
+    // key is still visited. Both clear, so the count pins the fix without
     // depending on the raw `pairs` order between the two table keys.
     let vm = TestVm::new().build();
     let source = "local t = {a = 1} \

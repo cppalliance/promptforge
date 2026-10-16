@@ -171,7 +171,9 @@ fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
 /// `act`'s tag and values for `then`.
 fn action(lua: &Lua, then: Then<Value>) -> (String, Vec<Value>) {
     let mut values = act(lua, then).unwrap().into_vec().into_iter();
-    let tag: String = lua.unpack(values.next().expect("a tag")).unwrap();
+    let tag: String = lua
+        .unpack(values.next().expect("act returns its tag first"))
+        .unwrap();
     (tag, values.collect())
 }
 

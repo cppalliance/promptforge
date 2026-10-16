@@ -149,8 +149,10 @@ fn untrusted_global_wraps_every_call_under_the_run_nonce() {
         "",
     )
     .expect("untrusted must run");
-    let wrapped = outcome.returned.expect("two envelopes");
-    let (first, second) = wrapped.split_once("\n@@SPLIT@@\n").expect("two envelopes");
+    let wrapped = outcome.returned.expect("the chunk returns both envelopes");
+    let (first, second) = wrapped
+        .split_once("\n@@SPLIT@@\n")
+        .expect("the separator splits the two envelopes");
     assert_eq!(first, second, "every call in a run shares the run nonce");
 }
 

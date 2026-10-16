@@ -168,13 +168,19 @@ fn tool_objects_install_without_payload_reports() {
         )],
     );
     let recorder = Recorder::default();
-    let _vm = TestVm::new()
+    let vm = TestVm::new()
         .tools(bindings)
         .emitter(recorder.emitter())
         .build();
-    let trace = format!("{:?}", recorder.observations());
-    assert!(!trace.contains("private_alias"));
-    assert!(!trace.contains("private capability"));
+    vm.teardown();
+    assert_eq!(
+        recorder.kinds(),
+        [
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED
+        ]
+    );
+    assert_identity_only(&recorder);
 }
 
 #[test]

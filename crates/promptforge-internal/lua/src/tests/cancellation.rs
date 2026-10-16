@@ -28,7 +28,9 @@ fn long_running_lua_block_cancels_cooperatively() {
     let lua = Lua::new();
     let budget = install_instruction_budget(&lua).expect("hook installs on a fresh VM");
     budget.set_cancel(handle);
-    let func = program.load(&lua).expect("bytecode loads");
+    let func = program
+        .load(&lua)
+        .expect("compiled bytecode loads into a fresh VM");
     let fired = budget.fired();
     let outcome = func.call::<()>(());
 

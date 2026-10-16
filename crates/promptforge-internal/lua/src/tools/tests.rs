@@ -1,14 +1,15 @@
 //! Tests for the `tools` namespace installers, alias decoding, and the local params schema.
 
+use std::collections::BTreeMap;
+
 use mlua::{Lua, Value, Variadic};
 use serde_json::json;
 
 use super::decode::{collect_offer_entries, local_params_schema, tool_name};
 use super::userdata::LuaToolHandle;
-use crate::ToolBinding;
-use crate::handles::ToolSet;
 use crate::scope::TaskAllowlist;
 use crate::test_vm::{TestVm, echo_tool, lua_over, tool_at};
+use crate::{ToolBinding, ToolSet};
 
 #[path = "tests-offering.rs"]
 mod offering;
@@ -25,7 +26,9 @@ fn echo_handle() -> LuaToolHandle {
 #[test]
 fn tool_name_accepts_a_bare_string() {
     let lua = Lua::new();
-    let value = lua.create_string("tools/echo").expect("string");
+    let value = lua
+        .create_string("tools/echo")
+        .expect("a fresh VM creates a short string");
     assert_eq!(
         tool_name(&Value::String(value)).expect("a string decodes"),
         "tools/echo"
@@ -35,7 +38,9 @@ fn tool_name_accepts_a_bare_string() {
 #[test]
 fn tool_name_reads_the_id_off_a_tool_object() {
     let lua = Lua::new();
-    let userdata = lua.create_userdata(echo_handle()).expect("userdata");
+    let userdata = lua
+        .create_userdata(echo_handle())
+        .expect("a fresh VM creates a tool object");
     assert_eq!(
         tool_name(&Value::UserData(userdata)).expect("a tool object decodes"),
         "tools/echo",
@@ -64,7 +69,9 @@ fn tool_name_rejects_tables_other_types_and_other_userdata() {
     );
     // A userdata that is not a tool object takes the same rejection; the
     // borrow failure must not leak mlua's type-mismatch wording.
-    let foreign = lua.create_userdata(Foreign).expect("userdata");
+    let foreign = lua
+        .create_userdata(Foreign)
+        .expect("a fresh VM creates a foreign userdata");
     let other = tool_name(&Value::UserData(foreign)).expect_err("not a tool object");
     assert!(
         other
@@ -77,11 +84,14 @@ fn tool_name_rejects_tables_other_types_and_other_userdata() {
 #[test]
 fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
     let lua = Lua::new();
-    let tool = lua.create_userdata(echo_handle()).expect("userdata");
+    let tool = lua
+        .create_userdata(echo_handle())
+        .expect("a fresh VM creates a tool object");
     let entries = collect_offer_entries(
         "tools.offer",
         Variadic::from_iter([Value::String(
-            lua.create_string("web/search").expect("string"),
+            lua.create_string("web/search")
+                .expect("a fresh VM creates a short string"),
         )]),
     )
     .expect("an id decodes");
@@ -95,12 +105,13 @@ fn tools_offer_entries_accept_strings_tool_objects_and_arrays() {
 
     let array = lua
         .create_sequence_from(vec![Value::UserData(tool)])
-        .expect("array");
+        .expect("a fresh VM creates the offer array");
     array
         .raw_push(Value::String(
-            lua.create_string("web/fetch").expect("string"),
+            lua.create_string("web/fetch")
+                .expect("a fresh VM creates a short string"),
         ))
-        .expect("push");
+        .expect("a fresh array takes a pushed id");
     let entries = collect_offer_entries("tools.offer", Variadic::from_iter([Value::Table(array)]))
         .expect("the array form decodes");
     assert_eq!(
@@ -245,7 +256,7 @@ fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
     let echo = ToolBinding::from_descriptor("tools_echo", &echo_tool());
     let vm = lua_over(ToolSet::new(
         Vec::new(),
-        std::collections::BTreeMap::new(),
+        BTreeMap::new(),
         vec![
             echo.clone(),
             ToolBinding::from_descriptor("tools_other", &tool_at("tools/other")),
@@ -254,9 +265,16 @@ fn tool_call_counts_seed_by_id_and_explain_an_unseeded_key() {
     let counts = vm
         .install_tool_call_counts(&[echo])
         .expect("the counts install");
-    assert_eq!(counts.get("tools/echo").expect("read"), Some(0));
     assert_eq!(
-        counts.get("tools_echo").expect("read"),
+        counts
+            .get("tools/echo")
+            .expect("the installed counts read any key"),
+        Some(0)
+    );
+    assert_eq!(
+        counts
+            .get("tools_echo")
+            .expect("the installed counts read any key"),
         None,
         "counts key a catalog tool by its id, never its wire name"
     );

@@ -3,6 +3,8 @@
 //! failure as the call's own answer. The per-record rules run as the list
 //! adds a record, so their tests sit with the list.
 
+use mlua::IntoLua;
+
 use super::*;
 use crate::{MessageList, NonEmpty, RecordRole};
 
@@ -10,9 +12,8 @@ use crate::{MessageList, NonEmpty, RecordRole};
 const NOT_A_LIST: &str = "models.loop needs a messages.new() list; build one with \
                           messages.new() and :user, :append, or :replace";
 
-/// A `chat` request over a `messages.new()` list holding the records of
-/// the Lua array `records`, as the loop shim yields it.
-fn chat_request(lua: &Lua, records: &str) -> mlua::Table {
+/// A `messages.new()` list holding the records of the Lua array `records`.
+fn record_list(lua: &Lua, records: &str) -> AnyUserData {
     let list = lua
         .create_userdata(MessageList::default())
         .expect("userdata creation cannot fail");
@@ -21,9 +22,24 @@ fn chat_request(lua: &Lua, records: &str) -> mlua::Table {
     ))
     .call::<()>(list.clone())
     .expect("the test records build a list");
-    let table = request_table(lua, "chat");
-    table.raw_set("messages", list).expect("raw_set");
-    table
+    list
+}
+
+/// A `chat` request over a `messages.new()` list holding the records of
+/// the Lua array `records`, as the loop shim yields it.
+fn chat_request(lua: &Lua, records: &str) -> mlua::Table {
+    chat_request_with_handle(lua, records, Value::Nil)
+}
+
+/// A `chat` request over the list [`chat_request`] builds, with `handle`
+/// beside it, as a handle's `loop` yields it.
+fn chat_request_with_handle(lua: &Lua, records: &str, handle: impl IntoLua) -> mlua::Table {
+    lua_table_with(
+        lua,
+        "local messages, handle = ...\n\
+         return { op = 'chat', messages = messages, handle = handle }",
+        (record_list(lua, records), handle),
+    )
 }
 
 fn expect_chat_call_error(parse: YieldParse, expected: &str) {
@@ -158,28 +174,20 @@ fn messages_that_are_not_a_list_are_the_calls_error() {
     let lua = Lua::new();
     // Absent, a non-table, a hand-written array, an empty table, and a
     // userdata of another type are all refused with the list error.
-    let missing = request_table(&lua, "chat");
-    expect_chat_call_error(
-        Request::from_yield(&lua, &Value::Table(missing)),
-        NOT_A_LIST,
-    );
-    let numeric = request_table(&lua, "chat");
-    numeric.raw_set("messages", 42).expect("raw_set");
-    expect_chat_call_error(
-        Request::from_yield(&lua, &Value::Table(numeric)),
-        NOT_A_LIST,
-    );
-    for source in [r#"{ { role = "user", content = "hi" } }"#, "{}"] {
-        let plain = request_table(&lua, "chat");
-        plain
-            .raw_set("messages", lua_table(&lua, source))
-            .expect("raw_set");
-        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(plain)), NOT_A_LIST);
+    for source in [
+        "{ op = 'chat' }",
+        "{ op = 'chat', messages = 42 }",
+        r#"{ op = 'chat', messages = { { role = "user", content = "hi" } } }"#,
+        "{ op = 'chat', messages = {} }",
+    ] {
+        let table = lua_table(&lua, source);
+        expect_chat_call_error(Request::from_yield(&lua, &Value::Table(table)), NOT_A_LIST);
     }
-    let other = request_table(&lua, "chat");
-    other
-        .raw_set("messages", handle_userdata(&lua))
-        .expect("raw_set");
+    let other = lua_table_with(
+        &lua,
+        "local messages = ...\nreturn { op = 'chat', messages = messages }",
+        handle_userdata(&lua),
+    );
     expect_chat_call_error(Request::from_yield(&lua, &Value::Table(other)), NOT_A_LIST);
 }
 
@@ -189,10 +197,11 @@ fn chat_with_the_loops_handle_holds_its_frozen_binding() {
     // binding is cloned out of the userdata at the parse, so the round runs
     // on the handle's model rather than the section default.
     let lua = Lua::new();
-    let table = chat_request(&lua, r#"{ { role = "user", content = "hi" } }"#);
-    table
-        .raw_set("handle", handle_userdata(&lua))
-        .expect("raw_set");
+    let table = chat_request_with_handle(
+        &lua,
+        r#"{ { role = "user", content = "hi" } }"#,
+        handle_userdata(&lua),
+    );
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::Chat {
             binding: Some(binding),
@@ -209,20 +218,17 @@ fn chat_handle_validation_names_the_loop_and_is_the_calls_error() {
     // the parse still refuses any other shape.
     let lua = Lua::new();
     let valid = r#"{ { role = "user", content = "hi" } }"#;
-    let wrong_userdata = chat_request(&lua, valid);
-    wrong_userdata
-        .raw_set(
-            "handle",
-            lua.create_userdata(OtherUserData)
-                .expect("userdata creation cannot fail"),
-        )
-        .expect("raw_set");
+    let wrong_userdata = chat_request_with_handle(
+        &lua,
+        valid,
+        lua.create_userdata(OtherUserData)
+            .expect("userdata creation cannot fail"),
+    );
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(wrong_userdata)),
         "models.loop handle must be a model handle",
     );
-    let wrong_type = chat_request(&lua, valid);
-    wrong_type.raw_set("handle", "fast").expect("raw_set");
+    let wrong_type = chat_request_with_handle(&lua, valid, "fast");
     expect_chat_call_error(
         Request::from_yield(&lua, &Value::Table(wrong_type)),
         "models.loop handle must be a model handle, got string",

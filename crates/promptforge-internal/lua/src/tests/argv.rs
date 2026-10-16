@@ -77,7 +77,8 @@ fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_integer_or_other_ke
         let caught = out.expect("the chunk returns the caught error");
         assert_eq!(refusal_line(&caught), Some(refusal), "writing {target}");
     }
-    let label = run_argv(&vm, "return getmetatable(argv)").expect("getmetatable reads");
+    let label = run_argv(&vm, "return getmetatable(argv)")
+        .expect("getmetatable reads the frozen argv label");
     assert_eq!(label.as_deref(), Some("argv is frozen"));
     vm.teardown();
 }

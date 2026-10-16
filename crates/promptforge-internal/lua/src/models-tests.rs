@@ -1,11 +1,15 @@
 //! Tests for the `models` namespace: `use`, `default`, `get`, and the model runtime selection.
 
-use super::{ModelRuntime, UseOptions};
+use std::sync::Arc;
+
+use mlua::Value;
+use promptforge_model_client::model::{
+    ModelBinding, ModelId, ModelInvocation, ModelSet, Temperature,
+};
+
+use super::{ModelRuntime, UseOptions, option_check_order};
 use crate::alias::Alias;
 use crate::test_vm::{BuiltVm, TestVm};
-use promptforge_model_client::model::ModelBinding;
-use promptforge_model_client::model::{ModelId, ModelInvocation, ModelSet, Temperature};
-use std::sync::Arc;
 
 /// The validated alias `text` names.
 #[track_caller]
@@ -103,7 +107,11 @@ fn models_use_selects_a_bound_role_by_label() {
     let handle: String = vm.eval("local h = models.use('writer'); return h.label .. '|' .. h.name");
     assert_eq!(handle, "writer|writer");
     assert_eq!(
-        used(&vm.model_runtime().lock().expect("runtime lock")),
+        used(
+            &vm.model_runtime()
+                .lock()
+                .expect("the model runtime mutex is not poisoned")
+        ),
         Some("writer")
     );
 }
@@ -129,7 +137,11 @@ fn models_use_options_reach_the_returned_handle() {
     assert!((temperature - 0.3).abs() < f64::EPSILON);
     assert_eq!(max_tokens, 256);
     assert_eq!(
-        used(&vm.model_runtime().lock().expect("runtime lock")),
+        used(
+            &vm.model_runtime()
+                .lock()
+                .expect("the model runtime mutex is not poisoned")
+        ),
         Some("writer")
     );
 }
@@ -206,7 +218,12 @@ fn models_use_rejects_invalid_options_without_selecting() {
             "{chunk}: expected {expected:?} in {error}"
         );
         assert!(
-            used(&vm.model_runtime().lock().expect("runtime lock")).is_none(),
+            used(
+                &vm.model_runtime()
+                    .lock()
+                    .expect("the model runtime mutex is not poisoned")
+            )
+            .is_none(),
             "{chunk}: a rejected call must not select"
         );
     }
@@ -215,27 +232,55 @@ fn models_use_rejects_invalid_options_without_selecting() {
 #[test]
 fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
     // Each fresh state walks `pairs` under its own hash seed; the rejection
-    // must not follow that walk.
-    let cases = [
+    // must not follow that walk. Every option in a case is bad, so the
+    // rejection names the first of its keys in check order: non-string
+    // keys by type name, then names bytewise.
+    let cases: [(&str, &[&str], &str); 3] = [
         (
-            "models.use('writer', { top_p = 1, max_tokens = 0, temperature = 3 })",
+            "{ top_p = 1, max_tokens = 0, temperature = 3 }",
+            &["max_tokens", "temperature", "top_p"],
             "models.use option max_tokens must be an integer in [1, 4294967295], got 0",
         ),
         (
-            "models.use('writer', { temperature = 3, top_p = 1 })",
+            "{ temperature = 3, top_p = 1 }",
+            &["temperature", "top_p"],
             "models.use option temperature 3 is outside the supported range [0.0, 2.0]",
         ),
         (
-            "models.use('writer', { 'x', [true] = 1, temperature = 3 })",
+            "{ 'x', [true] = 1, temperature = 3 }",
+            &["boolean", "integer", "temperature"],
             "models.use option names must be strings, got boolean",
         ),
     ];
-    for (chunk, expected) in cases {
-        for _ in 0..32 {
-            let error = models_vm().eval_err(chunk);
+    for (options, check_order, expected) in cases {
+        assert!(
+            expected.contains(check_order[0]),
+            "{options}: the expected rejection {expected:?} names the first key in check order"
+        );
+        let chunk = format!("models.use('writer', {options})");
+        for state in 0..32 {
+            let vm = models_vm();
+            let table: mlua::Table = vm.eval(&format!("return {options}"));
+            let mut keys = table
+                .pairs::<Value, Value>()
+                .map(|pair| {
+                    let (key, _) = pair.expect("a plain options table walks without error");
+                    option_check_order(&key)
+                })
+                .collect::<Vec<_>>();
+            keys.sort();
+            let sorted: Vec<String> = keys
+                .into_iter()
+                .map(|(_, label)| String::from_utf8_lossy(&label).into_owned())
+                .collect();
+            assert_eq!(
+                sorted, check_order,
+                "state {state}: {options} sorts its option keys into the check order"
+            );
+            let error = vm.eval_err(&chunk);
             assert!(
                 error.to_string().contains(expected),
-                "{chunk}: expected {expected:?} in {error}"
+                "state {state}: {chunk}: expected {expected:?} in {error}"
             );
         }
     }
@@ -286,7 +331,10 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
     let vm = models_vm();
     vm.eval::<()>("models.default('writer')");
     assert_eq!(
-        vm.models.lock().expect("set lock").default_alias(),
+        vm.models
+            .lock()
+            .expect("the model set mutex is not poisoned")
+            .default_alias(),
         Some("writer")
     );
 }
@@ -298,7 +346,10 @@ fn models_default_is_idempotent_for_the_same_label_and_refuses_a_change() {
     // same default must be a no-op.
     vm.eval::<()>("models.default('writer'); models.default('writer')");
     assert_eq!(
-        vm.models.lock().expect("set lock").default_alias(),
+        vm.models
+            .lock()
+            .expect("the model set mutex is not poisoned")
+            .default_alias(),
         Some("writer")
     );
     let error = vm.eval_err("models.default('critic')");
@@ -364,7 +415,7 @@ fn a_poisoned_model_set_reaches_the_caller_as_an_internal_error() {
     let vm = models_vm();
     vm.model_runtime()
         .lock()
-        .expect("runtime lock")
+        .expect("the model runtime mutex is not poisoned")
         .select(alias("writer"), UseOptions::default());
     let poisoner = Arc::clone(&vm.models);
     let _ = std::thread::spawn(move || {

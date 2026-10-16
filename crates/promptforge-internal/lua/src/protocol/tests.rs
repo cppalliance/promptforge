@@ -10,7 +10,7 @@
 
 use std::num::NonZeroU32;
 
-use mlua::{AnyUserData, Function, Lua, LuaSerdeExt, MultiValue, Value};
+use mlua::{AnyUserData, Function, IntoLuaMulti, Lua, LuaSerdeExt, MultiValue, Value};
 use serde_json::json;
 
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
@@ -40,23 +40,6 @@ fn test_binding() -> ModelBinding {
 fn handle_userdata(lua: &Lua) -> AnyUserData {
     lua.create_userdata(LuaModelHandle::from_binding(test_binding()))
         .expect("userdata creation cannot fail on a fresh VM")
-}
-
-fn request_table(lua: &Lua, op: &str) -> mlua::Table {
-    let table = lua.create_table().expect("table creation cannot fail");
-    table
-        .raw_set("op", op)
-        .expect("raw_set on a fresh table cannot fail");
-    table
-}
-
-fn set_var_snapshot(lua: &Lua, table: &mlua::Table) {
-    let var = lua.create_table().expect("table creation cannot fail");
-    var.raw_set("k", 1)
-        .expect("raw_set on a fresh table cannot fail");
-    table
-        .raw_set("var", var)
-        .expect("raw_set on a fresh table cannot fail");
 }
 
 fn assert_direct_yield(parse: YieldParse) {
@@ -92,12 +75,21 @@ fn failure_parts(lua: &Lua, result: Value) -> (String, String) {
         .expect("the failure table reads back through Lua")
 }
 
-/// Evaluates a Lua table constructor, so chat tests build message and
-/// opts tables from the exact source an author would write.
+/// Evaluates a Lua table constructor, so each test builds its yield,
+/// message, and opts tables from the exact source a shim or an author
+/// would write.
 fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
     lua.load(source)
         .eval()
         .expect("test table source evaluates")
+}
+
+/// Runs a Lua chunk that names `args` from `...` and returns a table, for
+/// a field no source text can write, such as a userdata.
+fn lua_table_with(lua: &Lua, chunk: &str, args: impl IntoLuaMulti) -> mlua::Table {
+    lua.load(chunk)
+        .call(args)
+        .expect("test table chunk returns a table")
 }
 
 mod answer;

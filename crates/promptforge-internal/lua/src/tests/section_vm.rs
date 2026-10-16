@@ -120,10 +120,13 @@ fn a_refused_injection_hands_back_the_vm_for_its_teardown() {
     assert!(matches!(error, Error::Internal(_)));
     assert_eq!(
         recorder.observations(),
-        [detail::LUA_TEARDOWN_STARTED, detail::LUA_TEARDOWN_SUCCEEDED]
-            .into_iter()
-            .map(|detail| ("Seed".to_owned(), detail.clone()))
-            .collect::<Vec<_>>(),
+        [
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED
+        ]
+        .into_iter()
+        .map(|boundary| ("Seed".to_owned(), boundary.clone()))
+        .collect::<Vec<_>>(),
         "the refused VM's teardown is observed"
     );
 }
@@ -222,7 +225,7 @@ fn section_vm_value_injection_bypasses_chunk_global_metatables() {
 fn section_vm_reports_store_operations_in_each_chunk() {
     let write = program("store.write('state.txt', args)");
     let read = program("return store.read('state.txt')");
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = TestVm::new()
         .section("Gather")
         .args("private input")
@@ -238,19 +241,20 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     assert_eq!(
         recorder.observations(),
         vec![
-            ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
-            ("Gather".to_owned(), detail::VFS_WRITE_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
-            ("Gather".to_owned(), detail::VFS_READ_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.clone(),),
-            ("Gather".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), boundary::LUA_CHUNK_STARTED.clone(),),
+            ("Gather".to_owned(), boundary::VFS_WRITE_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), boundary::LUA_CHUNK_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), boundary::LUA_CHUNK_STARTED.clone(),),
+            ("Gather".to_owned(), boundary::VFS_READ_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), boundary::LUA_CHUNK_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), boundary::LUA_TEARDOWN_STARTED.clone(),),
+            (
+                "Gather".to_owned(),
+                boundary::LUA_TEARDOWN_SUCCEEDED.clone(),
+            ),
         ]
     );
-    let trace = format!("{:?}", recorder.observations());
-    assert!(!trace.contains("private input"));
-    assert!(!trace.contains("state.txt"));
+    assert_identity_only(&recorder);
 }
 
 #[test]
@@ -312,7 +316,7 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let first = program("private_global = 'chunk secret'");
     let prologue = program("var.value = args");
     let epilog = program("return 'epilog done'");
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let vm = SectionVm::new(&test_nonce(), recorder.emitter(), "Gather")
         .expect("VM must build")
         .inject_values("private input", &json!({}), &fresh_access())
@@ -325,31 +329,28 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     run_scalar(&vm, &epilog, recorder.emitter(), "Gather").expect("epilog must run");
     vm.teardown(recorder.emitter(), "Gather");
 
-    let observations = recorder.observations();
     assert_eq!(
-        observations,
+        recorder.observations(),
         [
-            detail::LUA_CHUNK_STARTED,
-            detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_CHUNK_STARTED,
-            detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_CHUNK_STARTED,
-            detail::LUA_CHUNK_SUCCEEDED,
-            detail::LUA_TEARDOWN_STARTED,
-            detail::LUA_TEARDOWN_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::LUA_CHUNK_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::LUA_CHUNK_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::LUA_CHUNK_SUCCEEDED,
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Gather".to_owned(), detail.clone()))
+        .map(|boundary| ("Gather".to_owned(), boundary.clone()))
         .collect::<Vec<_>>()
     );
-    let trace = format!("{observations:?}");
-    assert!(!trace.contains("chunk secret"));
-    assert!(!trace.contains("private input"));
+    assert_identity_only(&recorder);
 }
 
 #[test]
 fn section_lifecycle_failures_report_their_phase() {
-    let recorder = Arc::new(Recorder::default());
+    let recorder = Recorder::default();
     let failing = program("error('private chunk failure')");
     let vm = TestVm::new()
         .emitter(recorder.emitter())
@@ -358,20 +359,19 @@ fn section_lifecycle_failures_report_their_phase() {
     run_scalar(&vm, &failing, recorder.emitter(), "Failing")
         .expect_err("the failing chunk must fail");
     vm.teardown();
-    let observations = recorder.observations();
     assert_eq!(
-        observations,
+        recorder.observations(),
         [
-            detail::LUA_CHUNK_STARTED,
-            detail::LUA_CHUNK_FAILED,
-            detail::LUA_TEARDOWN_STARTED,
-            detail::LUA_TEARDOWN_SUCCEEDED,
+            boundary::LUA_CHUNK_STARTED,
+            boundary::LUA_CHUNK_FAILED,
+            boundary::LUA_TEARDOWN_STARTED,
+            boundary::LUA_TEARDOWN_SUCCEEDED,
         ]
         .into_iter()
-        .map(|detail| ("Failing".to_owned(), detail.clone()))
+        .map(|boundary| ("Failing".to_owned(), boundary.clone()))
         .collect::<Vec<_>>()
     );
-    assert!(!format!("{observations:?}").contains("private chunk failure"));
+    assert_identity_only(&recorder);
 }
 
 #[test]

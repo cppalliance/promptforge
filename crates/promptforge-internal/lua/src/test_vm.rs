@@ -96,7 +96,7 @@ pub(crate) fn run_chunk(
 #[track_caller]
 pub(crate) fn tool_at(id: &str) -> ToolDescriptor {
     ToolDescriptor::new(
-        ToolId::parse(id).expect("valid id"),
+        ToolId::parse(id).expect("a fixture tool id is a valid tool id"),
         format!("{id} tool"),
         json!({ "type": "object" }),
     )

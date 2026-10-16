@@ -9,15 +9,11 @@ use super::*;
 #[test]
 fn spawn_parses_target_seeds_var_and_origin() {
     let lua = Lua::new();
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("input", "override").expect("raw_set");
-    let item = lua.create_table().expect("table creation cannot fail");
-    item.raw_set("name", "alpha").expect("raw_set");
-    table.raw_set("item", item).expect("raw_set");
-    table.raw_set("index", 3).expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '## Child', input = 'override', item = { name = 'alpha' }, \
+           index = 3, origin = 'author', var = { k = 1 } }",
+    );
     let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
     match request {
         Request::Spawn {
@@ -50,11 +46,11 @@ fn spawn_reads_the_fanout_mark_and_rejects_a_non_boolean_one() {
     // The mark is shim-produced: `true` from the fanout shim, absent from
     // `tasks.spawn`; any other shape is a hand-built yield.
     let lua = Lua::new();
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "### Worker").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    table.raw_set("fanout", true).expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '### Worker', origin = 'author', fanout = true, \
+           var = { k = 1 } }",
+    );
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::Spawn { via, .. } => assert_eq!(
             via,
@@ -64,21 +60,21 @@ fn spawn_reads_the_fanout_mark_and_rejects_a_non_boolean_one() {
         other => panic!("expected a spawn request, got {other:?}"),
     }
 
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "### Worker").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    table.raw_set("fanout", "yes").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '### Worker', origin = 'author', fanout = 'yes', \
+           var = { k = 1 } }",
+    );
     assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
 fn spawn_without_options_parses_every_seed_as_absent() {
     let lua = Lua::new();
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '## Child', origin = 'author', var = { k = 1 } }",
+    );
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::Spawn {
             input, item, index, ..
@@ -96,14 +92,11 @@ fn spawn_seed_shape_errors_are_the_calls_error() {
     // `item` and `index` are author options: a wrong shape returns as
     // the call's answer so `tasks.spawn` raises it at the call site.
     let lua = Lua::new();
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    let function = lua
-        .create_function(|_, ()| Ok(()))
-        .expect("function creation cannot fail");
-    table.raw_set("item", function).expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '## Child', origin = 'author', item = function() end, \
+           var = { k = 1 } }",
+    );
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Spawn(Err(Error::Lua(message)))) => {
             assert_eq!(message, "item must be JSON data, got function");
@@ -111,11 +104,10 @@ fn spawn_seed_shape_errors_are_the_calls_error() {
         other => panic!("expected the item call error, got {other:?}"),
     }
 
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    table.raw_set("index", -1).expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '## Child', origin = 'author', index = -1, var = { k = 1 } }",
+    );
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Spawn(Err(Error::Lua(message)))) => {
             assert_eq!(message, "index must be a non-negative integer, got -1");
@@ -127,19 +119,17 @@ fn spawn_seed_shape_errors_are_the_calls_error() {
 #[test]
 fn an_unconvertible_spawn_item_is_the_calls_error_naming_the_conversion_failure() {
     let lua = Lua::new();
-    let item = lua.create_table().expect("table creation cannot fail");
-    let member = lua
-        .create_function(|_, ()| Ok(()))
-        .expect("function creation cannot fail");
-    item.raw_set("f", member).expect("raw_set");
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = '## Child', origin = 'author', item = { f = function() end }, \
+           var = { k = 1 } }",
+    );
+    let item: Value = table
+        .raw_get("item")
+        .expect("the request table holds its item");
     let cause = lua
-        .from_value::<serde_json::Value>(Value::Table(item.clone()))
+        .from_value::<serde_json::Value>(item)
         .expect_err("a table holding a function has no JSON form");
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    table.raw_set("item", item).expect("raw_set");
-    set_var_snapshot(&lua, &table);
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Spawn(Err(Error::Lua(message)))) => {
             assert_eq!(
@@ -155,8 +145,7 @@ fn an_unconvertible_spawn_item_is_the_calls_error_naming_the_conversion_failure(
 fn a_malformed_task_id_is_the_calls_error_naming_the_parse_failure() {
     let lua = Lua::new();
     let cause = "0.x".parse::<TaskId>().expect_err("`0.x` is not a task id");
-    let table = request_table(&lua, "ready");
-    table.raw_set("task", "0.x").expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'ready', task = '0.x' }");
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Ready(Err(Error::Lua(message)))) => {
             assert_eq!(
@@ -173,27 +162,24 @@ fn spawn_with_an_unknown_or_missing_origin_is_a_malformed_yield() {
     // The origin is shim-produced, never an author argument: a wrong value
     // is a hand-built yield, not a call error.
     let lua = Lua::new();
-    for origin in [Value::Nil, Value::Integer(1)] {
-        let table = request_table(&lua, "spawn");
-        table.raw_set("target", "## Child").expect("raw_set");
-        table.raw_set("origin", origin).expect("raw_set");
-        set_var_snapshot(&lua, &table);
+    for origin in ["nil", "1", "'operator'"] {
+        let table = lua_table(
+            &lua,
+            &format!(
+                "{{ op = 'spawn', target = '## Child', origin = {origin}, var = {{ k = 1 }} }}"
+            ),
+        );
         assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
     }
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", "## Child").expect("raw_set");
-    table.raw_set("origin", "operator").expect("raw_set");
-    set_var_snapshot(&lua, &table);
-    assert_direct_yield(Request::from_yield(&lua, &Value::Table(table)));
 }
 
 #[test]
 fn a_spawn_with_a_non_string_target_keeps_the_resolve_error() {
     let lua = Lua::new();
-    let table = request_table(&lua, "spawn");
-    table.raw_set("target", 42).expect("raw_set");
-    table.raw_set("origin", "author").expect("raw_set");
-    set_var_snapshot(&lua, &table);
+    let table = lua_table(
+        &lua,
+        "{ op = 'spawn', target = 42, origin = 'author', var = { k = 1 } }",
+    );
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Spawn(Err(Error::LuaRuntime { message, .. }))) => {
             assert!(
@@ -208,16 +194,15 @@ fn a_spawn_with_a_non_string_target_keeps_the_resolve_error() {
 #[test]
 fn timer_parses_a_non_negative_finite_seconds_value_into_its_duration() {
     let lua = Lua::new();
-    for (value, expected) in [
-        (Value::Number(1.5), std::time::Duration::from_millis(1_500)),
-        (Value::Integer(30), std::time::Duration::from_secs(30)),
-        (Value::Number(0.0), std::time::Duration::ZERO),
+    for (seconds, expected) in [
+        ("1.5", std::time::Duration::from_millis(1_500)),
+        ("30", std::time::Duration::from_secs(30)),
+        ("0.0", std::time::Duration::ZERO),
     ] {
-        let table = request_table(&lua, "timer");
-        table.raw_set("seconds", value).expect("raw_set");
+        let table = lua_table(&lua, &format!("{{ op = 'timer', seconds = {seconds} }}"));
         match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
-            Request::Timer { duration } => assert_eq!(duration, expected),
-            other => panic!("expected a timer request, got {other:?}"),
+            Request::Timer { duration } => assert_eq!(duration, expected, "{seconds}"),
+            other => panic!("expected a timer request for {seconds}, got {other:?}"),
         }
     }
 }
@@ -228,17 +213,16 @@ fn timer_seconds_out_of_domain_are_the_calls_error() {
     // out-of-range, or non-numeric value returns as the call's answer
     // so the wait shim raises it at the call site and starts no timer.
     let lua = Lua::new();
-    let cases: [(Value, &str); 5] = [
-        (Value::Number(-1.0), "-1"),
-        (Value::Number(f64::NAN), "NaN"),
-        (Value::Number(f64::INFINITY), "inf"),
+    let cases = [
+        ("-1.0", "-1"),
+        ("0/0", "NaN"),
+        ("math.huge", "inf"),
         // Past `Duration`'s u64 seconds; Display renders the plain digits.
-        (Value::Number(1e20), "100000000000000000000"),
-        (Value::Nil, "nil"),
+        ("1e20", "100000000000000000000"),
+        ("nil", "nil"),
     ];
-    for (value, needle) in cases {
-        let table = request_table(&lua, "timer");
-        table.raw_set("seconds", value).expect("raw_set");
+    for (seconds, needle) in cases {
+        let table = lua_table(&lua, &format!("{{ op = 'timer', seconds = {seconds} }}"));
         match Request::from_yield(&lua, &Value::Table(table)) {
             YieldParse::Call(Answer::Timer(Err(Error::Lua(message)))) => {
                 assert!(
@@ -249,8 +233,7 @@ fn timer_seconds_out_of_domain_are_the_calls_error() {
             other => panic!("expected the timeout call error for {needle}, got {other:?}"),
         }
     }
-    let table = request_table(&lua, "timer");
-    table.raw_set("seconds", "soon").expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'timer', seconds = 'soon' }");
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Timer(Err(Error::Lua(message)))) => {
             assert_eq!(message, "timeout must be a number, got string");
@@ -266,14 +249,13 @@ fn concurrency_parses_an_optional_positive_whole_number_limit() {
     // field is the read-only form and a positive integer is a limit;
     // any other shape is a malformed yield.
     let lua = Lua::new();
-    let table = request_table(&lua, "concurrency");
+    let table = lua_table(&lua, "{ op = 'concurrency' }");
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::Concurrency { limit } => assert_eq!(limit, None, "no argument reads the limit"),
         other => panic!("expected a concurrency request, got {other:?}"),
     }
-    for (value, expected) in [(Value::Integer(1), 1), (Value::Integer(16), 16)] {
-        let table = request_table(&lua, "concurrency");
-        table.raw_set("limit", value).expect("raw_set");
+    for (limit, expected) in [("1", 1), ("16", 16)] {
+        let table = lua_table(&lua, &format!("{{ op = 'concurrency', limit = {limit} }}"));
         match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
             Request::Concurrency { limit } => {
                 assert_eq!(limit.map(std::num::NonZeroU64::get), Some(expected));
@@ -281,17 +263,11 @@ fn concurrency_parses_an_optional_positive_whole_number_limit() {
             other => panic!("expected a concurrency request, got {other:?}"),
         }
     }
-    for value in [
-        Value::Integer(0),
-        Value::Integer(-2),
-        Value::Number(2.5),
-        Value::String(lua.create_string("two").expect("a string")),
-    ] {
-        let table = request_table(&lua, "concurrency");
-        table.raw_set("limit", value).expect("raw_set");
+    for limit in ["0", "-2", "2.5", "'two'"] {
+        let table = lua_table(&lua, &format!("{{ op = 'concurrency', limit = {limit} }}"));
         match Request::from_yield(&lua, &Value::Table(table)) {
             YieldParse::Malformed(_) => {}
-            other => panic!("expected a malformed yield, got {other:?}"),
+            other => panic!("expected a malformed yield for {limit}, got {other:?}"),
         }
     }
 }
@@ -303,18 +279,14 @@ fn concurrency_converts_a_whole_number_float_and_refuses_an_out_of_range_one() {
     // it. A whole-number float past `u64` (an author's `1e20`) is the
     // call's error, raised at the call site like the shim's own refusal.
     let lua = Lua::new();
-    let table = request_table(&lua, "concurrency");
-    table.raw_set("limit", Value::Number(8.0)).expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'concurrency', limit = 8.0 }");
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
         Request::Concurrency { limit } => {
             assert_eq!(limit.map(std::num::NonZeroU64::get), Some(8));
         }
         other => panic!("expected a concurrency request, got {other:?}"),
     }
-    let table = request_table(&lua, "concurrency");
-    table
-        .raw_set("limit", Value::Number(1e20))
-        .expect("raw_set");
+    let table = lua_table(&lua, "{ op = 'concurrency', limit = 1e20 }");
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::Concurrency(Err(Error::Lua(message)))) => assert!(
             message.contains("positive whole number") && message.contains("64-bit"),
@@ -327,14 +299,19 @@ fn concurrency_converts_a_whole_number_float_and_refuses_an_out_of_range_one() {
 #[test]
 fn a_timer_answer_resumes_the_task_id_as_its_path_text() {
     let lua = Lua::new();
-    let task: TaskId = "0.3".parse().expect("a task id parses");
+    let task: TaskId = "0.3".parse().expect("`0.3` is a valid task id");
     let answer: Answer<Error> = Answer::Timer(Ok(task));
-    let (envelope, retained) = answer.into_envelope(&lua).expect("envelope renders");
+    let (envelope, retained) = answer
+        .into_envelope(&lua)
+        .expect("a timer answer renders its envelope");
     assert!(retained.is_none());
     let (ok, value) = echo_through_lua(&lua, envelope);
     assert!(ok);
     assert_eq!(
         value,
-        Value::String(lua.create_string("0.3").expect("string"))
+        Value::String(
+            lua.create_string("0.3")
+                .expect("a fresh VM creates a short string")
+        )
     );
 }
