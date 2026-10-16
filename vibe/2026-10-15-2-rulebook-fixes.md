@@ -7,37 +7,37 @@ todos:
     status: completed
   - id: step-01
     content: "Step 1: types and model-client (Role enum, Charset kind, non_exhaustive + constructors, FromStr, derives, catalog by value)"
-    status: pending
+    status: completed
   - id: step-02
     content: "Step 2: vfs (typed refusals, io cause, exhaustive is_mutation, case-insensitive claims, Stat/Entry constructors, splits)"
-    status: pending
+    status: completed
   - id: step-03
     content: "Step 3: lua core A and the lua error model (error-chain convention, Internal routing, QuotaResource, lib.rs cleanup)"
-    status: pending
+    status: completed
   - id: step-04
     content: "Step 4: lua core B (quota by downcast, TaskPhase/Blocked/SpawnVia, SectionVm encapsulation, key formatter)"
-    status: pending
+    status: completed
   - id: step-05
     content: "Step 5: parser and facade (ParseErrorKind::Internal, span Range, named iterators, module renames)"
-    status: pending
+    status: completed
   - id: step-06
     content: "Step 6: engine core and typed Duration timer (infer kind, error-chain, facade non_exhaustive, AnswerRecord)"
-    status: pending
+    status: completed
   - id: step-07
     content: "Step 7: engine scheduler (ChainKind, ChainStep, TaskBuiltin, CallDepthExceeded, kept causes, exhaustive matches)"
-    status: pending
+    status: completed
   - id: step-08
     content: "Step 8: engine test support (Observer argument struct, track_caller and Panics docs, non_exhaustive fixes, doc summaries)"
-    status: pending
+    status: completed
   - id: step-09
     content: "Step 9: engine execute tests (failure output, error-kind assertions, live_infer copies, explicit imports, lows)"
-    status: pending
+    status: completed
   - id: step-10
     content: "Step 10: lua tests (raw-event payload tests, invariant expect messages, lows)"
-    status: pending
+    status: completed
   - id: step-11
     content: "Step 11: workspace (MSRV + CI job, pulldown-cmark features, new lints and fallout)"
-    status: pending
+    status: completed
 isProject: false
 ---
 
