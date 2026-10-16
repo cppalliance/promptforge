@@ -732,7 +732,7 @@ Paths starting `P/` are under `crates/promptforge-internal/parser/src/`.
 </step-5>
 <step-6>
 
-### Step 6: engine core and the typed timer
+### Step 6: engine core and the typed timer [completed]
 
 - Component: `engine`
 - Tests: Verify runs these from the repository root in PowerShell, in this order.

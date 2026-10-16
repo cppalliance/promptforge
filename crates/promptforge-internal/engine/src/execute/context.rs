@@ -11,25 +11,43 @@ use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-#[path = "context-bound.rs"]
-mod bound;
-
 use promptforge_types::emitter::{Emitter, EventSink};
 use promptforge_types::event::Event;
 use promptforge_types::ids::{ChainId, TaskId};
-use promptforge_types::plugins::Prelude;
+use promptforge_types::plugins::{PluginId, Prelude};
+use promptforge_vfs::{Access, VfsRef};
 
 use crate::cancel::CancelHandle;
 use crate::lua::{ToolBinding, ToolSet};
 use crate::model::{ModelSet, ModelView};
 use crate::parser::Prompt;
 use crate::untrusted::GuardNonce;
-use promptforge_vfs::{Access, VfsRef};
 
 use super::config::{RunContext, RunLimits};
 use super::section_vm::{SectionVmSetup, VmSeed};
-use super::support::sys_json;
-use bound::{bound_model_set, bound_tool_set, catalog_bindings, derive_argv};
+
+#[path = "context-bound.rs"]
+mod bound;
+
+/// The context inputs a run moves into its state whole, rather than
+/// copying them out of a borrow: the `ui` snapshot, the Plugin preludes,
+/// and the roster.
+pub(super) struct OwnedInputs {
+    ui: Option<serde_json::Value>,
+    preludes: Vec<Prelude>,
+    roster: BTreeMap<PluginId, Option<String>>,
+}
+
+impl OwnedInputs {
+    /// Moves the inputs out of `ctx`, leaving their empty defaults behind.
+    pub(super) fn take(ctx: &mut RunContext) -> OwnedInputs {
+        OwnedInputs {
+            ui: ctx.ui.take(),
+            preludes: std::mem::take(&mut ctx.preludes),
+            roster: std::mem::take(&mut ctx.roster),
+        }
+    }
+}
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -116,19 +134,24 @@ pub(crate) struct RunState {
 }
 
 impl RunState {
-    /// Builds the context for one run of `prompt`. The turn counter is
-    /// minted here (starting at zero), as are the run's shared tool
-    /// and model sets - built from the catalog and the model bindings on
-    /// `ctx` (only the bindings come from
+    /// Builds the context for one run of `prompt` over `ctx` and the inputs
+    /// moved out of it. The turn counter is minted here (starting at zero),
+    /// as are the run's shared tool and model sets - built from the catalog,
+    /// the roster, and the model bindings (only the bindings come from
     /// [`RunContext::prepare`](super::RunContext::prepare), and they stay
     /// empty on a caller-built context that skipped it) - and the full-id
     /// bindings of `ctx`'s catalog; the nonce derives from `ctx`'s seed and
     /// `when` renders `ctx`'s `started_at`, so two contexts over the same
     /// inputs agree on both.
     #[must_use]
-    pub(super) fn new(prompt: Arc<Prompt>, args: &str, vfs: &VfsRef, ctx: &RunContext) -> Self {
-        let tool_set = Arc::new(bound_tool_set(&prompt, ctx));
-        let model_set = Arc::new(Mutex::new(bound_model_set(&prompt, ctx)));
+    pub(super) fn new(
+        prompt: Arc<Prompt>,
+        args: &str,
+        ctx: &RunContext,
+        owned: OwnedInputs,
+    ) -> Self {
+        let tool_set = Arc::new(bound::bound_tool_set(&prompt, ctx, owned.roster));
+        let model_set = Arc::new(Mutex::new(bound::bound_model_set(&prompt, ctx)));
         let execution: Arc<str> = Arc::from(ctx.name.as_str());
         // The root task's counter starts at the context's `provenance_start`:
         // past any parse events the caller put in the stream ahead of the
@@ -141,11 +164,12 @@ impl RunState {
             Arc::clone(&execution),
             ctx.report_debug,
         ));
-        let derived_argv = derive_argv(&prompt, args).map(Arc::from);
+        let derived_argv = bound::derive_argv(&prompt, args).map(Arc::from);
+        let models = Arc::clone(&model_set);
         Self {
             prompt,
             nonce: GuardNonce::from_seed(&ctx.seed),
-            vfs: vfs.clone(),
+            vfs: ctx.vfs.clone(),
             execution,
             args: Arc::from(args),
             argv: derived_argv,
@@ -155,12 +179,12 @@ impl RunState {
             cancel: ctx.cancel.clone(),
             turns: Arc::new(AtomicU32::new(0)),
             tool_set,
-            catalog_bindings: Arc::new(catalog_bindings(ctx)),
-            models: model_set.clone(),
+            catalog_bindings: Arc::new(bound::catalog_bindings(ctx)),
+            models,
             model_set,
             when: Arc::from(ctx.started_at.to_rfc3339()),
-            ui: ctx.ui.clone().map(Arc::new),
-            preludes: ctx.preludes.as_slice().into(),
+            ui: owned.ui.map(Arc::new),
+            preludes: owned.preludes.into(),
             #[cfg(test)]
             raw_shims: false,
         }
@@ -228,9 +252,10 @@ impl RunState {
         &self.execution
     }
 
-    /// The run's argument string.
-    pub(super) fn args(&self) -> &str {
-        &self.args
+    /// The run's argument string as the shared handle, for a renderer that
+    /// outlives this borrow.
+    pub(super) fn args_shared(&self) -> Arc<str> {
+        Arc::clone(&self.args)
     }
 
     /// The run's `argv`: the parsed form of the args string, or `None`
@@ -238,6 +263,12 @@ impl RunState {
     /// behind at the freeze.
     pub(super) fn argv(&self) -> Option<&serde_json::Value> {
         self.argv.as_deref()
+    }
+
+    /// The run's `argv` as the shared handle, for a renderer that outlives
+    /// this borrow.
+    pub(super) fn argv_shared(&self) -> Option<Arc<serde_json::Value>> {
+        self.argv.as_ref().map(Arc::clone)
     }
 
     /// The run's resource limits.
@@ -319,7 +350,7 @@ impl RunState {
     #[must_use]
     pub(super) fn with_args(&self, args: &str) -> Self {
         let mut ctx = self.clone();
-        ctx.argv = derive_argv(&self.prompt, args).map(Arc::from);
+        ctx.argv = bound::derive_argv(&self.prompt, args).map(Arc::from);
         ctx.args = Arc::from(args);
         ctx
     }
@@ -366,23 +397,33 @@ impl RunState {
         }
     }
 
-    /// The `sys` JSON for one section or arm of this run under the run's
-    /// `when`, with the driver supplying only the section entry's
-    /// hierarchical id, the entering chain's task id, and the section name.
+    /// The `sys` JSON for one section or arm of this run: the six shared
+    /// fields in one construction, with the driver supplying only the
+    /// section entry's hierarchical id, the entering chain's task id, and
+    /// the section name. A driver with an extra field (`index`, on a
+    /// spawned chain) inserts it at its own call site.
+    ///
+    /// `when` is the run's `started_at` rendered as RFC 3339, the same
+    /// string in every section; `id` is the section entry's hierarchical id
+    /// (the entering chain's id extended by its local entry counter),
+    /// rendered as a dot-separated path; `taskid` is the id of the nearest
+    /// enclosing task (the main walk is task `0`; a `call` child reports
+    /// its caller's task), the handle a chain passes to `tasks.*` to speak
+    /// about itself.
     pub(super) fn sys_json(
         &self,
         id: &str,
         task_id: &TaskId,
         section_name: &str,
     ) -> serde_json::Value {
-        sys_json(
-            &self.when,
-            id,
-            &task_id.to_string(),
-            section_name,
-            &self.execution,
-            self.section_count(),
-        )
+        serde_json::json!({
+            "when": &*self.when,
+            "id": id,
+            "taskid": task_id.to_string(),
+            "section_name": section_name,
+            "execution": &*self.execution,
+            "section_count": self.section_count(),
+        })
     }
 }
 

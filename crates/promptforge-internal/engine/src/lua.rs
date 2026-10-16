@@ -13,7 +13,7 @@
 
 // The store operation behind `execute::perform_vfs_op`, the entry point
 // a caller answers a `Vfs` effect through, and the
-// model-facing message renderer a store failure carries.
+// model-facing message renderers a store failure carries.
 pub(crate) use promptforge_lua::{
     Argv, CoroStep, Library, LibraryBlock, LibraryKey, LuaBlockResult, MessageList, ModelReport,
     NonEmpty, OverflowReason, ProseState, QuotaResource, ScriptReport, SectionText, SectionVm,
@@ -22,10 +22,7 @@ pub(crate) use promptforge_lua::{
     install_store_shims, install_ui, output_reserve, precheck, prepare_dispatch,
     prepare_model_dispatch, project_messages, render_item, resolve_model_binding,
 };
-pub(crate) use promptforge_lua::{run_store_op, store_error_message};
-
-#[cfg(test)]
-pub(crate) use promptforge_lua::LuaProgram;
+pub(crate) use promptforge_lua::{run_store_op, store_error_message, store_probe_message};
 
 #[cfg(test)]
 mod tests;

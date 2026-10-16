@@ -114,10 +114,10 @@ fn shim_via(table: &mlua::Table) -> std::result::Result<SpawnVia, FieldFailure> 
 }
 
 /// Parses a `timer` request: the author-supplied `seconds` (the wait's
-/// `opts.timeout`). The value must be a number that `Duration` can hold -
-/// non-negative, finite, and in range - so the scheduler's sleep never
-/// meets a value it cannot represent; any other shape is the call's
-/// error, raised at the wait's call site before a timer starts.
+/// `opts.timeout`), carried on as the `Duration` it converts to. The value
+/// must be a number that `Duration` can hold - non-negative, finite, and in
+/// range; any other shape is the call's error, raised at the wait's call
+/// site before a timer starts.
 pub(super) fn parse_timer(table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
     let seconds = match table.raw_get::<Value>("seconds") {
         Ok(Value::Number(seconds)) => seconds,
@@ -136,12 +136,12 @@ pub(super) fn parse_timer(table: &mlua::Table) -> std::result::Result<Request, F
         }
         Err(_) => return Err(FieldFailure::Malformed),
     };
-    if Duration::try_from_secs_f64(seconds).is_err() {
-        return Err(call_error(format!(
+    match Duration::try_from_secs_f64(seconds) {
+        Ok(duration) => Ok(Request::Timer { duration }),
+        Err(_) => Err(call_error(format!(
             "timeout must be a non-negative finite number of seconds, got {seconds}"
-        )));
+        ))),
     }
-    Ok(Request::Timer { seconds })
 }
 
 /// Parses a `join_any` request: the shim-built `tasks` sequence of id

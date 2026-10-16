@@ -295,7 +295,7 @@ fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
     let trace = Scenario::new(source.build()).bound().chat(&gateway).run();
     let rendered = trace.error().to_string();
     assert!(
-        rendered.contains("model inference received tool calls but no tools were advertised"),
+        rendered.contains("the round sent tool calls, but no tools were advertised"),
         "the violation must use neutral wording: {rendered}"
     );
     assert!(

@@ -59,8 +59,10 @@ pub enum RunErrorKind {
 /// The error's [`RunErrorKind`] says which of the two it is, and the
 /// extension of `path` says so too. Use the kind to branch in code, the
 /// error message to show a reader, and the location to navigate to the
-/// fault.
+/// fault. Build one with [`new`](SourceLocation::new) and the `with_`
+/// methods.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SourceLocation {
     /// The prompt name or Rust source file where the failure occurred.
     ///
@@ -86,12 +88,50 @@ pub struct SourceLocation {
     pub span: Option<Range<usize>>,
 }
 
+impl SourceLocation {
+    /// Builds a location in `path` with no line, column, or span.
+    #[must_use]
+    pub fn new(path: impl Into<String>) -> SourceLocation {
+        SourceLocation {
+            path: path.into(),
+            line: None,
+            column: None,
+            span: None,
+        }
+    }
+
+    /// Sets the 1-based line.
+    #[must_use]
+    pub fn with_line(mut self, line: Option<u32>) -> SourceLocation {
+        self.line = line;
+        self
+    }
+
+    /// Sets the 1-based column.
+    #[must_use]
+    pub fn with_column(mut self, column: Option<u32>) -> SourceLocation {
+        self.column = column;
+        self
+    }
+
+    /// Sets the byte span of the offending region in the document body.
+    #[must_use]
+    pub fn with_span(mut self, span: Option<Range<usize>>) -> SourceLocation {
+        self.span = span;
+        self
+    }
+}
+
 /// The error a failed prompt run reports.
 ///
 /// A run that fails ends with [`Step::Done`](super::Step::Done), whose
 /// result is [`RunResult::Failure`](super::RunResult::Failure) holding this
 /// error. Use [`kind`](RunError::kind) to classify the failure in code. The
-/// underlying cause stays available through [`std::error::Error::source`].
+/// message is self-contained: when the failure keeps an originating error,
+/// the message already holds that error's text, and
+/// [`cause`](RunError::cause) returns the error itself. A failure whose
+/// message does not hold its underlying error, such as a model round's,
+/// keeps it behind [`std::error::Error::source`] instead.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct RunError {
@@ -146,13 +186,49 @@ impl RunError {
         &self.inner
     }
 
+    /// Returns the originating error this failure keeps, when it has one.
+    ///
+    /// A Lua failure keeps the Lua error, a tool failure the tool's own
+    /// error, a store failure the store's structured error, and a
+    /// frontmatter failure the YAML decode failure. The message already
+    /// holds the cause's text, so [`std::error::Error::source`] does not
+    /// return it again, and a printer that walks the source chain shows the
+    /// text once.
+    #[must_use]
+    pub fn cause(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
+        self.inner.cause()
+    }
+
     /// Returns `true` when retrying the run may succeed (transient transport or
     /// backend failures).
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match &self.inner {
             Error::Completion(error) => error.is_retryable(),
-            _ => false,
+            Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::BindSchema { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::TasksLive { .. }
+            | Error::TaskNotOwned { .. }
+            | Error::TaskConsumed { .. }
+            | Error::TaskCancelled { .. }
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnboundToolCall { .. }
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::RequirementsUnmet { .. }
+            | Error::Tool { .. }
+            | Error::Internal { .. }
+            | Error::LuaQuota { .. }
+            | Error::ContextExhausted { .. }
+            | Error::Store { .. }
+            | Error::Determinism(_) => false,
         }
     }
 
@@ -168,31 +244,48 @@ impl RunError {
     #[must_use]
     pub fn location(&self) -> Option<SourceLocation> {
         match &self.inner {
-            Error::ParseFrontmatter { line, column, .. } => Some(SourceLocation {
-                path: "<prompt>".to_owned(),
-                line: *line,
-                column: *column,
-                span: None,
-            }),
+            Error::ParseFrontmatter { line, column, .. } => Some(
+                SourceLocation::new("<prompt>")
+                    .with_line(*line)
+                    .with_column(*column),
+            ),
             Error::ParseStructured {
                 name,
                 line,
                 column,
                 span,
                 ..
-            } => Some(SourceLocation {
-                path: name.clone().unwrap_or_else(|| "<prompt>".to_owned()),
-                line: *line,
-                column: *column,
-                span: span.map(|(start, end)| start..end),
-            }),
-            Error::Internal { file, line, .. } => Some(SourceLocation {
-                path: (*file).to_owned(),
-                line: Some(*line),
-                column: None,
-                span: None,
-            }),
-            _ => None,
+            } => Some(
+                SourceLocation::new(name.as_deref().unwrap_or("<prompt>"))
+                    .with_line(*line)
+                    .with_column(*column)
+                    .with_span(span.map(|(start, end)| start..end)),
+            ),
+            Error::Internal { file, line, .. } => {
+                Some(SourceLocation::new(*file).with_line(Some(*line)))
+            }
+            Error::Completion(_)
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::BindSchema { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::TasksLive { .. }
+            | Error::TaskNotOwned { .. }
+            | Error::TaskConsumed { .. }
+            | Error::TaskCancelled { .. }
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnboundToolCall { .. }
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::RequirementsUnmet { .. }
+            | Error::Tool { .. }
+            | Error::LuaQuota { .. }
+            | Error::ContextExhausted { .. }
+            | Error::Store { .. }
+            | Error::Determinism(_) => None,
         }
     }
 }

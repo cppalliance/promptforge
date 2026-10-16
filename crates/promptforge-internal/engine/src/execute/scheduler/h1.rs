@@ -13,12 +13,11 @@ use std::sync::Arc;
 
 use promptforge_types::ids::ChainId;
 
-use crate::execute::support::GENERIC_COMPLETION;
 use crate::execute::walk_target::{SlicePath, h1_visible_sections, section_position};
 use crate::heading_address::{self, Visible};
 use crate::{Error, Result};
 
-use super::{ChainIndex, Counters, Scheduler, prompt_origin};
+use super::{ChainIndex, Counters, GENERIC_COMPLETION, Scheduler, prompt_origin};
 
 impl Scheduler {
     /// Starts the H1 pass as the driver loop's first chain: the prompt's
@@ -78,7 +77,7 @@ impl Scheduler {
         start: usize,
     ) -> Result<()> {
         let chain = &mut self.chains[id.index()];
-        let Some(mut frame) = chain.frame.take() else {
+        let Some(frame) = chain.frame.take() else {
             return Err(Error::internal("the H1 pass ends with a live frame"));
         };
         let var = frame.read_var()?;

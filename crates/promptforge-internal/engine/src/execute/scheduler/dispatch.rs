@@ -14,7 +14,6 @@ use std::sync::Arc;
 use crate::execute::protocol::{Answer, Blocked, Request, VfsOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
-use crate::execute::support::MAX_CALL_DEPTH;
 use crate::lua::{ToolSet, resolve_model_binding};
 use crate::model::Message;
 use crate::model::ModelBinding;
@@ -24,7 +23,7 @@ use promptforge_types::event::lifecycle;
 use promptforge_types::event::lifecycle::Lifecycle;
 use promptforge_vfs::VfsError;
 
-use super::{ChainIndex, Continuation, Counters, Scheduler, VfsContinuation};
+use super::{ChainIndex, Continuation, Counters, MAX_CALL_DEPTH, Scheduler, VfsContinuation};
 
 /// The error for a name that resolves to no tool in the run: the name and
 /// the id of every tool the run offers, so the message reads required
@@ -149,8 +148,8 @@ impl Scheduler {
                 );
                 Ok(())
             }
-            Request::Timer { seconds } => {
-                self.dispatch_timer(id, seconds);
+            Request::Timer { duration } => {
+                self.dispatch_timer(id, duration);
                 Ok(())
             }
             Request::JoinAny { tasks } => {

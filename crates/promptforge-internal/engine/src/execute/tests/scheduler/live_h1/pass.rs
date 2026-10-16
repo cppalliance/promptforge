@@ -180,7 +180,7 @@ fn a_failing_library_required_from_h1_ends_the_run_as_requirements_unmet() {
     let trace = h1_scenario(md).run();
 
     let error = trace.error();
-    let Error::RequirementsUnmet { notice } = error.inner() else {
+    let Error::RequirementsUnmet { notice, .. } = error.inner() else {
         panic!("the library's raise is the failed H1 gate: {error}");
     };
     assert!(

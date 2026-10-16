@@ -51,11 +51,7 @@ impl InferenceBroker for Offline {
 struct Clock;
 
 impl Timer for Clock {
-    fn sleep(&self, seconds: f64) -> BoxFuture<()> {
-        // The Engine refuses a timeout that `Duration` can't hold before it
-        // issues the effect, so the zero fallback never fires; if it did,
-        // waking at once beats never waking.
-        let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO);
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         Box::pin(tokio::time::sleep(duration))
     }
 }

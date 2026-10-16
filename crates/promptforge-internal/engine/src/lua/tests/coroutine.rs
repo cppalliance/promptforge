@@ -4,11 +4,11 @@
 //! `@`-named chunk errors rendering verbatim, and scalar returns and VM
 //! state rolling forward across block coroutines.
 
-use promptforge_lua::Error;
+use promptforge_lua::{Error, LuaProgram};
 
 use crate::cancel::CancelHandle;
 use crate::execute::protocol::{Request, YieldParse};
-use crate::lua::{CoroStep, LuaBlockResult, LuaProgram};
+use crate::lua::{CoroStep, LuaBlockResult};
 use crate::model::ModelSet;
 
 use super::{compile_block, scheduler_vm};

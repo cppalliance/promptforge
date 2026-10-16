@@ -28,6 +28,7 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use promptforge::effect::{Round, ToolCallOrigin};
 use promptforge::model::{
@@ -113,8 +114,8 @@ pub trait ToolPerformer: Send + Sync {
 /// The Harness polls each sleep inside the run's own future, so a timer
 /// must not block while polled. It waits on the Host's own runtime.
 pub trait Timer: Send + Sync {
-    /// Resolves once `seconds` have passed.
-    fn sleep(&self, seconds: f64) -> BoxFuture<()>;
+    /// Resolves once `duration` has passed.
+    fn sleep(&self, duration: Duration) -> BoxFuture<()>;
 }
 
 /// The Harness's performers: one for each chat, tool-call, and timer

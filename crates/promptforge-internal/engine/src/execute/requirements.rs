@@ -87,6 +87,7 @@ impl Requirements {
         (!self.is_satisfied()).then(|| {
             super::RunError::from(crate::Error::RequirementsUnmet {
                 notice: self.notice(),
+                cause: None,
             })
         })
     }
@@ -120,19 +121,20 @@ impl Requirements {
             );
         }
         for unmet in &self.unmet_requirements {
-            let line = match unmet.check {
-                RequirementCheck::ContextMinimum => format!(
-                    "role '{}': requires a context of at least {} tokens; \
+            let _ = match unmet.check {
+                RequirementCheck::ContextMinimum => write!(
+                    notice,
+                    "\n- role '{}': requires a context of at least {} tokens; \
                      the current model provides {}",
                     unmet.role, unmet.required, unmet.actual
                 ),
-                RequirementCheck::HardKeyword => format!(
-                    "role '{}': requires '{}'; \
+                RequirementCheck::HardKeyword => write!(
+                    notice,
+                    "\n- role '{}': requires '{}'; \
                      the current model's thinking capability is {}",
                     unmet.role, unmet.required, unmet.actual
                 ),
             };
-            let _ = write!(notice, "\n- {line}");
         }
         notice
     }

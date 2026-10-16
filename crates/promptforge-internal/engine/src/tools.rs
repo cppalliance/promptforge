@@ -12,11 +12,3 @@
 //! and other crates name the vocabulary through `promptforge_types::tools`.
 
 pub(crate) use promptforge_types::tools::ToolCatalog;
-#[cfg(test)]
-pub(crate) use promptforge_types::tools::{
-    OutputTrust, ToolError, ToolErrorKind, ToolId, ToolOutput,
-};
-
-#[cfg(test)]
-#[path = "tools-tests.rs"]
-mod tests;

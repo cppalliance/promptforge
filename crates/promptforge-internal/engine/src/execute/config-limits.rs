@@ -31,7 +31,7 @@ nz!(nz_usize, NonZeroUsize, usize);
 /// The defaults are built-in constants and are safe to use as they are. A
 /// prompt's frontmatter `max_tool_iterations` field, when present, overrides
 /// [`RunLimits::max_tool_iterations`] for that prompt.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct RunLimits {
     max_tool_iterations: NonZeroU32,
@@ -189,5 +189,17 @@ mod tests {
     fn the_tool_iteration_builder_replaces_the_default_limit() {
         let limits = RunLimits::new().max_tool_iterations(const { nz_u32(8) });
         assert_eq!(limits.tool_iterations().get(), 8);
+    }
+
+    #[test]
+    fn limits_compare_and_hash_by_value() {
+        let tighter = RunLimits::new().max_tool_iterations(const { nz_u32(8) });
+        assert_eq!(RunLimits::new(), RunLimits::default());
+        assert_ne!(RunLimits::new(), tighter);
+        let distinct: std::collections::HashSet<RunLimits> =
+            [RunLimits::new(), RunLimits::default(), tighter]
+                .into_iter()
+                .collect();
+        assert_eq!(distinct.len(), 2, "equal limits hash alike");
     }
 }

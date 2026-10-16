@@ -11,6 +11,7 @@ use promptforge_types::plugins::{PluginId, Prelude};
 use promptforge_types::replay::Flags;
 use promptforge_types::seed::{RunSeed, RunUid};
 use promptforge_types::timestamp::Timestamp;
+use promptforge_vfs::VfsRef;
 
 pub use limits::RunLimits;
 
@@ -18,10 +19,9 @@ use crate::cancel::CancelHandle;
 use crate::model::ModelDescriptor;
 use crate::parser::Prompt;
 use crate::tools::ToolCatalog;
-use promptforge_vfs::VfsRef;
 
 use super::bindings::ModelBindings;
-use super::fill::fill_model_bindings;
+use super::fill;
 use super::requirements::{Requirements, UnavailablePlugin};
 
 /// The inputs for one run of a prompt.
@@ -333,7 +333,8 @@ impl RunContext {
     #[must_use]
     pub fn prepare(mut self, prompt: &Prompt) -> (RunContext, Requirements) {
         let mut requirements = Requirements::default();
-        self.model_bindings = fill_model_bindings(prompt, self.model.as_ref(), &mut requirements);
+        self.model_bindings =
+            fill::fill_model_bindings(prompt, self.model.as_ref(), &mut requirements);
         (self, requirements)
     }
 

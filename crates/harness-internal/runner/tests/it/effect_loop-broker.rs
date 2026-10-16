@@ -120,17 +120,11 @@ async fn the_broker_receives_each_rounds_round() {
         vec![
             (
                 "infer round".to_owned(),
-                Round {
-                    id: RoundId::new(0),
-                    origin: ReplyOrigin::Infer
-                }
+                Round::new(RoundId::new(0), ReplyOrigin::Infer)
             ),
             (
                 "chat round".to_owned(),
-                Round {
-                    id: RoundId::new(1),
-                    origin: ReplyOrigin::Chat
-                }
+                Round::new(RoundId::new(1), ReplyOrigin::Chat)
             ),
         ],
         "the infer round is round 0 from `Infer`, and the chat round is round 1 from `Chat`"

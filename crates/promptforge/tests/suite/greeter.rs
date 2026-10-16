@@ -38,7 +38,9 @@ fn answering_each_store_effect_from_the_runs_store_returns_the_note() -> TestRes
 #[test]
 fn the_example_answers_a_timer_as_fired_at_once() {
     assert!(matches!(
-        answer(Effect::Timer { seconds: 3_600.0 }),
+        answer(Effect::Timer {
+            duration: std::time::Duration::from_secs(3_600)
+        }),
         EffectAnswer::Timer
     ));
 }

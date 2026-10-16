@@ -4,13 +4,17 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use promptforge_lua::LuaProgram;
+use promptforge_model_client::client::Role;
+use promptforge_types::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
+use promptforge_vfs::{Access, VfsError};
 use serde_json::{Value, json};
 
 use super::scope::prepare_scoped_tools;
-use super::support::advance_turn;
+use super::turn::advance_turn;
 use super::*;
 use crate::Error;
-use crate::lua::{LuaProgram, SectionVm, current_tool_bindings};
+use crate::lua::{SectionVm, current_tool_bindings};
 use crate::model::{ModelDescriptor, ModelSet};
 use crate::parser::ParseErrorKind;
 use crate::parser::Prompt;
@@ -21,10 +25,7 @@ use crate::test_support::scripted_chat::{
 };
 use crate::test_support::seeded::Seeded;
 use crate::test_support::{FnTool, fresh_access};
-use crate::tools::{ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
-use promptforge_model_client::client::Role;
-use promptforge_vfs::{Access, VfsError};
 
 mod context;
 mod fixtures;

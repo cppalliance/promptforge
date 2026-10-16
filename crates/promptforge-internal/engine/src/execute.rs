@@ -16,6 +16,7 @@
 //! - `context` - the ambient `RunState` run state.
 //! - `error` - the public [`RunError`] and its stable [`RunErrorKind`].
 //! - `fill` - prepare's model-role fill function.
+//! - `infer` - the nested-inference round's answer.
 //! - `protocol` - the coroutine request/answer types for the yield/resume
 //!   boundary.
 //! - `requirements` - the preflight [`Requirements`] report.
@@ -31,8 +32,8 @@
 //!   scheduler's chains construct, run, and tear down.
 //! - `section_vm` - the section VM setup half shared by the walk and the
 //!   fanout arm.
-//! - `support` - shared helpers.
-//! - `tools` - the nested-inference round's answer.
+//! - `turn` - the model-turn counter and the round report every served
+//!   completion goes through.
 //! - `walk_target` - the walk-target resolution helpers.
 
 mod bindings;
@@ -40,6 +41,7 @@ mod config;
 pub(crate) mod context;
 mod error;
 mod fill;
+mod infer;
 pub(crate) mod protocol;
 mod requirements;
 mod run;
@@ -47,8 +49,7 @@ pub(crate) mod scheduler;
 mod scope;
 mod section_context;
 pub(crate) mod section_vm;
-mod support;
-mod tools;
+mod turn;
 mod walk_target;
 
 // Public API surface.
@@ -59,8 +60,8 @@ pub use requirements::{
     MissingService, RequirementCheck, Requirements, UnavailablePlugin, UnmetRequirement,
 };
 pub use run::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round, Run, Step,
-    ToolAnswerRecord, ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, FailureRecord,
+    Round, Run, Step, ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 // The store vocabulary a `Vfs` effect holds and its answer returns, for
 // the Engine's own store handling; other crates name it from `promptforge_lua`.
@@ -135,7 +136,11 @@ pub fn perform_vfs_op(
 ///   bound model fails to meet
 ///   (a context minimum or a hard keyword), or an H1 block that failed the
 ///   prompt's hard gate.
+///
+/// The enum is `#[non_exhaustive]`, so a `match` on it needs a wildcard
+/// arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunResult {
     /// The run completed with its final text. The name matches
     /// `Result::Ok`, so patterns must write `RunResult::Ok` wherever

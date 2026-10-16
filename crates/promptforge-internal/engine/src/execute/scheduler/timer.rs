@@ -39,23 +39,16 @@ impl Scheduler {
     /// effect, and resumes the caller at once with the id. A dispatch
     /// failure is the call's answer, resumed into the caller so the wait
     /// shim raises it before any wait.
-    pub(super) fn dispatch_timer(&mut self, id: ChainIndex, seconds: f64) {
-        let answer = Answer::Timer(self.prepare_timer(id, seconds));
+    pub(super) fn dispatch_timer(&mut self, id: ChainIndex, duration: Duration) {
+        let answer = Answer::Timer(self.prepare_timer(id, duration));
         self.answer_inline(id, answer);
     }
 
     /// The fallible half of timer dispatch, shared with the model's
-    /// `await_tasks`: the duration check (the parse already bounds it, so
-    /// a failure here is defensive), the id allocation, the issued effect,
-    /// and the slot.
-    pub(super) fn prepare_timer(&mut self, id: ChainIndex, seconds: f64) -> Result<TaskId> {
-        Duration::try_from_secs_f64(seconds).map_err(|_| {
-            Error::Lua(format!(
-                "timeout must be a non-negative finite number of seconds, got {seconds}"
-            ))
-        })?;
+    /// `await_tasks`: the id allocation, the issued effect, and the slot.
+    pub(super) fn prepare_timer(&mut self, id: ChainIndex, duration: Duration) -> Result<TaskId> {
         let task = TaskId::from(self.allocate_child_id(id)?);
-        let effect = self.issue(id, Effect::Timer { seconds }, Continuation::Timer);
+        let effect = self.issue(id, Effect::Timer { duration }, Continuation::Timer);
         self.tasks.insert(
             task.clone(),
             TaskSlot {

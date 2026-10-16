@@ -10,8 +10,9 @@ use promptforge_lua::Error as LuaError;
 use promptforge_model_client::model::ModelSetError;
 use promptforge_parser::Error as ParserError;
 use promptforge_types::ids::TaskId;
+use promptforge_vfs::VfsError;
 
-use super::Error;
+use super::{BoxedSource, Error};
 
 impl Error {
     /// Builds a parse failure with a stable classification and no source span.
@@ -42,50 +43,60 @@ impl Error {
     /// at the broken invariant.
     #[track_caller]
     pub(crate) fn internal(message: &'static str) -> Error {
-        Error::internal_owned(Cow::Borrowed(message))
+        Error::internal_owned(Cow::Borrowed(message), None)
+    }
+
+    /// Builds an internal-invariant failure that keeps the failure which
+    /// broke the invariant as its cause, capturing the call site as
+    /// [`Error::internal`] does.
+    #[track_caller]
+    pub(crate) fn internal_with_cause(
+        message: &'static str,
+        cause: impl Into<BoxedSource>,
+    ) -> Error {
+        Error::internal_owned(Cow::Borrowed(message), Some(cause.into()))
     }
 
     /// Builds an internal-invariant failure whose message may name a value,
     /// capturing the call site as [`Error::internal`] does.
     #[track_caller]
-    fn internal_owned(message: Cow<'static, str>) -> Error {
+    fn internal_owned(message: Cow<'static, str>, cause: Option<BoxedSource>) -> Error {
         let location = std::panic::Location::caller();
         Error::Internal {
             message,
             file: location.file(),
             line: location.line(),
+            cause,
         }
     }
 
     /// Wraps a store failure that has no operation to render - a handle
-    /// acquisition, the declared-store probe - as [`Error::Store`] with
-    /// the fixed probe message.
-    pub(crate) fn store(source: promptforge_vfs::VfsError) -> Error {
+    /// acquisition, the declared-store probe - as [`Error::Store`]: a run
+    /// that declares no store is told so, and any other failure follows the
+    /// fixed probe text.
+    pub(crate) fn store(cause: VfsError) -> Error {
         Error::Store {
-            message: "store operation failed".to_owned(),
-            source,
+            message: crate::lua::store_probe_message(&cause),
+            cause,
         }
     }
 
     /// Wraps one store operation's failure as [`Error::Store`], rendering
     /// the model-facing message with the operation for its wording.
-    pub(crate) fn store_op(
-        op: &promptforge_lua::VfsOp,
-        source: promptforge_vfs::VfsError,
-    ) -> Error {
+    pub(crate) fn store_op(op: &promptforge_lua::VfsOp, cause: VfsError) -> Error {
         Error::Store {
-            message: crate::lua::store_error_message(op, &source),
-            source,
+            message: crate::lua::store_error_message(op, &cause),
+            cause,
         }
     }
 
-    /// Wraps an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
-    /// `#[source]` cause rather than flattening it to a string.
+    /// Wraps an `mlua` failure as [`Error::LuaRuntime`], keeping it as the
+    /// cause rather than flattening it to a string.
     #[cfg(test)]
-    pub(super) fn lua(source: mlua::Error) -> Error {
+    pub(super) fn lua(cause: mlua::Error) -> Error {
         Error::LuaRuntime {
-            message: source.to_string(),
-            source: Box::new(source),
+            message: cause.to_string(),
+            cause: Box::new(cause),
         }
     }
 }
@@ -126,7 +137,7 @@ impl From<crate::parser::ParseError> for Error {
                 column,
             } => Error::ParseFrontmatter {
                 message,
-                source: cause,
+                cause,
                 line: line.map(NonZeroU32::get),
                 column: column.map(NonZeroU32::get),
             },
@@ -160,10 +171,7 @@ impl From<LuaError> for Error {
     fn from(error: LuaError) -> Error {
         match error {
             LuaError::Lua(message) => Error::Lua(message),
-            LuaError::LuaRuntime { message, cause } => Error::LuaRuntime {
-                message,
-                source: cause,
-            },
+            LuaError::LuaRuntime { message, cause } => Error::LuaRuntime { message, cause },
             LuaError::LuaCompile {
                 location,
                 source_line,
@@ -175,20 +183,14 @@ impl From<LuaError> for Error {
                 source_line,
                 lua_source,
                 message,
-                source: cause,
+                cause,
             },
             LuaError::LuaQuota { resource } => Error::LuaQuota { resource },
             LuaError::ContextExhausted { reason } => Error::ContextExhausted { reason },
             LuaError::Interrupted => Error::Interrupted,
-            LuaError::Tool { message, cause } => Error::Tool {
-                message,
-                source: cause,
-            },
-            LuaError::Store { message, cause } => Error::Store {
-                message,
-                source: cause,
-            },
-            LuaError::Internal(message) => Error::internal_owned(message),
+            LuaError::Tool { message, cause } => Error::Tool { message, cause },
+            LuaError::Store { message, cause } => Error::Store { message, cause },
+            LuaError::Internal(message) => Error::internal_owned(message, None),
             LuaError::Raised(raised) => Error::from_raised(raised),
         }
     }
@@ -217,8 +219,8 @@ fn raised_field<'a>(raised: &'a promptforge_lua::Raised, name: &str) -> Option<&
 /// [`ErrorValue`](promptforge_lua::ErrorValue) rendering, so the
 /// reconstruction is exact where the fields round-trip; a malformed table
 /// degrades to the closest variant rather than panicking.
-fn raised_store_error(raised: &promptforge_lua::Raised) -> promptforge_vfs::VfsError {
-    use promptforge_vfs::{PathReason, VfsError};
+fn raised_store_error(raised: &promptforge_lua::Raised) -> VfsError {
+    use promptforge_vfs::PathReason;
     let path = raised_field(raised, "path").unwrap_or_default().to_owned();
     match raised_field(raised, "reason") {
         Some("not_found") => VfsError::NotFound { path },
@@ -332,7 +334,7 @@ impl Error {
             promptforge_lua::ErrorKind::Cancelled => Error::Interrupted,
             promptforge_lua::ErrorKind::Tool => Error::Tool {
                 message: raised.message.clone(),
-                source: Box::new(raised),
+                cause: Box::new(raised),
             },
             promptforge_lua::ErrorKind::TaskNotOwned => match raised_task(&raised) {
                 Some(task) => Error::TaskNotOwned { task },
@@ -344,7 +346,7 @@ impl Error {
             },
             promptforge_lua::ErrorKind::Store => Error::Store {
                 message: raised.message.clone(),
-                source: raised_store_error(&raised),
+                cause: raised_store_error(&raised),
             },
             promptforge_lua::ErrorKind::OutOfScopeTool
             | promptforge_lua::ErrorKind::UnboundTool

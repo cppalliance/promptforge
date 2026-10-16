@@ -26,6 +26,8 @@
 //! `slept N seconds` when only a timeout was given. Every shape is the
 //! Engine's own text, so it resumes trusted.
 
+use std::time::Duration;
+
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use serde_json::Value;
 
@@ -46,8 +48,8 @@ pub(super) struct AwaitTasks {
     /// The timeout timer's slot id, when the call gave a timeout; listed
     /// last in the wait set.
     timer: Option<TaskId>,
-    /// The timeout in seconds, for the plain-sleep rendering.
-    seconds: Option<f64>,
+    /// The timeout, for the plain-sleep rendering.
+    timeout: Option<Duration>,
 }
 
 /// The refusal for a `timeout` that is not a non-negative finite number
@@ -56,13 +58,14 @@ const TIMEOUT_REFUSAL: &str =
     "await_tasks: `timeout` must be a non-negative number of seconds when given";
 
 /// Reads the optional `timeout` argument: absent or null is `None`; a
-/// number `Duration` can hold is `Some`; anything else is the refusal.
-fn timeout_argument(args: &Value) -> std::result::Result<Option<f64>, String> {
+/// number of seconds `Duration` can hold is that duration; anything else
+/// is the refusal.
+fn timeout_argument(args: &Value) -> std::result::Result<Option<Duration>, String> {
     match args.get("timeout") {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Number(seconds)) => seconds
             .as_f64()
-            .filter(|seconds| std::time::Duration::try_from_secs_f64(*seconds).is_ok())
+            .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
             .map(Some)
             .ok_or_else(|| TIMEOUT_REFUSAL.to_owned()),
         Some(_) => Err(TIMEOUT_REFUSAL.to_owned()),
@@ -72,10 +75,14 @@ fn timeout_argument(args: &Value) -> std::result::Result<Option<f64>, String> {
 /// Renders a wake's answer: the drained notices, then the timeout line
 /// when the timer fired - the still-running list, or the plain sleep's
 /// duration when nothing was running.
-fn render_wake(mut lines: Vec<String>, timed_out: Option<f64>, still_running: &[TaskId]) -> String {
-    if let Some(seconds) = timed_out {
+fn render_wake(
+    mut lines: Vec<String>,
+    timed_out: Option<Duration>,
+    still_running: &[TaskId],
+) -> String {
+    if let Some(timeout) = timed_out {
         if still_running.is_empty() {
-            lines.push(format!("slept {seconds} seconds"));
+            lines.push(format!("slept {} seconds", timeout.as_secs_f64()));
         } else {
             let ids: Vec<String> = still_running.iter().map(ToString::to_string).collect();
             lines.push(format!("timed out; tasks {} still running", ids.join(", ")));
@@ -100,8 +107,8 @@ impl Scheduler {
         call_id: &str,
         turn: u32,
     ) -> BuiltinOutcome {
-        let seconds = match timeout_argument(args) {
-            Ok(seconds) => seconds,
+        let timeout = match timeout_argument(args) {
+            Ok(timeout) => timeout,
             Err(text) => return BuiltinOutcome::Answered(BuiltinAnswer::refused(text)),
         };
         let notices = self.drain_task_notices(id);
@@ -109,14 +116,14 @@ impl Scheduler {
             return BuiltinOutcome::Answered(BuiltinAnswer::served(notices.join("\n")));
         }
         let live = self.live_tasks_of(id, Some(TaskOrigin::Model));
-        if live.is_empty() && seconds.is_none() {
+        if live.is_empty() && timeout.is_none() {
             return BuiltinOutcome::Answered(BuiltinAnswer::served(
                 "nothing to wait for".to_owned(),
             ));
         }
         let mut set = live;
-        let timer = match seconds {
-            Some(seconds) => match self.prepare_timer(id, seconds) {
+        let timer = match timeout {
+            Some(timeout) => match self.prepare_timer(id, timeout) {
                 Ok(timer) => {
                     set.push(timer.clone());
                     Some(timer)
@@ -135,7 +142,7 @@ impl Scheduler {
             call_id: call_id.to_owned(),
             turn,
             timer,
-            seconds,
+            timeout,
         });
         chain.blocked = Some(Blocked::Tasks);
         // Parking over live model tasks gives the chain's admission slots
@@ -166,7 +173,7 @@ impl Scheduler {
         }
         let notices = self.drain_task_notices(owner);
         let still_running = self.live_tasks_of(owner, Some(TaskOrigin::Model));
-        let fired = if timed_out { awaiting.seconds } else { None };
+        let fired = if timed_out { awaiting.timeout } else { None };
         let text = render_wake(notices, fired, &still_running);
         let answer = self.report_builtin_answer(
             owner,

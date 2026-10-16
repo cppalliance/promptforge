@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use std::time::Duration;
 
 use harness_runner::PackageRegistry;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Performers, Timer, ToolPerformer};
@@ -151,7 +152,7 @@ impl ToolPerformer for Unused {
 }
 
 impl Timer for Unused {
-    fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
+    fn sleep(&self, _duration: Duration) -> BoxFuture<()> {
         unreachable!("no test issues a Timer effect")
     }
 }
@@ -363,7 +364,7 @@ pub(crate) struct PendingTimer {
 }
 
 impl Timer for PendingTimer {
-    fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
+    fn sleep(&self, _duration: Duration) -> BoxFuture<()> {
         let raise = RaiseOnDrop(Arc::clone(&self.dropped));
         Box::pin(async move {
             let _raise = raise;

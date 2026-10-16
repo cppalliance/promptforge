@@ -432,7 +432,7 @@ impl Prefill {
         if self.models.is_none() && self.offering.is_none() && !self.raw_shims {
             return Run::new(prompt, args, ctx);
         }
-        Run::new_for_test(prompt, args, &ctx, |mut state| {
+        Run::new_for_test(prompt, args, ctx, |mut state| {
             if let Some(set) = self.models {
                 state = state.with_models_for_test(set);
             }

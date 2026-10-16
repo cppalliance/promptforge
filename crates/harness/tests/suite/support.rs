@@ -35,8 +35,7 @@ impl InferenceBroker for Offline {
 pub(crate) struct Clock;
 
 impl Timer for Clock {
-    fn sleep(&self, seconds: f64) -> BoxFuture<()> {
-        let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO);
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         Box::pin(tokio::time::sleep(duration))
     }
 }

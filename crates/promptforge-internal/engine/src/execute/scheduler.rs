@@ -100,6 +100,13 @@ use pending::{CallSite, Continuation, Pending, ToolCallContinuation, VfsContinua
 use tasks::TaskSlot;
 pub(in crate::execute) use tool_call::RESERVED_TOOL_NAMES;
 
+/// Maximum nested `call()` depth (inclusive of the first call).
+const MAX_CALL_DEPTH: usize = 8;
+
+/// The run's final result when no section produced a reply: the generic
+/// completion text both fallback sites (an empty walk, an H1-only run) share.
+const GENERIC_COMPLETION: &str = "done";
+
 /// The most precise prompt-source line known for `blocks`: the first
 /// compiled chunk's absolute source line, else the prompt's opening line.
 fn first_chunk_line(blocks: &[Block]) -> u32 {

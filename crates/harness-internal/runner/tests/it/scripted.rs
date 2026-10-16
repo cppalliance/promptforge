@@ -7,6 +7,7 @@
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use harness_runner::HostContext;
 use harness_runner::performers::{BoxFuture, InferenceBroker, Timer};
@@ -184,7 +185,7 @@ impl Drop for CountOnDrop {
 pub(crate) struct HeldTimer(pub(crate) Arc<Held>);
 
 impl Timer for HeldTimer {
-    fn sleep(&self, _seconds: f64) -> BoxFuture<()> {
+    fn sleep(&self, _duration: Duration) -> BoxFuture<()> {
         self.0.hold()
     }
 }

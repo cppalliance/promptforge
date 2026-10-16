@@ -10,21 +10,19 @@
 
 use std::sync::Arc;
 
+use promptforge_types::event::lifecycle;
 use promptforge_types::ids::{ChainId, TaskId};
+use promptforge_vfs::Access;
 
 use crate::execute::context::RunState;
-use crate::execute::section_vm::{VmSeed, setup_section_vm};
-use crate::execute::walk_target::{
-    RequireOrigin, SlicePath, h1_visible_sections, read_visible, resolve_library,
-};
+use crate::execute::section_vm::{self, VmSeed};
+use crate::execute::walk_target::{self, RequireOrigin, SlicePath};
 use crate::heading_address::Visible;
 use crate::lua::{Library, LibraryKey, SectionVm};
 use crate::parser::Prompt;
 use crate::{Error, Result};
-use promptforge_types::event::lifecycle;
-use promptforge_vfs::Access;
 
-use super::{SectionContext, TaskSeed, prose_renderer};
+use super::{SectionContext, TaskSeed};
 
 /// The resolver behind a frame's `require`: each heading resolves in
 /// `prompt` from the position a loading library's key names, or from
@@ -34,7 +32,7 @@ fn library_resolver(
     origin: RequireOrigin,
 ) -> impl Fn(String, Option<LibraryKey>) -> Result<Library> + Send + Sync + 'static {
     move |heading: String, key: Option<LibraryKey>| {
-        resolve_library(&prompt, &origin, &heading, key.as_ref())
+        walk_target::resolve_library(&prompt, &origin, &heading, key.as_ref())
     }
 }
 
@@ -113,14 +111,14 @@ impl SectionContext {
             Arc::clone(ctx.prompt_arc()),
             RequireOrigin::Section(home.clone(), index),
         );
-        let render = prose_renderer(ctx, seed.item.clone());
+        let render = super::prose_renderer(ctx, seed.item.clone());
         // The `prompt` reads resolve over the section's visible set; the
         // suspending calls (`call`, `tasks.fanout`, `models.infer`) are the
         // yield shims the setup half installs.
         let prompt = Arc::clone(ctx.prompt_arc());
         let home = home.clone();
         let read = move |heading: String| {
-            read_visible(&heading, Visible::of(home.resolve(&prompt), index))
+            walk_target::read_visible(&heading, Visible::of(home.resolve(&prompt), index))
         };
         // The setup half of the section lifecycle - Engine injection, Engine
         // globals, the control surface, `require`, the store yield shims, and
@@ -138,13 +136,12 @@ impl SectionContext {
         );
         // Setup runs on the bare VM and tears it down itself on failure:
         // the frame does not exist yet, so its `Drop` cannot own this path.
-        let vm = setup_section_vm(vm, &setup, read, resolve, render)?;
+        let vm = section_vm::setup_section_vm(vm, &setup, read, resolve, render)?;
         Ok(Self {
             vm: Some(vm),
             name: section.name().to_owned(),
             completed: false,
             sys,
-            var: var.clone(),
             item: seed.item,
             counts: None,
             local_calls: Vec::new(),
@@ -164,7 +161,7 @@ impl SectionContext {
     ///
     /// H1's only deltas from a walked section: no `SECTION_STARTED`
     /// observation (the pass is not a walked section), an empty `var` seed
-    /// (it runs first and is never re-entered), [`h1_visible_sections`]
+    /// (it runs first and is never re-entered), [`walk_target::h1_visible_sections`]
     /// as the visible set behind the `prompt` reads, and
     /// [`RequireOrigin::H1`], which reaches every top-level section, behind
     /// `require`.
@@ -198,10 +195,13 @@ impl SectionContext {
             ctx.limits().lua_logs().get(),
         )?;
         let resolve = library_resolver(Arc::clone(ctx.prompt_arc()), RequireOrigin::H1);
-        let render = prose_renderer(ctx, None);
+        let render = super::prose_renderer(ctx, None);
         let prompt = Arc::clone(ctx.prompt_arc());
         let read = move |heading: String| {
-            read_visible(&heading, Visible::all(h1_visible_sections(&prompt)))
+            walk_target::read_visible(
+                &heading,
+                Visible::all(walk_target::h1_visible_sections(&prompt)),
+            )
         };
         // H1's one privilege: `argv` installs writable, so the repair
         // pattern can assign it; the executor reads the value back at the
@@ -210,13 +210,12 @@ impl SectionContext {
         setup.argv_writable = true;
         // Setup runs on the bare VM and tears it down itself on failure:
         // the frame does not exist yet, so its `Drop` cannot own this path.
-        let vm = setup_section_vm(vm, &setup, read, resolve, render)?;
+        let vm = section_vm::setup_section_vm(vm, &setup, read, resolve, render)?;
         Ok(Self {
             vm: Some(vm),
             name: title.to_owned(),
             completed: false,
             sys,
-            var: serde_json::json!({}),
             item: None,
             counts: None,
             local_calls: Vec::new(),

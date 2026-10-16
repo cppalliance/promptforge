@@ -16,8 +16,8 @@ use serde_json::json;
 
 /// Compiles one Lua chunk for a section VM drive.
 #[track_caller]
-fn chunk(source: &str) -> crate::lua::LuaProgram {
-    crate::lua::LuaProgram::compile(
+fn chunk(source: &str) -> promptforge_lua::LuaProgram {
+    promptforge_lua::LuaProgram::compile(
         source,
         "chunk",
         NonZeroU32::new(1).expect("compile source line is non-zero"),

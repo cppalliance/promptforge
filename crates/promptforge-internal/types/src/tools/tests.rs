@@ -42,6 +42,27 @@ fn tool_output_has_mandatory_trust() {
 }
 
 #[test]
+fn output_trust_serializes_as_its_snake_case_name() {
+    use super::OutputTrust;
+    assert_wire(&OutputTrust::Trusted, r#""trusted""#);
+    assert_wire(&OutputTrust::Untrusted, r#""untrusted""#);
+}
+
+#[test]
+fn each_tool_error_kind_tags_as_its_snake_case_name() {
+    use super::ToolErrorKind;
+    for (kind, tag) in [
+        (ToolErrorKind::InvalidArguments, "invalid_arguments"),
+        (ToolErrorKind::Backend, "backend"),
+        (ToolErrorKind::Transport, "transport"),
+        (ToolErrorKind::Cancelled, "cancelled"),
+        (ToolErrorKind::Other, "other"),
+    ] {
+        assert_eq!(kind.tag(), tag);
+    }
+}
+
+#[test]
 fn tool_catalog_is_send_and_sync() {
     // The public catalog must stay `Send + Sync` so downstream callers can
     // share it across tasks; a representation change that dropped either

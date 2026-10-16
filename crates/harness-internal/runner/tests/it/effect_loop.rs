@@ -173,7 +173,7 @@ async fn records_are_events_then_effects_then_answers_per_step() {
     );
     assert_eq!(
         payload(effect_positions[1] + 1),
-        json!({ "ToolCall": { "Ok": { "text": "hi", "trusted": true } } })
+        json!({ "ToolCall": { "Ok": { "text": "hi", "trust": "trusted" } } })
     );
 
     // The run ended once, with the loop's outcome.

@@ -3,8 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use promptforge_model_client::detail::tool_schema_new;
+use promptforge_model_client::detail;
 use promptforge_parser::ModelKeyword;
+use promptforge_types::plugins::PluginId;
 use promptforge_types::tools::ToolDescriptor;
 
 use crate::execute::scheduler::RESERVED_TOOL_NAMES;
@@ -15,14 +16,18 @@ use crate::parser::Prompt;
 use super::super::config::RunContext;
 
 /// Builds the run's shared tool set: the frontmatter's declared Plugins,
-/// the context's roster, and every catalog tool the run can offer bound
-/// with the tool's descriptor data (its schema, description, and output
-/// kind), so run-time execution never consults the catalog again and never
-/// holds an implementation.
-pub(super) fn bound_tool_set(prompt: &Prompt, ctx: &RunContext) -> ToolSet {
+/// the `roster` moved out of the context, and every catalog tool the run
+/// can offer bound with the tool's descriptor data (its schema,
+/// description, and output kind), so run-time execution never consults the
+/// catalog again and never holds an implementation.
+pub(super) fn bound_tool_set(
+    prompt: &Prompt,
+    ctx: &RunContext,
+    roster: BTreeMap<PluginId, Option<String>>,
+) -> ToolSet {
     ToolSet::new(
         prompt.frontmatter().plugins().to_vec(),
-        ctx.roster.clone(),
+        roster,
         offered_bindings(ctx),
     )
 }
@@ -55,7 +60,7 @@ fn offer_refusal(name: &str, tool: &ToolDescriptor, taken: &BTreeSet<String>) ->
     if RESERVED_TOOL_NAMES.contains(&name) {
         return Some("a task built-in has the same name".to_owned());
     }
-    if let Err(error) = tool_schema_new(
+    if let Err(error) = detail::tool_schema_new(
         name,
         tool.description.as_str(),
         tool.parameters_schema.clone(),

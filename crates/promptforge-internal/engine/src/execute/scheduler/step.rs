@@ -203,6 +203,7 @@ impl Scheduler {
                     match error {
                         Error::Lua(_) | Error::LuaRuntime { .. } => Error::RequirementsUnmet {
                             notice: error.to_string(),
+                            cause: None,
                         },
                         other => other,
                     }
@@ -263,7 +264,7 @@ impl Scheduler {
                         // global fails the run instead of returning the
                         // value; the frame then drops unarmed - the pass
                         // never fires SECTION_FINISHED.
-                        let mut frame = chain
+                        let frame = chain
                             .frame
                             .take()
                             .ok_or(Error::internal("a live chain holds its frame"))?;

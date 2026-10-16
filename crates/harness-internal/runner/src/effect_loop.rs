@@ -53,17 +53,19 @@ use promptforge::effect::{Effect, EffectAnswer, EffectId};
 use promptforge::event::Event;
 use promptforge::ids::Provenance;
 use promptforge::vfs::{Access, VfsOp, perform_vfs_op};
-use promptforge::{Run, RunError, RunResult, Step};
+use promptforge::{Run, Step};
 
-use crate::display_chain::display_chain;
 use crate::harness::StopSignal;
 use crate::performers::{BoxFuture, Performers};
 use crate::recorder::{Record, RecordKind, RecorderError, RunId, RunOutcome, RunRecorder};
 
 #[path = "effect_loop-flight.rs"]
 mod flight;
+#[path = "effect_loop-outcome.rs"]
+mod outcome;
 
 use flight::{Flights, Reach};
+pub(crate) use outcome::failed_outcome;
 
 /// Why the loop stopped without an outcome.
 #[derive(Debug, thiserror::Error)]
@@ -159,7 +161,7 @@ impl Driver {
                     self.commit_events(events).await?;
                     // `Done` is returned only once every effect is
                     // answered, so nothing is in flight.
-                    let outcome = outcome_of(result);
+                    let outcome = outcome::outcome_of(result);
                     self.recorder.end_run(self.run_id, outcome.clone()).await?;
                     return Ok(outcome);
                 }
@@ -365,10 +367,10 @@ impl Driver {
                 return None;
             }
             Effect::Vfs { access, op } => return Some((access, op)),
-            Effect::Timer { seconds } => {
+            Effect::Timer { duration } => {
                 let timer = Arc::clone(&self.performers.timer);
                 let sleep = async move {
-                    timer.sleep(seconds).await;
+                    timer.sleep(duration).await;
                     EffectAnswer::Timer
                 };
                 Box::pin(sleep)
@@ -475,25 +477,5 @@ fn record(
         kind,
         effect_id,
         payload,
-    }
-}
-
-/// The recorded outcome for the run's result.
-fn outcome_of(result: RunResult) -> RunOutcome {
-    match result {
-        RunResult::Ok(final_text) => RunOutcome::Completed { final_text },
-        RunResult::Cancelled => RunOutcome::Cancelled,
-        RunResult::Failure(error) => failed_outcome(&error),
-    }
-}
-
-/// The failed outcome for an Engine error: the failure's kind is the
-/// error kind's debug name and its message the error's text with its
-/// cause chain. The one derivation for a run that failed under the loop
-/// and a run preparation refused, so the two agree in the record.
-pub(crate) fn failed_outcome(error: &RunError) -> RunOutcome {
-    RunOutcome::Failed {
-        kind: format!("{:?}", error.kind()),
-        message: display_chain(error),
     }
 }

@@ -10,6 +10,7 @@
 //! scheduler can report the call and answer it.
 
 use std::num::NonZeroU64;
+use std::time::Duration;
 
 use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::{TaskId, TaskOrigin};
@@ -93,10 +94,9 @@ pub enum Request {
     /// author-visible: the shim yields it for `opts.timeout` and keeps
     /// the id.
     Timer {
-        /// `opts.timeout`: how long the timer runs before it fires, in
-        /// seconds. Non-negative, finite, and within `Duration`'s range by
-        /// the parse.
-        seconds: f64,
+        /// `opts.timeout`: how long the timer runs before it fires. The
+        /// parse refuses a seconds value no `Duration` can hold.
+        duration: Duration,
     },
     /// `tasks.join_any(set)`: park the chain until the first task in `set`
     /// ends, or resume at once when one already has. The one scheduler

@@ -39,6 +39,7 @@ pub mod effect {
     pub use promptforge_engine::EffectAnswer;
     pub use promptforge_engine::EffectId;
     pub use promptforge_engine::EffectRecord;
+    pub use promptforge_engine::FailureRecord;
     pub use promptforge_engine::Round;
     pub use promptforge_engine::ToolAnswerRecord;
     pub use promptforge_engine::ToolCallOrigin;

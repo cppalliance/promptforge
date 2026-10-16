@@ -20,19 +20,19 @@
 //! [`AnswerRecord`], the answer's outcome as a log stores it.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::ids::RoundId;
 use promptforge_types::tools::{OutputTrust, ToolError, ToolId, ToolOutput};
 pub use promptforge_types::tools::{ToolCallOrigin, ToolCaller};
+use promptforge_vfs::{Access, VfsError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::execute::protocol::{VfsOp, VfsOutcome};
 use crate::model::{Completion, CompletionError, CompletionResult, Message, ToolSchema};
 use crate::model::{CompletionOptions, ModelBinding, Temperature};
-use promptforge_vfs::{Access, VfsError};
-
-use crate::execute::protocol::{VfsOp, VfsOutcome};
 
 /// The identifier of one in-flight effect, which pairs an issued
 /// [`Effect`] with its [`EffectAnswer`].
@@ -67,6 +67,7 @@ impl std::fmt::Display for EffectId {
 /// reply, and tool-call events reported from the round's answer carry the
 /// same id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Round {
     /// The round's run-wide id.
     pub id: RoundId,
@@ -77,7 +78,20 @@ pub struct Round {
     pub origin: ReplyOrigin,
 }
 
+impl Round {
+    /// Builds the identity of round `id`, dispatched from `origin`.
+    #[must_use]
+    pub fn new(id: RoundId, origin: ReplyOrigin) -> Round {
+        Round { id, origin }
+    }
+}
+
 /// One piece of work the Engine asks the caller to perform.
+///
+/// The enum is closed on purpose: it has no `#[non_exhaustive]`, so the
+/// caller's `match` names every kind and needs no wildcard arm. A new
+/// effect kind breaks every caller's build, rather than reaching a caller
+/// that cannot perform it.
 #[derive(Debug)]
 pub enum Effect {
     /// One model round: send `messages` to the model with `tools`
@@ -151,11 +165,11 @@ pub enum Effect {
         /// The validated operation.
         op: VfsOp,
     },
-    /// One sleep of `seconds` seconds, which the Engine uses as the
-    /// timeout behind a timed wait.
+    /// One sleep of `duration`, which the Engine uses as the timeout
+    /// behind a timed wait.
     Timer {
-        /// The duration in seconds, finite and zero or greater.
-        seconds: f64,
+        /// How long the sleep lasts.
+        duration: Duration,
     },
 }
 
@@ -212,7 +226,9 @@ impl Effect {
                 origin: origin.clone(),
             },
             Effect::Vfs { op, .. } => EffectRecord::Vfs { op: op.clone() },
-            Effect::Timer { seconds } => EffectRecord::Timer { seconds: *seconds },
+            Effect::Timer { duration } => EffectRecord::Timer {
+                seconds: duration.as_secs_f64(),
+            },
         }
     }
 }
@@ -230,6 +246,7 @@ impl Effect {
 /// caller may serve the slot with a different model from the bound one.
 /// The answer's [`ChatAnswerRecord`] names the model that served the round.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum EffectRecord {
     /// One model round.
     Chat {
@@ -284,6 +301,9 @@ pub enum EffectRecord {
 /// The answer to one [`Effect`]: one variant per effect kind, plus
 /// [`Dropped`](EffectAnswer::Dropped) for an effect the caller gave up on.
 /// Every effect receives exactly one answer.
+///
+/// Closed on purpose, like [`Effect`]: a new answer kind arrives with a
+/// new effect kind, and both break every caller's build.
 #[derive(Debug)]
 pub enum EffectAnswer {
     /// The model round's completion or its failure.
@@ -306,27 +326,24 @@ pub enum EffectAnswer {
 
 impl EffectAnswer {
     /// Returns the answer's record: the parts of its outcome that a log can
-    /// hold whole. A failure is recorded as its display text. A completion
-    /// is recorded as its reply or its requested tool names. The round's
-    /// request and response bodies travel as debug events, and its metrics
-    /// travel in the turn's event.
+    /// hold whole. A failure is recorded as a [`FailureRecord`]: its kind's
+    /// tag and its display text. A completion is recorded as its reply or
+    /// its requested tool names. The round's request and response bodies
+    /// travel as debug events, and its metrics travel in the turn's event.
     #[must_use]
     pub fn record(&self) -> AnswerRecord {
         match self {
             EffectAnswer::Chat(result) => AnswerRecord::Chat(match result {
                 Ok(completion) => Ok(ChatAnswerRecord::from(completion.as_ref())),
-                Err(error) => Err(error.to_string()),
+                Err(error) => Err(FailureRecord::new(error.kind().tag(), error.to_string())),
             }),
             EffectAnswer::ToolCall(result) => AnswerRecord::ToolCall(match result {
-                Ok(output) => Ok(ToolAnswerRecord {
-                    text: output.text().to_owned(),
-                    trusted: output.trust() == OutputTrust::Trusted,
-                }),
-                Err(error) => Err(error.to_string()),
+                Ok(output) => Ok(ToolAnswerRecord::new(output.text(), output.trust())),
+                Err(error) => Err(FailureRecord::new(error.kind().tag(), error.to_string())),
             }),
             EffectAnswer::Vfs(result) => AnswerRecord::Vfs(match result {
                 Ok(outcome) => Ok(outcome.clone()),
-                Err(error) => Err(error.to_string()),
+                Err(error) => Err(FailureRecord::new(error.tag(), error.to_string())),
             }),
             EffectAnswer::Timer => AnswerRecord::Timer,
             EffectAnswer::Dropped => AnswerRecord::Dropped,
@@ -335,27 +352,58 @@ impl EffectAnswer {
 }
 
 /// An [`EffectAnswer`] as a run log stores it: one variant per answer
-/// kind, each holding its outcome with every failure rendered to its
-/// display text.
+/// kind, each holding its outcome with every failure recorded as a
+/// [`FailureRecord`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum AnswerRecord {
     /// The model round's outcome.
-    Chat(std::result::Result<ChatAnswerRecord, String>),
+    Chat(std::result::Result<ChatAnswerRecord, FailureRecord>),
     /// The tool call's outcome.
-    ToolCall(std::result::Result<ToolAnswerRecord, String>),
+    ToolCall(std::result::Result<ToolAnswerRecord, FailureRecord>),
     /// The outcome of the operation on the run's store view: the
-    /// [`VfsOutcome`] itself on success, or the failure's display text.
-    Vfs(std::result::Result<VfsOutcome, String>),
+    /// [`VfsOutcome`] itself on success, or the failure's record.
+    Vfs(std::result::Result<VfsOutcome, FailureRecord>),
     /// The timer fired.
     Timer,
     /// The caller gave up on the effect and dropped it.
     Dropped,
 }
 
+/// A failed answer as the log records it, serialized as
+/// `{"kind": .., "message": ..}`.
+///
+/// `kind` is the stable tag of the failure's kind: the `CompletionErrorKind`
+/// tag for a model round (such as `malformed_response`), the
+/// `ToolErrorKind` tag for a tool call (such as `invalid_arguments`), or
+/// the `VfsError` tag for a store operation (such as `not_found`).
+/// `message` is the failure's display text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct FailureRecord {
+    /// The stable tag of the failure's kind.
+    pub kind: String,
+    /// The failure's display text.
+    pub message: String,
+}
+
+impl FailureRecord {
+    /// Builds the record of a failure of kind `kind` with `message` as its
+    /// display text.
+    #[must_use]
+    pub fn new(kind: impl Into<String>, message: impl Into<String>) -> FailureRecord {
+        FailureRecord {
+            kind: kind.into(),
+            message: message.into(),
+        }
+    }
+}
+
 /// A completed model round as the log records it: what identifies the
 /// answer. The round's request and response bodies travel separately, as
 /// debug events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ChatAnswerRecord {
     /// The model that served the round, as the completion names it.
     pub model: String,
@@ -366,6 +414,41 @@ pub struct ChatAnswerRecord {
     /// The names of the tools the model requested, in call order, when it
     /// requested any.
     pub tool_calls: Vec<String>,
+}
+
+impl ChatAnswerRecord {
+    /// Builds the record of a round `model` served, with no finish reason,
+    /// no reply, and no tool calls.
+    #[must_use]
+    pub fn new(model: impl Into<String>) -> ChatAnswerRecord {
+        ChatAnswerRecord {
+            model: model.into(),
+            finish_reason: None,
+            reply: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    /// Sets the provider's finish reason.
+    #[must_use]
+    pub fn with_finish_reason(mut self, finish_reason: Option<String>) -> ChatAnswerRecord {
+        self.finish_reason = finish_reason;
+        self
+    }
+
+    /// Sets the reply text.
+    #[must_use]
+    pub fn with_reply(mut self, reply: Option<String>) -> ChatAnswerRecord {
+        self.reply = reply;
+        self
+    }
+
+    /// Sets the names of the tools the model requested, in call order.
+    #[must_use]
+    pub fn with_tool_calls(mut self, tool_calls: Vec<String>) -> ChatAnswerRecord {
+        self.tool_calls = tool_calls;
+        self
+    }
 }
 
 impl From<&Completion> for ChatAnswerRecord {
@@ -391,11 +474,23 @@ impl From<&Completion> for ChatAnswerRecord {
 
 /// A tool's own output as the log records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ToolAnswerRecord {
     /// The output text, before the Engine's trust rules apply.
     pub text: String,
-    /// Whether the tool declared its output trusted.
-    pub trusted: bool,
+    /// The trust level the tool declared for its output.
+    pub trust: OutputTrust,
+}
+
+impl ToolAnswerRecord {
+    /// Builds the record of an output of `text` at `trust`.
+    #[must_use]
+    pub fn new(text: impl Into<String>, trust: OutputTrust) -> ToolAnswerRecord {
+        ToolAnswerRecord {
+            text: text.into(),
+            trust,
+        }
+    }
 }
 
 #[cfg(test)]

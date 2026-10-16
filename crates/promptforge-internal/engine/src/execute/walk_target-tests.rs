@@ -1,9 +1,10 @@
 //! Tests for library resolution: what a `require` builds from a section,
 //! the key naming its position, and the reach a keyed lookup resolves from.
 
-use super::*;
-use crate::lua::LuaProgram;
+use promptforge_lua::LuaProgram;
 use promptforge_parser::test_support::{prose_block, synthetic_section};
+
+use super::*;
 
 /// `## Grand` holds `### Parent` and a `### Helpers`, `### Parent` holds
 /// `#### Sibling` and `#### Self`, `## Top` holds a second `### Helpers`,
@@ -139,13 +140,17 @@ fn a_keyed_lookup_resolves_from_the_librarys_reach() {
 }
 
 #[test]
-fn a_key_that_names_no_position_is_an_internal_error() {
+fn a_key_that_names_no_position_is_an_internal_error_that_keeps_its_cause() {
     for identity in ["", "x", "1.", "1..2"] {
         let error = RequireOrigin::from_key(&LibraryKey::new(identity.to_owned()))
             .expect_err("a foreign key must not parse");
         assert!(
             matches!(error, Error::Internal { .. }),
             "{identity:?} gave {error}"
+        );
+        assert!(
+            error.cause().is_some(),
+            "required the index parse failure as the cause, actual none for {identity:?}"
         );
     }
 }

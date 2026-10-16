@@ -199,8 +199,10 @@ fn a_store_effect_records_its_operation_and_drops_the_access_handle() {
 }
 
 #[test]
-fn a_timer_effect_records_its_seconds() {
-    let effect = Effect::Timer { seconds: 0.25 };
+fn a_timer_effect_records_its_duration_in_seconds() {
+    let effect = Effect::Timer {
+        duration: std::time::Duration::from_millis(250),
+    };
     let record = effect.record();
     assert_eq!(record, EffectRecord::Timer { seconds: 0.25 });
     assert_eq!(round_trip(&record), record);
@@ -372,7 +374,7 @@ fn a_child_cancel_handles_cancel_is_observed_by_the_instruction_hook() {
             "local n = 0\nwhile true do\n  n = n + 1\n  if n == 1 then log('looping') end\nend",
         ),
         "",
-        &run_context().cancel(child),
+        run_context().cancel(child),
         |fresh| {
             state = Some(fresh.clone());
             fresh
@@ -479,4 +481,13 @@ fn a_stillborn_run_reports_its_failure_on_the_first_step() {
         panic!("an unsupported version fails, got {result:?}");
     };
     assert_eq!(error.kind(), crate::execute::RunErrorKind::Version);
+    assert!(run.decided(), "a run that never started is decided");
+    let Step::Done {
+        result: RunResult::Failure(again),
+        ..
+    } = run.step()
+    else {
+        panic!("a spent run stays done");
+    };
+    assert_eq!(again.kind(), crate::execute::RunErrorKind::Internal);
 }

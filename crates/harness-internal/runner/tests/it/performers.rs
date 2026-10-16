@@ -23,17 +23,17 @@ use crate::support::{
 };
 
 /// A Host's timer: sleeps on the test runtime's clock for the effect's
-/// seconds, and raises `dropped` when a sleep is torn down unfinished.
+/// duration, and raises `dropped` when a sleep is torn down unfinished.
 #[derive(Default)]
 struct SleepTimer {
     dropped: Arc<AtomicBool>,
 }
 
 impl Timer for SleepTimer {
-    fn sleep(&self, seconds: f64) -> BoxFuture<()> {
+    fn sleep(&self, duration: Duration) -> BoxFuture<()> {
         let raise = RaiseOnDrop(Arc::clone(&self.dropped));
         Box::pin(async move {
-            tokio::time::sleep(Duration::from_secs_f64(seconds)).await;
+            tokio::time::sleep(duration).await;
             std::mem::forget(raise);
         })
     }

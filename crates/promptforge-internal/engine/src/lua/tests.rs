@@ -24,20 +24,18 @@ use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use mlua::{MultiValue, Thread};
+use promptforge_lua::{Error, LuaProgram};
+use promptforge_types::tools::{ToolDescriptor, ToolId};
 use serde_json::json;
-
-use promptforge_lua::Error;
 
 use crate::execute::protocol::{Answer, Request, YieldParse};
 use crate::execute::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use crate::lua::{Library, LuaProgram, SectionText, SectionVm, ToolBinding, ToolSet};
+use crate::lua::{Library, SectionText, SectionVm, ToolBinding, ToolSet};
 use crate::model::ModelSet;
 use crate::test_support::fresh_access;
 use crate::test_support::recording::null_emitter;
 use crate::test_support::scenario::{TEST_SEED, test_binding};
-use crate::tools::ToolId;
 use crate::untrusted::GuardNonce;
-use promptforge_types::tools::ToolDescriptor;
 
 fn test_models() -> ModelSet {
     ModelSet::from_parts(

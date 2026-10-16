@@ -4,8 +4,9 @@
 ///
 /// Every [`ToolOutput`] carries a trust level, so it cannot be forgotten. An
 /// [`OutputTrust::Untrusted`] result is nonce-wrapped before it can reach
-/// model input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// model input. A run log records the level as `trusted` or `untrusted`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum OutputTrust {
     /// The output was produced by trusted, first-party code.
@@ -73,6 +74,21 @@ pub enum ToolErrorKind {
     Cancelled,
     /// Any other tool failure.
     Other,
+}
+
+impl ToolErrorKind {
+    /// Returns the kind's stable tag: its name in snake_case, such as
+    /// `invalid_arguments`. A run log records a failed call under it.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            ToolErrorKind::InvalidArguments => "invalid_arguments",
+            ToolErrorKind::Backend => "backend",
+            ToolErrorKind::Transport => "transport",
+            ToolErrorKind::Cancelled => "cancelled",
+            ToolErrorKind::Other => "other",
+        }
+    }
 }
 
 /// An error from a tool call, with a message that is safe to show the model.

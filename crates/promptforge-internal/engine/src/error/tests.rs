@@ -7,6 +7,9 @@ use promptforge_lua::Error as LuaError;
 use super::*;
 use crate::parser::Prompt;
 
+#[path = "tests-chain.rs"]
+mod chain;
+
 fn assert_source_survives_run_error(error: Error) {
     assert!(
         std::error::Error::source(&error).is_some(),
@@ -35,6 +38,10 @@ fn context_exhaustion_maps_from_lua_and_classifies() {
             }
         ),
         "the mapping preserves the reason, got {error:?}"
+    );
+    assert!(
+        error.cause().is_none(),
+        "a variant with no originating error has no cause"
     );
     assert!(
         error.to_string().starts_with("context exhausted: "),
@@ -68,21 +75,26 @@ fn source_bearing_binding_errors_preserve_their_cause() {
 }
 
 #[test]
-fn lua_compile_preserves_the_originating_compiler_error() {
-    // A compile failure keeps the concrete `mlua` error as a private
-    // `source()` instead of flattening it into `message` alone, and the
-    // chain survives through the public `RunError` wrapper.
+fn lua_compile_keeps_the_originating_compiler_error_as_its_cause() {
+    // A compile failure keeps the concrete `mlua` error as its cause
+    // instead of flattening it into `message` alone, and the public
+    // `RunError` wrapper reaches it.
     let compile = Error::LuaCompile {
         location: "section `S` prologue".to_owned(),
         source_line: 7,
         lua_source: "x =".to_owned(),
         message: "syntax error near '='".to_owned(),
-        source: Box::new(mlua::Error::SyntaxError {
+        cause: Box::new(mlua::Error::SyntaxError {
             message: "syntax error near '='".to_owned(),
             incomplete_input: false,
         }),
     };
-    assert_source_survives_run_error(compile);
+    let cause = compile
+        .cause()
+        .and_then(|cause| cause.downcast_ref::<mlua::Error>())
+        .expect("the compiler error is the cause");
+    assert!(matches!(cause, mlua::Error::SyntaxError { .. }));
+    assert!(crate::RunError::from(compile).cause().is_some());
 }
 
 #[test]
@@ -106,9 +118,9 @@ fn typed_error_survives_the_lua_external_boundary() {
         }
         other => panic!("expected an ExternalError holding the typed error, got {other:?}"),
     }
-    // Re-wrapping through the crate's Lua boundary keeps the chain reachable.
+    // Re-wrapping through the crate's Lua boundary keeps the cause reachable.
     let wrapped = Error::lua(external);
-    assert!(std::error::Error::source(&wrapped).is_some());
+    assert!(wrapped.cause().is_some());
 }
 
 #[test]
@@ -218,6 +230,7 @@ fn requirements_unmet_classifies_and_reports_the_notice_as_its_message() {
     // environment, not the transport, is what falls short.
     let error = Error::RequirementsUnmet {
         notice: "the environment cannot satisfy this prompt:\n- role 'analyst': requires a context of at least 200000 tokens; the current model provides 32000".to_owned(),
+        cause: None,
     };
     let run_error = crate::RunError::from(error);
     assert_eq!(run_error.kind(), crate::RunErrorKind::RequirementsUnmet);
@@ -348,7 +361,7 @@ fn every_store_failure_rebuilds_from_its_raised_table_under_its_own_tag() {
                 .into_iter()
                 .collect(),
         };
-        let Error::Store { source, .. } = Error::from(LuaError::Raised(raised)) else {
+        let Error::Store { cause: source, .. } = Error::from(LuaError::Raised(raised)) else {
             panic!("a raised store table maps to a store error: {failure:?}");
         };
         assert_eq!(source.tag(), failure.tag(), "{failure:?}");

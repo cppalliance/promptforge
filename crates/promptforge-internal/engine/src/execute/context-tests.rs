@@ -14,16 +14,21 @@ fn test_prompt() -> Prompt {
 }
 
 fn test_state(prompt: &Prompt) -> RunState {
-    RunState::new(
-        Arc::new(prompt.clone()),
-        "",
-        &promptforge_vfs::VfsRef::default(),
-        &RunContext::new(
+    state_over(
+        prompt,
+        RunContext::new(
             "run-context-test",
             TEST_SEED,
             promptforge_types::timestamp::Timestamp::UNIX_EPOCH,
         ),
     )
+}
+
+/// The state a run of `prompt` assembles from `ctx`, its owned inputs
+/// moved out as `Run::new` moves them.
+fn state_over(prompt: &Prompt, mut ctx: RunContext) -> RunState {
+    let owned = OwnedInputs::take(&mut ctx);
+    RunState::new(Arc::new(prompt.clone()), "", &ctx, owned)
 }
 
 #[test]
@@ -62,9 +67,9 @@ fn derived_values_come_from_the_prompt_and_limits() {
 fn forks_swap_only_their_own_fields() {
     let ctx = test_state(&test_prompt());
     let chain = ctx.with_args("chain-args");
-    assert_eq!(chain.args(), "chain-args");
+    assert_eq!(&*chain.args_shared(), "chain-args");
     assert!(Arc::ptr_eq(&ctx.prompt, &chain.prompt));
-    assert_eq!(ctx.args(), "");
+    assert_eq!(&*ctx.args_shared(), "");
 
     let turns = Arc::new(AtomicU32::new(7));
     let task: TaskId = "0.4".parse().expect("a task id parses");
@@ -77,12 +82,9 @@ fn forks_swap_only_their_own_fields() {
 
 #[test]
 fn the_root_task_sequence_starts_where_the_context_says() {
-    let prompt = test_prompt();
-    let ctx = RunState::new(
-        Arc::new(prompt),
-        "",
-        &promptforge_vfs::VfsRef::default(),
-        &RunContext::new(
+    let ctx = state_over(
+        &test_prompt(),
+        RunContext::new(
             "run-context-test",
             TEST_SEED,
             promptforge_types::timestamp::Timestamp::UNIX_EPOCH,

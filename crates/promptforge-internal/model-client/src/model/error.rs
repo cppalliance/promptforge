@@ -84,6 +84,27 @@ impl CompletionErrorKind {
         }
     }
 
+    /// Returns the kind's stable tag: its name in snake_case, such as
+    /// `malformed_response`. A run log records a failed round under it.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            CompletionErrorKind::ContextOverflow => "context_overflow",
+            CompletionErrorKind::RateLimited => "rate_limited",
+            CompletionErrorKind::QuotaExhausted => "quota_exhausted",
+            CompletionErrorKind::Overloaded => "overloaded",
+            CompletionErrorKind::Refused => "refused",
+            CompletionErrorKind::Timeout => "timeout",
+            CompletionErrorKind::Transport => "transport",
+            CompletionErrorKind::ServerError => "server_error",
+            CompletionErrorKind::Rejected => "rejected",
+            CompletionErrorKind::MalformedResponse => "malformed_response",
+            CompletionErrorKind::EmptyReply => "empty_reply",
+            CompletionErrorKind::Unavailable => "unavailable",
+            CompletionErrorKind::InvalidParts => "invalid_parts",
+        }
+    }
+
     fn is_retryable(self) -> bool {
         matches!(
             self,

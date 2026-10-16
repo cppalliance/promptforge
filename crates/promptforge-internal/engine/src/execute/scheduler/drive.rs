@@ -13,12 +13,11 @@ use crate::execute::RunResult;
 use crate::execute::error::RunError;
 use crate::execute::run::{EffectAnswer, EffectId, Step};
 use crate::execute::scheduler::ChainIndex;
-use crate::execute::support::GENERIC_COMPLETION;
 use crate::{Error, Result};
 use promptforge_types::event::lifecycle;
 use promptforge_types::ids::AbandonReason;
 
-use super::{Phase, Scheduler};
+use super::{GENERIC_COMPLETION, Phase, Scheduler};
 
 impl Scheduler {
     /// Drains the ready queue and returns the step's outcome: the effects

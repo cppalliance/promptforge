@@ -73,8 +73,24 @@ impl promptforge_lua::ErrorValue for Error {
             | Error::TaskCancelled { task } => {
                 vec![("task".to_owned(), ErrorField::String(task.to_string()))]
             }
-            Error::Store { source, .. } => promptforge_lua::store_error_value_fields(source),
-            _ => Vec::new(),
+            Error::Store { cause, .. } => promptforge_lua::store_error_value_fields(cause),
+            Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::Completion(_)
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::BindSchema { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::RequirementsUnmet { .. }
+            | Error::Tool { .. }
+            | Error::Internal { .. }
+            | Error::LuaQuota { .. }
+            | Error::Determinism(_) => Vec::new(),
         }
     }
 }

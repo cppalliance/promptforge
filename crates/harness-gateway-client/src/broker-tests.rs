@@ -79,10 +79,7 @@ fn recording() -> (OnPiece, Arc<Mutex<Vec<StreamDelta>>>) {
 
 /// The run's first round, dispatched from `origin`.
 fn round(origin: ReplyOrigin) -> Round {
-    Round {
-        id: RoundId::new(0),
-        origin,
-    }
+    Round::new(RoundId::new(0), origin)
 }
 
 fn reply_of(result: &CompletionResult) -> &str {

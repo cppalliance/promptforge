@@ -27,10 +27,10 @@ use std::sync::Arc;
 
 use promptforge_types::emitter::Emitter;
 use promptforge_types::plugins::Prelude;
+use promptforge_vfs::Access;
 
 use crate::lua::{Library, LibraryKey, ProseState, SectionText, SectionVm, Uninjected};
 use crate::{Error, Result};
-use promptforge_vfs::Access;
 
 /// What a section VM is seeded with beyond the shared Engine values.
 ///

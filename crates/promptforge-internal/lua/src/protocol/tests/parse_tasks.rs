@@ -1,6 +1,7 @@
 //! The task-operation request parsers: `spawn`'s target, seeds, var
 //! snapshot, origin, and fanout mark; the `timer` leaf request's
-//! author-supplied `seconds` and its domain checks; and `concurrency`'s
+//! author-supplied `seconds`, its domain checks, and the `Duration` it
+//! parses into; and `concurrency`'s
 //! optional shim-validated limit.
 
 use super::*;
@@ -205,20 +206,17 @@ fn a_spawn_with_a_non_string_target_keeps_the_resolve_error() {
 }
 
 #[test]
-fn timer_parses_a_non_negative_finite_seconds_value() {
+fn timer_parses_a_non_negative_finite_seconds_value_into_its_duration() {
     let lua = Lua::new();
     for (value, expected) in [
-        (Value::Number(1.5), 1.5),
-        (Value::Integer(30), 30.0),
-        (Value::Number(0.0), 0.0),
+        (Value::Number(1.5), std::time::Duration::from_millis(1_500)),
+        (Value::Integer(30), std::time::Duration::from_secs(30)),
+        (Value::Number(0.0), std::time::Duration::ZERO),
     ] {
         let table = request_table(&lua, "timer");
         table.raw_set("seconds", value).expect("raw_set");
         match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
-            Request::Timer { seconds } => assert!(
-                (seconds - expected).abs() < f64::EPSILON,
-                "expected {expected}, got {seconds}"
-            ),
+            Request::Timer { duration } => assert_eq!(duration, expected),
             other => panic!("expected a timer request, got {other:?}"),
         }
     }

@@ -10,10 +10,10 @@ use std::num::NonZeroU32;
 
 use mlua::MultiValue;
 
-use promptforge_lua::{Error, ErrorKind};
+use promptforge_lua::{Error, ErrorKind, LuaProgram};
 
 use crate::execute::protocol::Answer;
-use crate::lua::{CoroStep, LuaBlockResult, LuaProgram, OverflowReason};
+use crate::lua::{CoroStep, LuaBlockResult, OverflowReason};
 use crate::model::ModelSet;
 use crate::test_support::recording::null_emitter;
 

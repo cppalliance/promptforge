@@ -104,7 +104,9 @@ pub use crate::coro::{install_section_loop_shim, install_store_shims};
 pub use crate::dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
 };
-pub use crate::engine_globals::{install_ui, run_store_op, store_error_message};
+pub use crate::engine_globals::{
+    install_ui, run_store_op, store_error_message, store_probe_message,
+};
 pub use crate::error::{Error, QuotaResource, SharedSource};
 pub use crate::error_value::{
     ErrorField, ErrorKind, ErrorValue, ParseErrorKindError, Raised, error_table,

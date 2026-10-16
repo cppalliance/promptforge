@@ -15,8 +15,8 @@ use promptforge_vfs::Access;
 
 use crate::error::{Error, QuotaExceeded, QuotaResource, Result};
 
-pub use store::store_error_message;
 pub(crate) use store::{install_store_table, route_store_to_shims};
+pub use store::{store_error_message, store_probe_message};
 
 /// Maximum number of Unicode scalar values accepted by `log`.
 pub(crate) const LUA_LOG_CHARACTER_LIMIT: usize = 256;

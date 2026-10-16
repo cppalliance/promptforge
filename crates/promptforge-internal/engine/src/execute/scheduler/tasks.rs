@@ -26,10 +26,9 @@ use promptforge_vfs::detail::{access_id, access_spawn};
 
 use crate::execute::protocol::{Answer, Blocked, SpawnVia};
 use crate::execute::section_context::TaskSeed;
-use crate::execute::support::MAX_CALL_DEPTH;
 use crate::{Error, Result};
 
-use super::{ChainIndex, Counters, Scheduler, SpawnRecord, prompt_origin};
+use super::{ChainIndex, Counters, MAX_CALL_DEPTH, Scheduler, SpawnRecord, prompt_origin};
 use crate::execute::run::EffectId;
 
 /// Where a task's work runs.

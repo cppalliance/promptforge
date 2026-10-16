@@ -20,8 +20,8 @@ use promptforge_types::tools::{ToolError, ToolOutput};
 use promptforge_vfs::detail::{access_id, end_access};
 use promptforge_vfs::{ExecId, VfsError};
 
+use crate::execute::infer::accept_infer;
 use crate::execute::protocol::{Answer, ToolCallOutcome, VfsOutcome};
-use crate::execute::tools::accept_infer;
 use crate::lua::{ModelReport, prepare_dispatch, prepare_model_dispatch};
 use crate::model::{Completion, CompletionError};
 use crate::{Error, Result};

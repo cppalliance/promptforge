@@ -1,5 +1,6 @@
-//! Cross-cutting run helpers: the turn counter, the `sys` JSON, the shared
-//! round report, and the shared run constants.
+//! One model turn: the shared turn counter and the round report every
+//! served completion goes through, the chat arm's and the nested-inference
+//! arm's alike.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -11,13 +12,6 @@ use promptforge_types::ids::RoundId;
 use promptforge_types::metrics::CallMetrics;
 
 use crate::model::{Completion, CompletionResult};
-
-/// Maximum nested `call()` depth (inclusive of the first call).
-pub(super) const MAX_CALL_DEPTH: usize = 8;
-
-/// The run's final result when no section produced a reply: the generic
-/// completion text both fallback sites (an empty walk, an H1-only run) share.
-pub(super) const GENERIC_COMPLETION: &str = "done";
 
 /// Advances the shared turn counter with saturation, returning the 1-based
 /// index of the turn just started.
@@ -33,33 +27,6 @@ pub(super) fn advance_turn(turns: &AtomicU32) -> u32 {
         })
         .unwrap_or(u32::MAX)
         .saturating_add(1)
-}
-
-/// The `sys` JSON every section driver builds for its section or arm: the
-/// six shared fields in one construction. A driver with an extra field
-/// (`index`, on a fanout arm or a spawned chain) inserts it at its own call
-/// site. `when` is the run's `started_at` rendered as RFC 3339, the same
-/// string in every section; `id` is the section entry's hierarchical id
-/// (the entering chain's id extended by its local entry counter), rendered
-/// as a dot-separated path; `taskid` is the id of the nearest enclosing
-/// task (the main walk is task `0`; a `call` child reports its caller's
-/// task), the handle a chain passes to `tasks.*` to speak about itself.
-pub(super) fn sys_json(
-    when: &str,
-    id: &str,
-    task_id: &str,
-    section_name: &str,
-    execution: &str,
-    section_count: usize,
-) -> serde_json::Value {
-    serde_json::json!({
-        "when": when,
-        "id": id,
-        "taskid": task_id,
-        "section_name": section_name,
-        "execution": execution,
-        "section_count": section_count,
-    })
 }
 
 /// What a served completion reports once the turn has advanced and the
@@ -162,5 +129,5 @@ pub(super) fn report_model_turn(
 }
 
 #[cfg(test)]
-#[path = "support-tests.rs"]
+#[path = "turn-tests.rs"]
 mod tests;

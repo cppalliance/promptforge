@@ -164,7 +164,9 @@ impl RequireOrigin {
             .split('.')
             .map(str::parse)
             .collect::<std::result::Result<Vec<usize>, _>>()
-            .map_err(|_| Error::internal("a library key names no section position"))?;
+            .map_err(|cause| {
+                Error::internal_with_cause("a library key names no section position", cause)
+            })?;
         let index = indices
             .pop()
             .ok_or(Error::internal("a library key names no section position"))?;

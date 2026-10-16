@@ -40,6 +40,29 @@ fn retryability_is_fixed_per_kind() {
 }
 
 #[test]
+fn each_kind_tags_as_its_snake_case_name() {
+    let tags: Vec<&str> = ALL_KINDS.iter().map(|kind| kind.tag()).collect();
+    assert_eq!(
+        tags,
+        [
+            "context_overflow",
+            "rate_limited",
+            "quota_exhausted",
+            "overloaded",
+            "refused",
+            "timeout",
+            "transport",
+            "server_error",
+            "rejected",
+            "malformed_response",
+            "empty_reply",
+            "unavailable",
+            "invalid_parts",
+        ]
+    );
+}
+
+#[test]
 fn each_kind_has_its_fixed_phrase() {
     let phrases = [
         (

@@ -27,7 +27,7 @@ fn a_store_install_without_a_store_names_why_in_its_message() {
     );
     assert_eq!(
         error.to_string(),
-        "store operation failed: no store: the handle declares no store"
+        "this run declares no store, so no store operation can run"
     );
     vm.teardown(&null_emitter(), "Test");
 }

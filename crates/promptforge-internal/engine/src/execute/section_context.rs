@@ -2,8 +2,8 @@
 //!
 //! [`SectionContext`] is born at a section entry and dies at its teardown.
 //! It owns the section VM plus the state the block walk reads and writes -
-//! the `sys` JSON, the seeded `var`, a spawned chain's `item`, and the
-//! tool-call counts - and it holds the frame's effective reporting handles
+//! the `sys` JSON, a spawned chain's `item`, and the tool-call counts -
+//! and it holds the frame's effective reporting handles
 //! (the task-scoped event emitter and the turn counter) seeded out of the
 //! run context; a task chain's context is the spawn's fork, so the handles
 //! reach the frame and the task's nested chains through the one value.
@@ -23,12 +23,13 @@ mod construct;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use crate::lua::{ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts};
-use crate::{Error, Result, subst};
+use promptforge_types::emitter::Emitter;
 use promptforge_types::event::lifecycle;
 
+use crate::lua::{ProseState, ScriptReport, SectionVm, ToolBinding, ToolCallCounts};
+use crate::{Error, Result, subst};
+
 use super::context::RunState;
-use promptforge_types::emitter::Emitter;
 
 /// The seeds a spawned task chain's first section entry receives beyond the
 /// shared Engine values: `tasks.spawn`'s `opts.item` (installed as the
@@ -79,9 +80,6 @@ pub(super) struct SectionContext {
     /// The section's `sys` JSON, enriched in place by the walk (the model
     /// binding).
     sys: serde_json::Value,
-    /// The walk's `var` table: seeded into the VM at construction, read back
-    /// out of it before teardown so the walk rolls it forward.
-    var: serde_json::Value,
     /// A spawned chain's `item` seed (a fanout arm's collection member) for
     /// `{{ item }}` substitution; `None` on every other entry.
     item: Option<serde_json::Value>,
@@ -111,22 +109,16 @@ pub(super) struct ReportingHandles {
 }
 
 impl SectionContext {
-    /// Reads the section's final `var` back into the frame and returns it,
-    /// so the walk rolls it forward. Must run while the frame is live,
-    /// before its drop: the read goes through the live VM.
+    /// Reads the section's final `var` out of the VM, so the walk rolls it
+    /// forward. Must run while the frame is live, before its drop: the read
+    /// goes through the live VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM's `var` cannot be
     /// converted back to JSON (the write guard keeps this conversion from
-    /// failing in practice).
-    pub(super) fn read_var(&mut self) -> Result<serde_json::Value> {
-        let Some(vm) = self.vm.as_mut() else {
-            return Err(Error::internal(
-                "the section frame's VM lives until the frame's own drop",
-            ));
-        };
-        self.var = vm.var()?;
-        Ok(self.var.clone())
+    /// failing in practice), or [`Error::Internal`] if the VM is gone.
+    pub(super) fn read_var(&self) -> Result<serde_json::Value> {
+        Ok(self.vm()?.var()?)
     }
 
     /// Reads the H1 pass's `argv` back as JSON while the frame is live: the
@@ -235,19 +227,19 @@ impl SectionContext {
 
 /// The `{{ }}` renderer for one frame's prose templates, its own blocks'
 /// and the libraries `require` loads alike: each render substitutes from
-/// the run's `args` and `argv`, the frame's `item`, and the section state
-/// the first read snapshots.
+/// the run's `args` and `argv`, shared with the run rather than copied,
+/// the frame's `item`, and the section state the first read snapshots.
 fn prose_renderer(
     ctx: &RunState,
     item: Option<serde_json::Value>,
 ) -> impl Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static {
-    let raw_args = ctx.args().to_owned();
-    let argv = ctx.argv().cloned();
+    let raw_args = ctx.args_shared();
+    let argv = ctx.argv_shared();
     move |template: &str, state: ProseState| -> mlua::Result<String> {
         let globals = |name: &str| (state.globals)(name).map_err(Error::from);
         let sources = subst::Sources {
             args: &raw_args,
-            argv: argv.as_ref(),
+            argv: argv.as_deref(),
             item: item.as_ref(),
             var: &state.var,
             sys: &state.sys,

@@ -14,8 +14,8 @@ use promptforge_types::ids::Provenance;
 mod effect;
 
 pub use effect::{
-    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, Round,
-    ToolAnswerRecord, ToolCallOrigin, ToolCaller,
+    AnswerRecord, ChatAnswerRecord, Effect, EffectAnswer, EffectId, EffectRecord, FailureRecord,
+    Round, ToolAnswerRecord, ToolCallOrigin, ToolCaller,
 };
 
 use crate::cancel::CancelHandle;
@@ -24,12 +24,15 @@ use crate::{Error, Result};
 
 use super::RunResult;
 use super::config::RunContext;
-use super::context::RunState;
+use super::context::{OwnedInputs, RunState};
 use super::error::RunError;
 use super::scheduler::Scheduler;
 
 /// The outcome of one call to [`Run::step`]: the run either continues or
 /// is over.
+///
+/// Closed on purpose, like [`Effect`]: the caller's loop names both
+/// outcomes, and a new one breaks every caller's build.
 #[derive(Debug)]
 pub enum Step {
     /// The run continues.
@@ -74,21 +77,38 @@ pub enum Step {
 /// change between calls. It holds its prompt through an `Arc`, so the
 /// caller can parse a prompt once and run it many times.
 pub struct Run {
-    /// The scheduler, present unless construction failed.
-    scheduler: Option<Scheduler>,
-    /// A construction failure, delivered as the first step's `Done`.
-    stillborn: Option<Error>,
+    /// Whether the run is live, failed to start, or has reported that
+    /// failure.
+    phase: Phase,
     /// The run's cancel flag, shared with every chain's VM hook.
     cancel: CancelHandle,
 }
 
+/// Where a run stands: live with its scheduler, failed to start with the
+/// failure its first step reports, or spent once that step has reported
+/// it.
+enum Phase {
+    /// The run started; its scheduler steps it.
+    Live(Box<Scheduler>),
+    /// The run failed to start; the first step reports this failure.
+    Stillborn(Error),
+    /// The run failed to start and its first step reported why.
+    Spent,
+}
+
 impl std::fmt::Debug for Run {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Run")
-            .field("live", &self.scheduler.is_some())
-            .field("stillborn", &self.stillborn)
-            .field("cancel", &self.cancel)
-            .finish()
+        let phase = match &self.phase {
+            Phase::Live(_) => "live",
+            Phase::Stillborn(_) => "stillborn",
+            Phase::Spent => "spent",
+        };
+        let mut state = f.debug_struct("Run");
+        state.field("phase", &phase);
+        if let Phase::Stillborn(error) = &self.phase {
+            state.field("failure", error);
+        }
+        state.field("cancel", &self.cancel).finish()
     }
 }
 
@@ -106,20 +126,16 @@ impl Run {
     /// prompt has no supported `promptforge:` version, when the context's
     /// filesystem declares no store, or when the store's backend fails its
     /// probe.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "the public API takes the context by value: Run::new owns the run's inputs"
-    )]
     #[must_use]
-    pub fn new(prompt: Arc<Prompt>, args: &str, ctx: RunContext) -> Run {
+    pub fn new(prompt: Arc<Prompt>, args: &str, mut ctx: RunContext) -> Run {
         // The context's one flag, held here so a stillborn run still has
         // the handle `cancel` and `cancel_handle` name.
         let cancel = ctx.cancel.clone();
-        match prepare_state(prompt, args, &ctx) {
+        let owned = OwnedInputs::take(&mut ctx);
+        match prepare_state(prompt, args, &ctx, owned) {
             Ok(state) => Self::from_state(state),
             Err(error) => Run {
-                scheduler: None,
-                stillborn: Some(error),
+                phase: Phase::Stillborn(error),
                 cancel,
             },
         }
@@ -132,14 +148,14 @@ impl Run {
     pub(crate) fn new_for_test(
         prompt: Arc<Prompt>,
         args: &str,
-        ctx: &RunContext,
+        mut ctx: RunContext,
         edit: impl FnOnce(RunState) -> RunState,
     ) -> Run {
-        match prepare_state(prompt, args, ctx) {
+        let owned = OwnedInputs::take(&mut ctx);
+        match prepare_state(prompt, args, &ctx, owned) {
             Ok(state) => Self::from_state(edit(state)),
             Err(error) => Run {
-                scheduler: None,
-                stillborn: Some(error),
+                phase: Phase::Stillborn(error),
                 cancel: ctx.cancel.clone(),
             },
         }
@@ -152,8 +168,7 @@ impl Run {
     pub(crate) fn from_state(state: RunState) -> Run {
         let cancel = state.cancel().clone();
         Run {
-            scheduler: Some(Scheduler::new(state)),
-            stillborn: None,
+            phase: Phase::Live(Box::new(Scheduler::new(state))),
             cancel,
         }
     }
@@ -170,20 +185,18 @@ impl Run {
     /// [`RunResult::Failure`]. So the caller drives the loop and owns the
     /// retry policy without catching a panic.
     pub fn step(&mut self) -> Step {
-        if let Some(error) = self.stillborn.take() {
-            return Step::Done {
-                result: RunResult::Failure(RunError::from(error)),
-                events: Vec::new(),
-            };
+        if let Phase::Live(scheduler) = &mut self.phase {
+            return scheduler.step();
         }
-        match self.scheduler.as_mut() {
-            Some(scheduler) => scheduler.step(),
-            None => Step::Done {
-                result: RunResult::Failure(RunError::from(Error::internal(
-                    "a run that failed to start cannot be stepped again",
-                ))),
-                events: Vec::new(),
-            },
+        let failure = match std::mem::replace(&mut self.phase, Phase::Spent) {
+            Phase::Stillborn(error) => error,
+            Phase::Live(_) | Phase::Spent => {
+                Error::internal("a run that failed to start cannot be stepped again")
+            }
+        };
+        Step::Done {
+            result: RunResult::Failure(RunError::from(failure)),
+            events: Vec::new(),
         }
     }
 
@@ -203,7 +216,7 @@ impl Run {
     /// `resume` cannot fail: a bad answer ends the run with a
     /// [`RunResult::Failure`] instead of returning an error or panicking.
     pub fn resume(&mut self, id: EffectId, answer: EffectAnswer) {
-        if let Some(scheduler) = self.scheduler.as_mut() {
+        if let Phase::Live(scheduler) = &mut self.phase {
             scheduler.resume(id, answer);
         }
     }
@@ -238,35 +251,49 @@ impl Run {
     /// events, which are only a report.
     #[must_use]
     pub fn decided(&self) -> bool {
-        self.scheduler.as_ref().is_none_or(Scheduler::decided)
+        match &self.phase {
+            Phase::Live(scheduler) => scheduler.decided(),
+            Phase::Stillborn(_) | Phase::Spent => true,
+        }
     }
 
     /// The scheduler behind the run, for the suites that inspect its
     /// arena.
     #[cfg(test)]
     pub(crate) fn scheduler_for_test(&mut self) -> &mut Scheduler {
-        self.scheduler
-            .as_mut()
-            .expect("a run built from a state holds its scheduler")
+        match &mut self.phase {
+            Phase::Live(scheduler) => scheduler,
+            Phase::Stillborn(_) | Phase::Spent => {
+                panic!("a run built from a state holds its scheduler")
+            }
+        }
     }
 
     /// The run's model-turn counter, for the suites that count turns: zero
     /// for a run that failed to start.
     #[cfg(test)]
     pub(crate) fn turns_for_test(&self) -> u32 {
-        self.scheduler.as_ref().map_or(0, Scheduler::turns_for_test)
+        match &self.phase {
+            Phase::Live(scheduler) => scheduler.turns_for_test(),
+            Phase::Stillborn(_) | Phase::Spent => 0,
+        }
     }
 }
 
-/// Assembles the run state from the caller's context, checking the version
-/// gate and then the declared store.
+/// Assembles the run state from the caller's context and the inputs moved
+/// out of it, checking the version gate and then the declared store.
 ///
 /// # Errors
 /// Returns [`Error::UnsupportedVersion`] or a structural parse error for a
 /// prompt that is not a supported promptforge prompt, or [`Error::Store`]
 /// when the handle declares no store or the store's backend fails the
 /// probe.
-fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<RunState> {
+fn prepare_state(
+    prompt: Arc<Prompt>,
+    args: &str,
+    ctx: &RunContext,
+    owned: OwnedInputs,
+) -> Result<RunState> {
     match prompt.frontmatter().promptforge() {
         Some(0) => {}
         Some(other) => return Err(Error::UnsupportedVersion(other)),
@@ -287,7 +314,7 @@ fn prepare_state(prompt: Arc<Prompt>, args: &str, ctx: &RunContext) -> Result<Ru
         .acquire(promptforge_vfs::Origin::new("store mount probe"))
         .map_err(Error::store)?;
     promptforge_vfs::detail::probe_store(&probe).map_err(Error::store)?;
-    Ok(RunState::new(prompt, args, &ctx.vfs, ctx))
+    Ok(RunState::new(prompt, args, ctx, owned))
 }
 
 #[cfg(test)]

@@ -118,14 +118,8 @@ async fn a_sections_round_reaches_the_broker_as_chat_and_a_nested_infer_round_as
     assert_eq!(
         *broker.rounds.lock().expect("the round log is healthy"),
         [
-            Round {
-                id: RoundId::new(0),
-                origin: ReplyOrigin::Infer,
-            },
-            Round {
-                id: RoundId::new(1),
-                origin: ReplyOrigin::Chat,
-            },
+            Round::new(RoundId::new(0), ReplyOrigin::Infer),
+            Round::new(RoundId::new(1), ReplyOrigin::Chat),
         ],
         "each round reaches the broker numbered in dispatch order, under the path that sent it"
     );

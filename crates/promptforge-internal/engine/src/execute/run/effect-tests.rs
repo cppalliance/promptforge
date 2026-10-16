@@ -3,8 +3,9 @@
 //! the whole request. Then the answer record: a `Chat` answer projects to
 //! the reply or the requested tool names beside the model and finish
 //! reason, never the bodies; a `ToolCall` answer projects to its text and
-//! trust; and every failure projects to its display text. Each record
-//! round-trips through serde, as a run log and a replay depend on.
+//! trust; and every failure projects to its kind's tag and its display
+//! text. Each record round-trips through serde, as a run log and a replay
+//! depend on.
 
 use promptforge_model_client::client::{RawExchange, ToolCall};
 use promptforge_model_client::model::CompletionErrorKind;
@@ -31,10 +32,7 @@ fn chat_effect(messages: Vec<Message>, after: Option<RoundId>, keep: u64) -> Eff
         after,
         keep,
         tools: Vec::new(),
-        round: Round {
-            id: RoundId::new(3),
-            origin: ReplyOrigin::Chat,
-        },
+        round: Round::new(RoundId::new(3), ReplyOrigin::Chat),
     }
 }
 
@@ -147,12 +145,9 @@ fn a_chat_answer_records_the_reply_model_and_finish_reason_without_the_bodies() 
     let record = answer.record();
     assert_eq!(
         record,
-        AnswerRecord::Chat(Ok(ChatAnswerRecord {
-            model: "test-model".to_owned(),
-            finish_reason: Some("stop".to_owned()),
-            reply: Some("the reply".to_owned()),
-            tool_calls: Vec::new(),
-        }))
+        AnswerRecord::Chat(Ok(ChatAnswerRecord::new("test-model")
+            .with_finish_reason(Some("stop".to_owned()))
+            .with_reply(Some("the reply".to_owned()))))
     );
     let text = serde_json::to_string(&record).expect("an answer record serializes");
     assert!(
@@ -172,12 +167,9 @@ fn a_chat_answer_with_tool_calls_records_their_names_in_call_order_and_no_reply(
     let record = answer.record();
     assert_eq!(
         record,
-        AnswerRecord::Chat(Ok(ChatAnswerRecord {
-            model: "test-model".to_owned(),
-            finish_reason: Some("tool_calls".to_owned()),
-            reply: None,
-            tool_calls: vec!["grab".to_owned(), "echo".to_owned()],
-        }))
+        AnswerRecord::Chat(Ok(ChatAnswerRecord::new("test-model")
+            .with_finish_reason(Some("tool_calls".to_owned()))
+            .with_tool_calls(vec!["grab".to_owned(), "echo".to_owned()])))
     );
     let text = serde_json::to_string(&record).expect("an answer record serializes");
     assert!(
@@ -195,17 +187,14 @@ fn a_canned_chat_answer_records_no_finish_reason() {
     let answer = EffectAnswer::Chat(Ok(Box::new(completion)));
     assert_eq!(
         answer.record(),
-        AnswerRecord::Chat(Ok(ChatAnswerRecord {
-            model: "canned-model".to_owned(),
-            finish_reason: None,
-            reply: Some("canned".to_owned()),
-            tool_calls: Vec::new(),
-        }))
+        AnswerRecord::Chat(Ok(
+            ChatAnswerRecord::new("canned-model").with_reply(Some("canned".to_owned()))
+        ))
     );
 }
 
 #[test]
-fn a_failed_chat_answer_records_the_errors_display_text() {
+fn a_failed_chat_answer_records_the_kinds_tag_and_the_errors_display_text() {
     let error = CompletionError::new(
         CompletionErrorKind::MalformedResponse,
         "the model backend sent a reply that could not be understood: \
@@ -219,7 +208,10 @@ fn a_failed_chat_answer_records_the_errors_display_text() {
     );
     assert!(!expected.contains("hidden"), "the detail is never recorded");
     let record = EffectAnswer::Chat(Err(error)).record();
-    assert_eq!(record, AnswerRecord::Chat(Err(expected)));
+    assert_eq!(
+        record,
+        AnswerRecord::Chat(Err(FailureRecord::new("malformed_response", expected)))
+    );
     assert_eq!(answer_round_trip(&record), record);
 }
 
@@ -228,20 +220,18 @@ fn a_tool_call_answer_records_the_outputs_text_and_trust() {
     let trusted = EffectAnswer::ToolCall(Ok(ToolOutput::trusted("done"))).record();
     assert_eq!(
         trusted,
-        AnswerRecord::ToolCall(Ok(ToolAnswerRecord {
-            text: "done".to_owned(),
-            trusted: true,
-        }))
+        AnswerRecord::ToolCall(Ok(ToolAnswerRecord::new("done", OutputTrust::Trusted)))
+    );
+    assert_eq!(
+        serde_json::to_string(&trusted).expect("a tool answer records"),
+        r#"{"ToolCall":{"Ok":{"text":"done","trust":"trusted"}}}"#
     );
     assert_eq!(answer_round_trip(&trusted), trusted);
 
     let untrusted = EffectAnswer::ToolCall(Ok(ToolOutput::untrusted("<html>"))).record();
     assert_eq!(
         untrusted,
-        AnswerRecord::ToolCall(Ok(ToolAnswerRecord {
-            text: "<html>".to_owned(),
-            trusted: false,
-        }))
+        AnswerRecord::ToolCall(Ok(ToolAnswerRecord::new("<html>", OutputTrust::Untrusted)))
     );
     assert_eq!(answer_round_trip(&untrusted), untrusted);
 }
@@ -253,10 +243,44 @@ fn a_failed_tool_call_answer_records_the_errors_display_text_and_hides_its_sourc
     let record = EffectAnswer::ToolCall(Err(error)).record();
     assert_eq!(
         record,
-        AnswerRecord::ToolCall(Err("backend failed".to_owned())),
+        AnswerRecord::ToolCall(Err(FailureRecord::new("backend", "backend failed"))),
         "the display text is the model-safe message; the source stays behind it"
     );
     assert_eq!(answer_round_trip(&record), record);
+}
+
+#[test]
+fn a_failure_record_of_each_kind_round_trips_through_json() {
+    let cases = [
+        (
+            EffectAnswer::Chat(Err(CompletionError::new(
+                CompletionErrorKind::RateLimited,
+                "the model backend is limiting the request rate",
+            ))),
+            r#"{"Chat":{"Err":{"kind":"rate_limited","message":"the model backend is limiting the request rate"}}}"#,
+        ),
+        (
+            EffectAnswer::ToolCall(Err(ToolError::new(
+                ToolErrorKind::InvalidArguments,
+                "path is required",
+            ))),
+            r#"{"ToolCall":{"Err":{"kind":"invalid_arguments","message":"path is required"}}}"#,
+        ),
+        (
+            EffectAnswer::Vfs(Err(VfsError::ReadOnly {
+                path: "notes.md".to_owned(),
+            })),
+            r#"{"Vfs":{"Err":{"kind":"read_only","message":"read-only: notes.md is served read-only and cannot change"}}}"#,
+        ),
+    ];
+    for (answer, line) in cases {
+        let record = answer.record();
+        assert_eq!(
+            serde_json::to_string(&record).expect("a failure record serializes"),
+            line
+        );
+        assert_eq!(answer_round_trip(&record), record);
+    }
 }
 
 #[test]
@@ -298,19 +322,20 @@ fn the_store_answer_records_byte_identical_json_for_every_outcome() {
 }
 
 #[test]
-fn a_failed_store_answer_records_the_vfs_errors_display_text() {
+fn a_failed_store_answer_records_the_vfs_errors_tag_and_display_text() {
     let error = VfsError::NotFound {
         path: "missing.txt".to_owned(),
     };
     let expected = error.to_string();
     assert_eq!(expected, "not found: missing.txt");
     let record = EffectAnswer::Vfs(Err(error)).record();
-    assert_eq!(record, AnswerRecord::Vfs(Err(expected)));
+    assert_eq!(
+        record,
+        AnswerRecord::Vfs(Err(FailureRecord::new("not_found", expected)))
+    );
     assert_eq!(
         serde_json::to_string(&record).expect("a store answer records"),
-        r#"{"Vfs":{"Err":"not found: missing.txt"}}"#,
-        "a failure keeps the `{{\"Err\": \"...\"}}` shape, now holding the \
-         VfsError's display text"
+        r#"{"Vfs":{"Err":{"kind":"not_found","message":"not found: missing.txt"}}}"#
     );
     assert_eq!(answer_round_trip(&record), record);
 }

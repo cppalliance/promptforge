@@ -12,14 +12,15 @@
 
 use std::sync::atomic::AtomicU32;
 
-use crate::Error;
-use crate::model::{Completion, CompletionError, CompletionResult};
+use promptforge_types::emitter::Emitter;
 use promptforge_types::event::ReplyOrigin;
 use promptforge_types::event::lifecycle;
 use promptforge_types::ids::RoundId;
 
-use super::support::{advance_turn, report_model_turn};
-use promptforge_types::emitter::Emitter;
+use crate::Error;
+use crate::model::{Completion, CompletionError, CompletionErrorKind, CompletionResult};
+
+use super::turn;
 
 /// Reports one completed infer round through the shared round report and
 /// renders its text. The report fires the turn advance's round events - the
@@ -35,8 +36,8 @@ fn accept_infer_completion(
     section: &str,
     turns: &AtomicU32,
 ) -> Result<String, Error> {
-    let turn = advance_turn(turns);
-    let (outcome, _) = report_model_turn(
+    let turn = turn::advance_turn(turns);
+    let (outcome, _) = turn::report_model_turn(
         emitter,
         section,
         turn,
@@ -50,14 +51,23 @@ fn accept_infer_completion(
         // protocol violation rather than something to dispatch.
         // `CompletionResult` is `#[non_exhaustive]` across the crate boundary:
         // an unrecognized future outcome is the same violation.
-        CompletionResult::ToolCalls(_) => Err(Error::Lua(
-            "model inference received tool calls but no tools were advertised".to_owned(),
+        CompletionResult::ToolCalls(_) => Err(malformed_reply(
+            "the round sent tool calls, but no tools were advertised",
         )),
-        _ => Err(Error::Lua(
-            "model inference received an unrecognized outcome but no tools were advertised"
-                .to_owned(),
+        _ => Err(malformed_reply(
+            "the round sent an unrecognized outcome, and no tools were advertised",
         )),
     }
+}
+
+/// The malformed-reply failure for an infer round whose outcome breaks the
+/// round's protocol, with `specific` naming how.
+fn malformed_reply(specific: &str) -> Error {
+    let kind = CompletionErrorKind::MalformedResponse;
+    Error::Completion(CompletionError::new(
+        kind,
+        format!("{}: {specific}", kind.phrase()),
+    ))
 }
 
 /// Applies one infer round's answer - the completion the performer
@@ -70,8 +80,9 @@ fn accept_infer_completion(
 /// so no `MODEL_TURN_FAILED` fires for an aborted round.
 ///
 /// # Errors
-/// Returns the completion's failure, or [`Error::Lua`] when the round
-/// produced tool calls (none were advertised) or an unrecognized outcome.
+/// Returns the completion's failure, or an [`Error::Completion`] of kind
+/// `MalformedResponse` when the round produced tool calls (none were
+/// advertised) or an unrecognized outcome.
 pub(super) fn accept_infer(
     result: std::result::Result<Box<Completion>, CompletionError>,
     round: RoundId,
@@ -88,3 +99,7 @@ pub(super) fn accept_infer(
     };
     accept_infer_completion(*completion, round, emitter, section, turns)
 }
+
+#[cfg(test)]
+#[path = "infer-tests.rs"]
+mod tests;

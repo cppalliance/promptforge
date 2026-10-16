@@ -12,9 +12,9 @@ use crate::test_support::scenario::EXECUTION;
 use promptforge_vfs::{VfsError, VfsRef};
 
 /// A hand-built `VfsRef` that declares no store fails the run up front
-/// with [`RunErrorKind::Vfs`]: every run needs a declared store.
-/// (`RunContext::prepare` never replaces the handle, so the raw handle's
-/// declaration is what the run sees.)
+/// with [`RunErrorKind::Vfs`], saying what is missing: every run needs a
+/// declared store. (`RunContext::prepare` never replaces the handle, so
+/// the raw handle's declaration is what the run sees.)
 #[test]
 fn a_handle_without_a_declared_store_fails_the_run() {
     let source = one_section("store.write('overlay.txt', 'overlaid')");
@@ -25,6 +25,10 @@ fn a_handle_without_a_declared_store_fails_the_run() {
         error.kind(),
         RunErrorKind::Vfs,
         "the run fails as a store error: {error}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "this run declares no store, so no store operation can run"
     );
 }
 

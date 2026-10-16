@@ -119,10 +119,7 @@ async fn round(broker: &WorkshopBroker) -> Result<String, CompletionError> {
             vec![Message::user("hi")],
             Vec::new(),
             CompletionOptions::new("m"),
-            Round {
-                id: RoundId::new(0),
-                origin: ReplyOrigin::Infer,
-            },
+            Round::new(RoundId::new(0), ReplyOrigin::Infer),
         )
         .await?;
     match completion.result() {
@@ -298,10 +295,7 @@ async fn run_round(broker: &RunBroker, id: u64, origin: ReplyOrigin) -> String {
             vec![Message::user("hi")],
             Vec::new(),
             CompletionOptions::new("m"),
-            Round {
-                id: RoundId::new(id),
-                origin,
-            },
+            Round::new(RoundId::new(id), origin),
         )
         .await
         .expect("the gateway answers");

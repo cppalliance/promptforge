@@ -174,6 +174,18 @@ pub fn store_error_message(op: &VfsOp, error: &VfsError) -> String {
     }
 }
 
+/// The model-facing message for a store failure that has no operation to
+/// render - deriving a store view, the declared-store probe: a run that
+/// declares no store is told so, and any other failure follows the fixed
+/// probe text.
+#[must_use]
+pub fn store_probe_message(error: &VfsError) -> String {
+    match error {
+        VfsError::NoStore => "this run declares no store, so no store operation can run".to_owned(),
+        _ => format!("store operation failed: {error}"),
+    }
+}
+
 /// Records a store conflict in the shared slot the Engine reads when the
 /// Plugin preludes return: a conflict a prelude caught with `pcall` must
 /// still end the run with a determinism violation, so the direct closures
@@ -244,7 +256,7 @@ pub(crate) fn install_store_table(
     let shared = StoreShared {
         view: Arc::new(
             promptforge_vfs::detail::store_view(access).map_err(|cause| Error::Store {
-                message: format!("store operation failed: {cause}"),
+                message: store_probe_message(&cause),
                 cause,
             })?,
         ),
