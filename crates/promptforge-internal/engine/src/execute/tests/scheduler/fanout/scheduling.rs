@@ -183,12 +183,12 @@ fn fanout_over_a_large_collection_admits_arms_under_the_ceiling() {
         models.infer(item)\n\
         return item\n\
         ```\n";
-    promptforge_lua::reset_section_vm_peak();
+    promptforge_lua::test_support::reset_section_vm_peak();
     let trace = scheduler_scenario(md).chat(&gateway).run();
 
     assert_eq!(trace.text(), "1025:1:1025");
     let ceiling = RunLimits::new().concurrency().get();
-    let peak = promptforge_lua::section_vm_peak();
+    let peak = promptforge_lua::test_support::section_vm_peak();
     assert!(
         (2..=ceiling + 1).contains(&peak),
         "between the parent plus one admitted arm and the ceiling's arms plus the parent hold \

@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mlua::{Lua, Value};
-use promptforge_model_client::client::Role;
 use promptforge_model_client::model::ModelSet;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::tools::{ToolDescriptor, ToolId};
@@ -24,8 +23,10 @@ use crate::error::Result;
 use crate::handles::resolve_section_target;
 use crate::hardening::install_instruction_budget;
 use crate::sys::{guarded_var, var_snapshot_table, var_to_json};
-use crate::test_vm::{BuiltVm, TEST_SECTION, TestVm, fresh_access, test_nonce};
-use crate::vm::{DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, LuaOutcome, run_chunk};
+use crate::test_vm::{
+    BuiltVm, LuaOutcome, TEST_SECTION, TestVm, fresh_access, run_chunk, test_nonce,
+};
+use crate::vm::{DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES};
 
 #[path = "tests-recording.rs"]
 pub(crate) mod recording;
@@ -234,30 +235,40 @@ fn fixture_set(tools: &[(&str, &str)]) -> ToolSet {
     )
 }
 
-/// A text record under `role`, with no tool calls and no call id.
+/// A text record under `role`, with no tool calls.
 #[track_caller]
-pub(crate) fn text(role: Role, content: &str) -> MessageRecord {
+pub(crate) fn text(role: RecordRole, content: &str) -> MessageRecord {
     MessageRecord {
         role,
         content: MessageContent::Text(content.to_owned()),
         tool_calls: Vec::new(),
-        tool_call_id: None,
     }
 }
 
 #[track_caller]
 pub(crate) fn system(content: &str) -> MessageRecord {
-    text(Role::System, content)
+    text(RecordRole::System, content)
 }
 
 #[track_caller]
 pub(crate) fn user(content: &str) -> MessageRecord {
-    text(Role::User, content)
+    text(RecordRole::User, content)
 }
 
 #[track_caller]
 pub(crate) fn assistant(content: &str) -> MessageRecord {
-    text(Role::Assistant, content)
+    text(RecordRole::Assistant, content)
+}
+
+/// A tool result answering the call `id`, holding the text `content`.
+#[track_caller]
+pub(crate) fn tool_result(id: &str, content: &str) -> MessageRecord {
+    text(
+        RecordRole::Tool {
+            tool_call_id: id.to_owned(),
+        },
+        content,
+    )
 }
 
 /// The 1-based number of the first line where two texts differ. When one is

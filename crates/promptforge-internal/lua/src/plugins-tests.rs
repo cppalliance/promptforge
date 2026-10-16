@@ -55,7 +55,7 @@ fn roster_set() -> ToolSet {
 /// The Plugins `plugins.offer` recorded on `vm`, by name.
 #[track_caller]
 fn offered_plugins(vm: &SectionVm) -> Vec<String> {
-    vm.tool_runtime
+    vm.tool_runtime()
         .lock()
         .expect("the runtime mutex is not poisoned")
         .plugins
@@ -205,7 +205,7 @@ fn offer_records_each_plugin_once_from_a_name_an_object_or_a_list() {
         "each Plugin is recorded once, in first-offer order"
     );
     assert!(
-        vm.tool_runtime
+        vm.tool_runtime()
             .lock()
             .expect("the runtime mutex is not poisoned")
             .added
@@ -231,7 +231,10 @@ fn offer_refuses_a_wrong_or_extra_argument_and_an_absent_plugin_and_records_noth
         ("plugins.offer({ 'web', 42 })", format!("{shape} integer")),
         (
             "plugins.offer('web/fetch')",
-            format!("{shape} \"web/fetch\""),
+            format!(
+                "{shape} \"web/fetch\": {}",
+                PluginId::parse("web/fetch").expect_err("a tool id is not a Plugin id")
+            ),
         ),
         (
             "plugins.offer('web', 'gh')",

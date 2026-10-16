@@ -12,9 +12,8 @@ fn models_default_takes_a_label_and_parks_the_prompt_wide_default() {
         Some(false),
         &["no-thinking"],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.default("writer")"#),
         &null_emitter(),
@@ -38,9 +37,8 @@ fn models_default_returns_an_inspectable_handle() {
         Some(false),
         &["no-thinking", "fast"],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(
             r#"local model = models.default("writer")
@@ -71,9 +69,8 @@ fn models_default_rejects_an_unbound_label() {
         None,
         &[],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     let error = vm
         .run_chunk(
             &chunk(r#"models.default("ghost")"#),
@@ -103,9 +100,8 @@ fn models_default_is_idempotent_and_never_changes_mid_run() {
             &[],
         ),
     ]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     // A library every section requires re-runs in each, so re-naming the
     // same default is a no-op.
     vm.run_chunk(
@@ -140,9 +136,8 @@ fn models_default_resolves_the_section_model_without_use() {
         Some(false),
         &["no-thinking"],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.default("writer")"#),
         &null_emitter(),

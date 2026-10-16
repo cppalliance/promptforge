@@ -105,7 +105,7 @@ end";
 }
 
 #[test]
-fn the_var_view_raises_the_whole_refusal_for_a_string_or_integer_key() {
+fn the_var_view_raises_the_whole_refusal_for_a_string_integer_or_other_key() {
     let vm = section_vm_with_var(&json!({ "mode": "fast" }));
     let probe = "\
 function probe_set(key)
@@ -120,7 +120,11 @@ end";
         ),
         (
             "1",
-            "var is read-only inside a Plugin prelude; cannot set 'Integer(1)'",
+            "var is read-only inside a Plugin prelude; cannot set '1'",
+        ),
+        (
+            "2.5",
+            "var is read-only inside a Plugin prelude; cannot set 'number'",
         ),
     ] {
         let message: String = vm.eval(&format!("return probe_set({key})"));

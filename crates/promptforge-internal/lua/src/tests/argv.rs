@@ -57,7 +57,7 @@ fn frozen_argv_rejects_writes_at_any_depth() {
 }
 
 #[test]
-fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
+fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_integer_or_other_key() {
     let argv = json!({ "query": "papers" });
     let vm = TestVm::new().argv(Argv::Frozen(Some(&argv))).build();
     for (target, refusal) in [
@@ -65,9 +65,10 @@ fn a_frozen_argv_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
             "argv.query",
             "argv is frozen outside H1: cannot set field 'query'",
         ),
+        ("argv[1]", "argv is frozen outside H1: cannot set field 1"),
         (
-            "argv[1]",
-            "argv is frozen outside H1: cannot set field Integer(1)",
+            "argv[2.5]",
+            "argv is frozen outside H1: cannot set field number",
         ),
     ] {
         let source =

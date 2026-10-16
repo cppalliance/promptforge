@@ -26,7 +26,7 @@ fn spawn_parses_target_seeds_var_and_origin() {
             index,
             var,
             origin,
-            fanout,
+            via,
         } => {
             assert_eq!(target, "## Child");
             assert_eq!(input.as_deref(), Some("override"));
@@ -34,7 +34,11 @@ fn spawn_parses_target_seeds_var_and_origin() {
             assert_eq!(index, Some(3));
             assert_eq!(var, json!({ "k": 1 }));
             assert_eq!(origin, TaskOrigin::Author);
-            assert!(!fanout, "an absent mark is a plain `tasks.spawn`");
+            assert_eq!(
+                via,
+                crate::SpawnVia::Spawn,
+                "an absent mark is a plain `tasks.spawn`"
+            );
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }
@@ -51,7 +55,11 @@ fn spawn_reads_the_fanout_mark_and_rejects_a_non_boolean_one() {
     table.raw_set("fanout", true).expect("raw_set");
     set_var_snapshot(&lua, &table);
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
-        Request::Spawn { fanout, .. } => assert!(fanout, "the fanout shim's mark is read"),
+        Request::Spawn { via, .. } => assert_eq!(
+            via,
+            crate::SpawnVia::Fanout,
+            "the fanout shim's mark is read"
+        ),
         other => panic!("expected a spawn request, got {other:?}"),
     }
 
@@ -112,6 +120,50 @@ fn spawn_seed_shape_errors_are_the_calls_error() {
             assert_eq!(message, "index must be a non-negative integer, got -1");
         }
         other => panic!("expected the index call error, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unconvertible_spawn_item_is_the_calls_error_naming_the_conversion_failure() {
+    let lua = Lua::new();
+    let item = lua.create_table().expect("table creation cannot fail");
+    let member = lua
+        .create_function(|_, ()| Ok(()))
+        .expect("function creation cannot fail");
+    item.raw_set("f", member).expect("raw_set");
+    let cause = lua
+        .from_value::<serde_json::Value>(Value::Table(item.clone()))
+        .expect_err("a table holding a function has no JSON form");
+    let table = request_table(&lua, "spawn");
+    table.raw_set("target", "## Child").expect("raw_set");
+    table.raw_set("origin", "author").expect("raw_set");
+    table.raw_set("item", item).expect("raw_set");
+    set_var_snapshot(&lua, &table);
+    match Request::from_yield(&lua, &Value::Table(table)) {
+        YieldParse::Call(Answer::Spawn(Err(Error::Lua(message)))) => {
+            assert_eq!(
+                message,
+                format!("item must be a JSON-representable value: {cause}")
+            );
+        }
+        other => panic!("expected the item call error, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_malformed_task_id_is_the_calls_error_naming_the_parse_failure() {
+    let lua = Lua::new();
+    let cause = "0.x".parse::<TaskId>().expect_err("`0.x` is not a task id");
+    let table = request_table(&lua, "ready");
+    table.raw_set("task", "0.x").expect("raw_set");
+    match Request::from_yield(&lua, &Value::Table(table)) {
+        YieldParse::Call(Answer::Ready(Err(Error::Lua(message)))) => {
+            assert_eq!(
+                message,
+                format!("`0.x` is not a task id such as `0.1`: {cause}")
+            );
+        }
+        other => panic!("expected the task id call error, got {other:?}"),
     }
 }
 
@@ -225,7 +277,9 @@ fn concurrency_parses_an_optional_positive_whole_number_limit() {
         let table = request_table(&lua, "concurrency");
         table.raw_set("limit", value).expect("raw_set");
         match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
-            Request::Concurrency { limit } => assert_eq!(limit, Some(expected)),
+            Request::Concurrency { limit } => {
+                assert_eq!(limit.map(std::num::NonZeroU64::get), Some(expected));
+            }
             other => panic!("expected a concurrency request, got {other:?}"),
         }
     }
@@ -254,7 +308,9 @@ fn concurrency_converts_a_whole_number_float_and_refuses_an_out_of_range_one() {
     let table = request_table(&lua, "concurrency");
     table.raw_set("limit", Value::Number(8.0)).expect("raw_set");
     match expect_request(Request::from_yield(&lua, &Value::Table(table))) {
-        Request::Concurrency { limit } => assert_eq!(limit, Some(8)),
+        Request::Concurrency { limit } => {
+            assert_eq!(limit.map(std::num::NonZeroU64::get), Some(8));
+        }
         other => panic!("expected a concurrency request, got {other:?}"),
     }
     let table = request_table(&lua, "concurrency");

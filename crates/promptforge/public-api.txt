@@ -31,6 +31,7 @@
 #[non_exhaustive] pub enum promptforge::vfs::Verdict
 #[non_exhaustive] pub enum promptforge::vfs::VfsError
 #[non_exhaustive] pub enum promptforge::vfs::VfsOp
+#[non_exhaustive] pub enum promptforge::vfs::VfsOutcome
 #[non_exhaustive] pub enum promptforge::vfs::Writability
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
@@ -442,7 +443,6 @@ pub enum promptforge::effect::AnswerRecord
 pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
-pub enum promptforge::vfs::VfsOutcome
 pub fn promptforge::MissingService::new(plugin: promptforge::plugins::PluginId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
 pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
 pub fn promptforge::ParseError::kind(&self) -> promptforge::ParseErrorKind

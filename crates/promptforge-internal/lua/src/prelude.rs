@@ -26,7 +26,7 @@ use mlua::{Lua, Table, Value};
 use promptforge_types::plugins::{PluginId, Prelude};
 
 use crate::error::{Error, Result};
-use crate::proxy::read_only_proxy;
+use crate::proxy::{key_path, key_text, read_only_proxy};
 
 /// The `_G` names a prelude's environment reads, as bound when it installs.
 const VISIBLE_GLOBALS: [&str; 19] = [
@@ -129,7 +129,7 @@ fn read_only_var(lua: &Lua, target: Table, path: String) -> mlua::Result<Table> 
     let index = lua.create_function(move |lua, (_view, key): (Value, Value)| {
         match target.get::<Value>(key.clone())? {
             Value::Table(nested) => {
-                read_only_var(lua, nested, child_path(&path, &key)).map(Value::Table)
+                read_only_var(lua, nested, key_path(&path, &key)).map(Value::Table)
             }
             other => Ok(other),
         }
@@ -137,18 +137,9 @@ fn read_only_var(lua: &Lua, target: Table, path: String) -> mlua::Result<Table> 
     read_only_proxy(
         lua,
         Value::Function(index),
-        move |key| format!("{refusal} '{}'", field_name(key)),
+        move |key| format!("{refusal} '{}'", key_text(key)),
         "var is read-only",
     )
-}
-
-/// Renders the path of a field read through a `var` view, for its refusal.
-fn child_path(path: &str, key: &Value) -> String {
-    match key {
-        Value::String(name) => format!("{path}.{}", name.to_string_lossy()),
-        Value::Integer(index) => format!("{path}[{index}]"),
-        other => format!("{path}[{other:?}]"),
-    }
 }
 
 /// Reads the prelude's globals off its environment table's own entries,
@@ -213,18 +204,10 @@ fn seal(lua: &Lua, plugin: &PluginId, name: &str, hidden: Table) -> Result<Table
     read_only_proxy(
         lua,
         Value::Table(hidden),
-        move |key| format!("{refusal} '{}'", field_name(key)),
+        move |key| format!("{refusal} '{}'", key_text(key)),
         &format!("{name} is sealed"),
     )
     .map_err(Error::lua)
-}
-
-/// Renders a refused field's key for an error message.
-fn field_name(key: &Value) -> String {
-    match key {
-        Value::String(name) => name.to_string_lossy(),
-        other => format!("{other:?}"),
-    }
 }
 
 /// Maps a prelude's load or run failure to the model-facing message,

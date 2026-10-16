@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use crate::execute::protocol::{Answer, Request, VfsOp};
+use crate::execute::protocol::{Answer, Blocked, Request, VfsOp};
 use crate::execute::run::Effect;
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
@@ -77,13 +77,13 @@ fn vfs_observations(op: &VfsOp) -> Option<(Lifecycle, Lifecycle)> {
 /// What a chain parks on when it yields `request`, as `tasks.status`
 /// reports it; `None` for the arms answered inline, whose chain is back on
 /// the ready queue before anyone can look.
-fn blocked_on(request: &Request) -> Option<&'static str> {
+fn blocked_on(request: &Request) -> Option<Blocked> {
     match request {
-        Request::Infer { .. } | Request::Chat { .. } => Some("chat"),
-        Request::Call { .. } => Some("call"),
-        Request::JoinAny { .. } => Some("tasks"),
-        Request::ToolCall { .. } | Request::ToolCalls { .. } => Some("tool_call"),
-        Request::Store { .. } => Some("store"),
+        Request::Infer { .. } | Request::Chat { .. } => Some(Blocked::Chat),
+        Request::Call { .. } => Some(Blocked::Call),
+        Request::JoinAny { .. } => Some(Blocked::Tasks),
+        Request::ToolCall { .. } | Request::ToolCalls { .. } => Some(Blocked::ToolCall),
+        Request::Store { .. } => Some(Blocked::Store),
         Request::Spawn { .. }
         | Request::Timer { .. }
         | Request::Ready { .. }
@@ -136,7 +136,7 @@ impl Scheduler {
                 index,
                 var,
                 origin,
-                fanout,
+                via,
             } => {
                 self.dispatch_spawn(
                     id,
@@ -145,7 +145,7 @@ impl Scheduler {
                     TaskSeed { item, index },
                     var,
                     origin,
-                    fanout,
+                    via,
                 );
                 Ok(())
             }
@@ -231,7 +231,7 @@ impl Scheduler {
                 .frame
                 .as_ref()
                 .ok_or(Error::internal("a live chain holds its frame"))?;
-            resolve_model_binding(chain.ctx.models(), &frame.vm()?.model_runtime)?.ok_or_else(
+            resolve_model_binding(chain.ctx.models(), frame.vm()?.model_runtime())?.ok_or_else(
                 || Error::ModelRequired {
                     section: chain.section_name().to_owned(),
                 },

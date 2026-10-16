@@ -34,8 +34,6 @@ mod objects;
 mod userdata;
 
 pub(crate) use decode::tool_name;
-#[cfg(test)]
-pub(crate) use userdata::LuaToolHandle;
 
 use decode::{collect_offer_entries, local_params_schema};
 pub(crate) use objects::tool_object;
@@ -56,11 +54,12 @@ const LOCAL_HANDLERS_REGISTRY: &str = "promptforge.tools.local_handlers";
 /// the VM reports as registered.
 pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
     let handlers: Option<Table> = lua.named_registry_value(LOCAL_HANDLERS_REGISTRY)?;
-    match handlers
-        .map(|handlers| handlers.raw_get::<Value>(alias))
-        .transpose()?
-    {
-        Some(Value::Function(handler)) => Ok(handler),
+    let handler = match handlers {
+        Some(handlers) => handlers.raw_get::<Value>(alias)?,
+        None => Value::Nil,
+    };
+    match handler {
+        Value::Function(handler) => Ok(handler),
         _ => Err(mlua::Error::external(Error::Internal(
             "a local tool answer names a registered handler".into(),
         ))),
@@ -72,9 +71,9 @@ pub(crate) fn local_handler(lua: &Lua, alias: &str) -> mlua::Result<Function> {
 /// unknown-key diagnostic.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the Lua table or callbacks cannot be created or
+/// Returns [`Error::LuaRuntime`] if the Lua table or callbacks cannot be created or
 /// installed.
-fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: &[String]) -> Result<()> {
+fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: Vec<String>) -> Result<()> {
     let globals = lua.globals();
     let tools: Table = globals.raw_get("tools").map_err(Error::lua)?;
 
@@ -82,7 +81,6 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: &[String]
     let meta = lua.create_table().map_err(Error::lua)?;
 
     let counts_for_index = counts.clone();
-    let offered: Vec<String> = offered.to_vec();
     let index = lua
         .create_function(move |_, (_table, key): (Table, String)| {
             let value = counts_for_index.get(&key).map_err(mlua::Error::external)?;
@@ -133,7 +131,7 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, offered: &[String]
 /// increment it.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
+/// Returns [`Error::LuaRuntime`] when installing the `tools.calls` index fails.
 pub(crate) fn install_tool_call_counts(
     lua: &Lua,
     bound_tools: &ToolSet,
@@ -145,7 +143,7 @@ pub(crate) fn install_tool_call_counts(
         .iter()
         .map(|binding| binding.id().to_string())
         .collect();
-    install_lua_tool_calls(lua, &counts, &offered)?;
+    install_lua_tool_calls(lua, &counts, offered)?;
     Ok(counts)
 }
 
@@ -157,15 +155,16 @@ fn resolve_entries(call: &str, set: &ToolSet, entries: Vec<String>) -> mlua::Res
     entries
         .into_iter()
         .map(|name| {
-            let binding = ToolId::parse(&name)
-                .ok()
-                .and_then(|_| set.offered_binding(&name))
-                .ok_or_else(|| {
-                    mlua::Error::external(format!(
-                        "{call}: {name:?} is not a catalog tool in this run"
-                    ))
-                })?;
-            Ok(binding.alias().to_owned())
+            let binding = match ToolId::parse(&name) {
+                Ok(_) => set.offered_binding(&name),
+                Err(_) => None,
+            };
+            match binding {
+                Some(binding) => Ok(binding.alias().to_owned()),
+                None => Err(mlua::Error::external(format!(
+                    "{call}: {name:?} is not a catalog tool in this run"
+                ))),
+            }
         })
         .collect()
 }
@@ -178,7 +177,7 @@ fn resolve_entries(call: &str, set: &ToolSet, entries: Vec<String>) -> mlua::Res
 /// boundary.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if a Lua table or callback cannot be created or
+/// Returns [`Error::LuaRuntime`] if a Lua table or callback cannot be created or
 /// installed.
 pub(crate) fn install_tools(
     lua: &Lua,

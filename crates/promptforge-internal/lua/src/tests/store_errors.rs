@@ -11,9 +11,7 @@ fn a_store_install_without_a_store_names_why_in_its_message() {
             .acquire(Origin::new("no store test"))
             .expect("a handle without a store still acquires"),
     );
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &access)
-        .expect("Engine values must inject");
+    let vm = TestVm::new().access(access).inject();
     let error = vm
         .install_engine_globals(&null_emitter(), "Test")
         .expect_err("a handle without a store cannot install the store table");

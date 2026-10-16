@@ -67,20 +67,6 @@ impl ToolBinding {
         }
     }
 
-    /// Builds a binding for a test double: the identity and schema come
-    /// from the descriptor, and the description is `description`.
-    ///
-    /// A test helper for `promptforge-engine`'s executor tests, so it exists
-    /// only under `test-support`.
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn for_test(alias: &str, description: &str, descriptor: &ToolDescriptor) -> Self {
-        Self {
-            description: description.to_owned(),
-            ..Self::from_descriptor(alias, descriptor)
-        }
-    }
-
     /// Returns the model-facing name.
     #[must_use]
     pub fn alias(&self) -> &str {

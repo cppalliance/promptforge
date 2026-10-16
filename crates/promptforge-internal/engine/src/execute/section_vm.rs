@@ -19,16 +19,16 @@
 //! construction failure's handling differs (the walk propagates, the arm
 //! finishes its finalizer), and a limits failure must keep
 //! propagating as a bare `?` - routing it through teardown would emit
-//! `LUA_TEARDOWN_STARTED`/`SUCCEEDED` events the walk never emitted. For the
-//! same reason a failed setup returns the VM untorn-down: each driver owns
-//! its teardown boundary.
+//! `LUA_TEARDOWN_STARTED`/`SUCCEEDED` events the walk never emitted. Setup
+//! consumes the uninjected VM, so a setup failure tears it down here, the
+//! one place a VM that never reached its frame is torn down.
 
 use std::sync::Arc;
 
 use promptforge_types::emitter::Emitter;
 use promptforge_types::plugins::Prelude;
 
-use crate::lua::{Library, LibraryKey, ProseState, SectionText, SectionVm};
+use crate::lua::{Library, LibraryKey, ProseState, SectionText, SectionVm, Uninjected};
 use crate::{Error, Result};
 use promptforge_vfs::Access;
 
@@ -104,22 +104,20 @@ pub(crate) struct SectionVmSetup<'a> {
 /// the Lua limits itself before calling, so a limits failure propagates
 /// without touching the VM's teardown observation path.
 ///
-/// On failure the VM is left for the caller to tear down, so each driver's
-/// own teardown boundary stays the one place a teardown happens.
-///
 /// # Errors
-/// Returns the [`Error`] of whichever step failed: Engine injection, Engine
-/// global install, `item` install, control-global install, the prelude install (a
+/// Returns the [`Error`] of whichever step failed, after tearing the VM
+/// down under the setup's section: Engine injection, Engine global
+/// install, `item` install, control-global install, the prelude install (a
 /// prelude that fails to load, or whose global collides, or a store
 /// conflict a prelude's store call recorded), the `require` install, or
 /// the store shims' install.
 pub(crate) fn setup_section_vm<R, L, P>(
-    vm: &mut SectionVm,
+    mut vm: SectionVm<Uninjected>,
     setup: &SectionVmSetup<'_>,
     read: R,
     resolve: L,
     render: P,
-) -> Result<()>
+) -> Result<SectionVm>
 where
     R: Fn(String) -> std::result::Result<Option<SectionText>, Error> + Send + Sync + 'static,
     L: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, Error>
@@ -138,7 +136,34 @@ where
     } else {
         crate::lua::Argv::Frozen(setup.argv)
     };
-    vm.inject_values_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)?;
+    let mut vm = vm
+        .inject_values_with_var(setup.args, setup.sys, setup.access, setup.seed.var, argv)
+        .map_err(|failure| Error::from(failure.teardown(setup.emitter, setup.section_name)))?;
+    match install_after_injection(&mut vm, setup, read, resolve, render) {
+        Ok(()) => Ok(vm),
+        Err(error) => {
+            vm.teardown(setup.emitter, setup.section_name);
+            Err(error)
+        }
+    }
+}
+
+/// The setup steps after Engine injection, in [`setup_section_vm`]'s order.
+fn install_after_injection<R, L, P>(
+    vm: &mut SectionVm,
+    setup: &SectionVmSetup<'_>,
+    read: R,
+    resolve: L,
+    render: P,
+) -> Result<()>
+where
+    R: Fn(String) -> std::result::Result<Option<SectionText>, Error> + Send + Sync + 'static,
+    L: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, Error>
+        + Send
+        + Sync
+        + 'static,
+    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+{
     vm.install_engine_globals(setup.emitter, setup.section_name)?;
     if let Some(snapshot) = setup.ui {
         crate::lua::install_ui(vm.lua(), Arc::clone(snapshot))?;
@@ -165,7 +190,7 @@ where
     vm.install_require(resolve, render, setup.emitter, setup.section_name)?;
     #[cfg(test)]
     if setup.raw_shims {
-        promptforge_lua::install_model_tool_call_shim(vm.lua())?;
+        promptforge_lua::test_support::install_model_tool_call_shim(vm.lua())?;
     }
     // The store yield shims install after the preludes: a prelude runs as a
     // main chunk, not a coroutine, so its store calls while it installs

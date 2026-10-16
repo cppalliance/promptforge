@@ -1,6 +1,6 @@
 //! The request vocabulary: the validated suspending Engine calls a shim can
-//! yield, the store operations they hold, and the message-record types
-//! the chat request is built from.
+//! yield and the store operations they hold. The message-record types the
+//! chat request is built from are in `record`.
 //!
 //! A local tool call spans two requests. The first is the ordinary
 //! [`Request::ToolCall`], which the scheduler answers with the handler.
@@ -9,12 +9,26 @@
 //! yields [`Request::LocalToolDone`] with how the handler ended, so the
 //! scheduler can report the call and answer it.
 
-use promptforge_model_client::client::Role;
+use std::num::NonZeroU64;
+
 use promptforge_model_client::model::ModelBinding;
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
+use super::non_empty::NonEmpty;
+use super::record::ToolCallRecord;
 use crate::Error;
 use crate::messages::MessageList;
+
+/// Which author-facing call started a task chain: the depth-cap refusal
+/// is named after it, so the typed error uses the wording the author
+/// reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnVia {
+    /// `tasks.spawn`.
+    Spawn,
+    /// One arm of `tasks.fanout`.
+    Fanout,
+}
 
 /// A validated suspending Engine call, parsed from the yielded table.
 ///
@@ -68,12 +82,9 @@ pub enum Request {
         /// The principal starting the task. Shim-produced, never
         /// author-supplied: the author shim always says `author`.
         origin: TaskOrigin,
-        /// Whether the spawn is a `fanout` arm. Shim-produced: the `fanout`
-        /// shim says `true`, `tasks.spawn` leaves it absent. The depth-cap
-        /// refusal is named after the author-facing call that tripped it
-        /// (`tasks.fanout` or `call`), so the typed error uses the wording
-        /// the author reads and no shim re-match is needed.
-        fanout: bool,
+        /// Which call started the task. Shim-produced: the `fanout` shim
+        /// marks its arms, and `tasks.spawn` leaves the mark absent.
+        via: SpawnVia,
     },
     /// The wait shims' internal timeout timer: a leaf request whose work
     /// is one sleep, registered as an effect-backed task slot the caller
@@ -93,8 +104,7 @@ pub enum Request {
     JoinAny {
         /// The tasks to wait on, in the author's order: the first terminal
         /// member in this order is the one delivered when several are.
-        /// Non-empty by the shim's check.
-        tasks: Vec<TaskId>,
+        tasks: NonEmpty<TaskId>,
     },
     /// `tasks.ready(task)`: the non-blocking check whether `task` has
     /// ended (in any terminal state, delivered or not).
@@ -116,11 +126,10 @@ pub enum Request {
     },
     /// `tasks.concurrency(limit?)`: set the chain's admission limit for
     /// the tasks it spawns from here on, or read the effective limit back
-    /// with no argument. The limit is shim-validated (a positive whole
-    /// number) before the yield, so a present `limit` is always one.
+    /// with no argument.
     Concurrency {
         /// The author-supplied limit, absent for the read-only form.
-        limit: Option<u64>,
+        limit: Option<NonZeroU64>,
     },
     /// `tasks.note(text)`: publish the caller's own task's latest progress
     /// note, read back by `tasks.status`.
@@ -307,109 +316,4 @@ pub enum VfsOp {
         /// The author-supplied logical path.
         path: String,
     },
-}
-
-/// One content part of a multimodal message: visible text or a data-URI
-/// image reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContentPart {
-    /// Visible text.
-    Text(String),
-    /// A data-URI image reference.
-    ImageUrl(String),
-}
-
-/// A message record's content: plain visible text, or a non-empty
-/// content-parts array.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageContent {
-    /// Plain visible text.
-    Text(String),
-    /// A non-empty multimodal content-parts array.
-    Parts(Vec<ContentPart>),
-}
-
-/// One normalized tool call an assistant message holds: the
-/// provider-neutral `{id, name, arguments}` record every later component
-/// consumes. The record stays neutral; the projection's `wire_message`
-/// renders it as the OpenAI function-call wire shape at dispatch time.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolCallRecord {
-    /// The call identifier tool results correlate against.
-    pub id: String,
-    /// The wire name of the tool the model asked for.
-    pub name: String,
-    /// The call arguments; always an object, normalized to `{}` when the
-    /// record had none.
-    pub arguments: serde_json::Value,
-}
-
-/// One validated message record: the plain-message contract every later
-/// component (projection, `models.loop`, the message builders) consumes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MessageRecord {
-    /// The message role.
-    pub role: Role,
-    /// The visible content.
-    pub content: MessageContent,
-    /// The normalized tool calls the record holds; empty unless an
-    /// assistant turn requested tools.
-    pub tool_calls: Vec<ToolCallRecord>,
-    /// The call ID a tool result answers; required on `tool` records.
-    pub tool_call_id: Option<String>,
-}
-
-impl MessageRecord {
-    /// The record's JSON form: `role`, `content`, and `tool_calls` and
-    /// `tool_call_id` when present, in the shapes the chat parse accepts,
-    /// so the parse turns it back into an equal record.
-    #[must_use]
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        let mut entry = serde_json::Map::new();
-        entry.insert("role".to_owned(), self.role.as_str().into());
-        entry.insert("content".to_owned(), self.content.to_json());
-        if let Some(calls) = self.tool_calls_json() {
-            entry.insert("tool_calls".to_owned(), calls);
-        }
-        if let Some(id) = &self.tool_call_id {
-            entry.insert("tool_call_id".to_owned(), id.as_str().into());
-        }
-        serde_json::Value::Object(entry)
-    }
-
-    /// The `tool_calls` field's JSON form: an array of `{id, name,
-    /// arguments}` objects, or `None` when the record holds no calls.
-    pub(crate) fn tool_calls_json(&self) -> Option<serde_json::Value> {
-        (!self.tool_calls.is_empty()).then(|| {
-            self.tool_calls
-                .iter()
-                .map(|call| {
-                    serde_json::json!({
-                        "id": call.id,
-                        "name": call.name,
-                        "arguments": call.arguments,
-                    })
-                })
-                .collect()
-        })
-    }
-}
-
-impl MessageContent {
-    /// The `content` field's JSON form: the text, or an array of `text`
-    /// and `image_url` parts.
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        match self {
-            MessageContent::Text(text) => text.as_str().into(),
-            MessageContent::Parts(parts) => parts
-                .iter()
-                .map(|part| match part {
-                    ContentPart::Text(text) => serde_json::json!({ "type": "text", "text": text }),
-                    ContentPart::ImageUrl(url) => {
-                        serde_json::json!({ "type": "image_url", "image_url": { "url": url } })
-                    }
-                })
-                .collect(),
-        }
-    }
 }

@@ -16,7 +16,7 @@ use crate::error_value::{ErrorField, ErrorKind, Raised, error_table, raised_from
 use crate::hardening::InstructionBudget;
 use crate::messages::MessageList;
 use crate::models::LuaModelHandle;
-use crate::protocol::{Answer, ChatResult, LocalToolOutcome, Request, YieldParse};
+use crate::protocol::{Answer, ChatOutcome, ChatResult, LocalToolOutcome, Request, YieldParse};
 
 /// A requested call named `echo`, its arguments naming its id.
 pub(super) fn echo_call(id: &str) -> ToolCallEvent {
@@ -26,11 +26,7 @@ pub(super) fn echo_call(id: &str) -> ToolCallEvent {
 /// A served round with no product, under turn 7.
 pub(super) fn round() -> ChatResult {
     ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: None,
-        empty_detail: None,
-        tool_calls: None,
+        outcome: ChatOutcome::Empty(None),
         finish_reason: None,
         turn: 7,
     }
@@ -144,7 +140,7 @@ fn envelope_failure_keeps_an_error_table_and_wraps_anything_else() {
 fn a_chat_answer_resumes_as_a_chat_result_userdata_the_step_takes_whole() {
     let lua = Lua::new();
     let served = ChatResult {
-        tool_calls: Some(vec![
+        outcome: ChatOutcome::ToolCalls(vec![
             echo_call("c1").with_tool(Some(ToolId::parse("web/fetch").unwrap())),
         ]),
         finish_reason: Some("tool_calls".to_owned()),
@@ -241,22 +237,13 @@ fn act_names_each_call_return_and_raise_with_its_values() {
     let lua = Lua::new();
     let value = |text: &str| Value::String(lua.create_string(text).unwrap());
     let tagged = |tag: &str, values: Vec<Value>| (tag.to_owned(), values);
-    let reason = Some(OverflowReason::Precheck);
     let compact = Then::Compact {
         compactor: value("f"),
-        reason,
+        reason: OverflowReason::Precheck,
     };
     assert_eq!(
         action(&lua, compact),
         tagged("compactor", vec![value("f"), value("precheck")])
-    );
-    let compact = Then::Compact {
-        compactor: value("f"),
-        reason: None,
-    };
-    assert_eq!(
-        action(&lua, compact),
-        tagged("compactor", vec![value("f"), Value::Nil])
     );
     let handler = Then::Handle {
         handler: value("h"),

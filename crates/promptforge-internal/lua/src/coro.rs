@@ -78,7 +78,7 @@ const HANDLE_METHODS_REGISTRY: &str = "promptforge.impl_coro.handle_methods";
 /// `tools.call_as_model` and drive the driver's `call_id` path from a
 /// fixture section. The registry is Rust-side only, and no VM ever
 /// installs it as a global.
-const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
+pub(crate) const MODEL_TOOL_CALL_REGISTRY: &str = "promptforge.impl_coro.model_tool_call";
 
 /// The registry key for the shim's store function table, stashed by the
 /// prelude install so the executor can install the store yield shims onto a
@@ -342,28 +342,6 @@ pub(crate) fn handle_method(lua: &Lua, name: &str) -> mlua::Result<Value> {
         Value::Table(methods) => methods.raw_get(name),
         _ => Ok(Value::Nil),
     }
-}
-
-/// Installs the model-issued `tool_call` form as `tools.call_as_model` on a
-/// VM whose shim prelude already ran, so a fixture section can yield a
-/// `tool_call` with a `call_id` straight at the driver's dispatch arm.
-///
-/// A test driver is the only caller, so the install exists only under the
-/// `test-support` feature: in production `tools.call_as_model` never
-/// exists in any VM - not stubbed, simply absent.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the shim prelude was never installed on this
-/// VM, the `tools` table is absent, or the install fails.
-#[cfg(feature = "test-support")]
-pub fn install_model_tool_call_shim(lua: &Lua) -> Result<()> {
-    let model_tool_call: Function = lua
-        .named_registry_value(MODEL_TOOL_CALL_REGISTRY)
-        .map_err(Error::lua)?;
-    let tools: Table = lua.globals().raw_get("tools").map_err(Error::lua)?;
-    tools
-        .raw_set("call_as_model", model_tool_call)
-        .map_err(Error::lua)
 }
 
 /// Installs the store yield shims onto a VM's `store` table, replacing the

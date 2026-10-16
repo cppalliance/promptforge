@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::messages::{ListEditError, MessageList};
 use crate::protocol::{MessageContent, MessageRecord, ToolCallRecord};
 use crate::test_vm::{BuiltVm, TestVm};
-use crate::tests::{assistant, system, text, user};
+use crate::tests::{assistant, system, tool_result, user};
 use crate::{Error, project_messages};
 
 #[path = "messages-tests-list-commit.rs"]
@@ -36,7 +36,7 @@ fn texts(list: &MessageList) -> Vec<(Role, String)> {
     list.to_records()
         .into_iter()
         .map(|record| match record.content {
-            MessageContent::Text(content) => (record.role, content),
+            MessageContent::Text(content) => (record.role.kind(), content),
             MessageContent::Parts(_) => panic!("these tests build text records only"),
         })
         .collect()
@@ -81,10 +81,7 @@ fn each_builder_chains_and_appends_its_record() {
                 }],
                 ..assistant("working")
             },
-            MessageRecord {
-                tool_call_id: Some("call_1".to_owned()),
-                ..text(Role::Tool, "echoed")
-            },
+            tool_result("call_1", "echoed"),
             assistant("done"),
             user("thanks"),
         ]

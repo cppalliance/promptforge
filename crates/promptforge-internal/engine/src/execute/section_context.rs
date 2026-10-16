@@ -278,7 +278,7 @@ fn install_section_scope(
         return Ok(());
     }
     *counts = Some(vm.install_tool_call_counts(effective_bindings)?);
-    let resolved_model = crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
+    let resolved_model = crate::lua::resolve_model_binding(ctx.models(), vm.model_runtime())?;
     if let Some(binding) = resolved_model.as_ref() {
         let current = vm.current_sys(sys)?;
         let enriched = crate::lua::enrich_sys_model(&current, binding);

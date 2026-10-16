@@ -42,7 +42,9 @@
 //!
 //! Most of this crate's public items exist for `promptforge-engine`'s
 //! executor, which drives the VM and the coroutine protocol; the facade
-//! re-exports only the store protocol ([`VfsOp`], [`VfsOutcome`]).
+//! re-exports only the store protocol ([`VfsOp`], [`VfsOutcome`]). The
+//! `test_support` module, built for this crate's tests and under the
+//! `test-support` feature, holds what tests reach beyond that surface.
 //!
 //! ## Invariants
 //!
@@ -84,6 +86,8 @@ mod sys;
 mod tools;
 mod vm;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 #[cfg(test)]
 pub(crate) mod test_vm;
 #[cfg(test)]
@@ -96,8 +100,6 @@ pub use crate::collection::render_item;
 pub use crate::compactors::{
     Compactor, OverflowReason, ParseOverflowReasonError, UsageAnchor, output_reserve, precheck,
 };
-#[cfg(feature = "test-support")]
-pub use crate::coro::install_model_tool_call_shim;
 pub use crate::coro::{install_section_loop_shim, install_store_shims};
 pub use crate::dispatch::{
     ModelReport, ScriptReport, ToolDispatch, prepare_dispatch, prepare_model_dispatch,
@@ -120,11 +122,13 @@ pub use crate::program::LuaProgram;
 pub use crate::projection::project_messages;
 pub use crate::prose::ProseState;
 pub use crate::protocol::{
-    Answer, ChatResult, ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request,
-    TaskDelivery, TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
+    Answer, Blocked, ChatOutcome, ChatResult, ContentPart, LocalToolOutcome, MessageContent,
+    MessageRecord, NonEmpty, RecordRole, Request, SpawnVia, TaskDelivery, TaskPhase, TaskStatus,
+    ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
 };
 pub use crate::scope::{TaskAllowlist, ToolCallCounts, ToolRuntime};
 pub use crate::sys::enrich_sys_model;
-pub use crate::vm::{CoroStep, SectionVm, current_tool_bindings, resolve_model_binding};
-#[cfg(feature = "test-support")]
-pub use crate::vm::{reset_section_vm_peak, section_vm_peak};
+pub use crate::vm::{
+    CoroStep, InjectFailure, Injected, SectionVm, Uninjected, current_tool_bindings,
+    resolve_model_binding,
+};

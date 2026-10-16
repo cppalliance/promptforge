@@ -616,7 +616,7 @@ Paths starting `L/` are under `crates/promptforge-internal/lua/src/`.
 </step-3>
 <step-4>
 
-### Step 4: lua core part B
+### Step 4: lua core part B [completed]
 
 - Component: `lua-core`
 - Tests: Verify runs these from the repository root in PowerShell, in this order. A search passes only when it prints nothing.

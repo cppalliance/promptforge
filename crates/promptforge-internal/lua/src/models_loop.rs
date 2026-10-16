@@ -244,10 +244,7 @@ fn act(lua: &Lua, then: Then<Value>) -> mlua::Result<MultiValue> {
             ("yield", vec![request(lua, "tool_call", fields)?])
         }
         Then::Compact { compactor, reason } => {
-            let reason = match reason {
-                Some(reason) => Value::String(lua.create_string(reason.tag())?),
-                None => Value::Nil,
-            };
+            let reason = Value::String(lua.create_string(reason.tag())?);
             ("compactor", vec![compactor, reason])
         }
         Then::Handle { handler, args } => ("handler", vec![handler, args]),

@@ -42,6 +42,31 @@ fn the_first_chunk_consumes_the_configured_log_budget() {
 }
 
 #[test]
+fn an_author_raise_of_a_quota_refusals_text_is_an_ordinary_runtime_error() {
+    // Only the Engine's own refusal is a quota: an author who raises the
+    // same words fails as any other runtime error.
+    let vm = TestVm::new().build();
+    for refusal in [
+        "lua log event budget exceeded",
+        "lua log cumulative byte budget exceeded",
+        "lua instruction budget exceeded",
+    ] {
+        let error = run_scalar(
+            &vm,
+            &program(&format!("error('{refusal}')")),
+            &null_emitter(),
+            "Budget",
+        )
+        .expect_err("the author's raise must fail the block");
+        assert!(
+            matches!(error, Error::LuaRuntime { .. }),
+            "an author raise of {refusal:?} must stay a runtime error: {error:?}"
+        );
+    }
+    vm.teardown();
+}
+
+#[test]
 fn the_memory_budget_error_stays_reachable() {
     // The heap ceiling refuses a block that allocates past the memory budget
     // `apply_lua_limits` set.

@@ -7,7 +7,7 @@ use promptforge_model_client::model::ModelBinding;
 use serde_json::Value as Json;
 
 use crate::error::{Error, Result};
-use crate::proxy::read_only_proxy;
+use crate::proxy::{key_path, key_text, read_only_proxy};
 
 /// The registry key holding the `var` proxy's hidden data table.
 ///
@@ -23,13 +23,6 @@ const VAR_PROXY_REGISTRY: &str = "promptforge.var_proxy";
 
 /// Registry map from every guarded proxy table to its hidden data table.
 const VAR_GUARDED_DATA_REGISTRY: &str = "promptforge.var_guarded_data";
-
-fn field_path(path: &str, key: &Value) -> String {
-    match key {
-        Value::String(name) => format!("{path}.{}", name.to_string_lossy()),
-        other => format!("{path}[{other:?}]"),
-    }
-}
 
 fn guarded_json_value(
     lua: &Lua,
@@ -88,7 +81,7 @@ fn guarded_table(
             if value.is_nil() {
                 return write_data.raw_set(key, value);
             }
-            let target = field_path(&table_path, &key);
+            let target = key_path(&table_path, &key);
             if let Value::Function(_) | Value::UserData(_) | Value::Thread(_) = value {
                 return Err(mlua::Error::runtime(format!(
                     "{target} must be JSON data, got {}",
@@ -181,13 +174,7 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
     read_only_proxy(
         lua,
         Value::Function(index),
-        |key| {
-            let field = match key {
-                Value::String(name) => name.to_string_lossy(),
-                other => format!("{other:?}"),
-            };
-            format!("sys is read-only; cannot set '{field}'")
-        },
+        |key| format!("sys is read-only; cannot set '{}'", key_text(key)),
         "sys is sealed",
     )
     .map_err(Error::lua)

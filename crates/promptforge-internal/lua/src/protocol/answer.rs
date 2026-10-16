@@ -28,6 +28,7 @@ use crate::handles::ToolOutputKind;
 /// object, such as `{"Text": "..."}`, `{"Paths": ["a.txt"]}`, or
 /// `{"Bool": true}`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum VfsOutcome {
     /// The operation succeeded, and the program receives nil.
     Unit,
@@ -90,45 +91,40 @@ impl ToolCallOutcome {
     }
 }
 
-/// One `chat` round's outcome, resumed into the loop shim as an opaque
+/// What one `chat` round produced, or that no round ran.
+///
+/// Callers branch on the variant, never on the round's finish reason
+/// alone - backends routinely finish tool-call rounds with `stop`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChatOutcome {
+    /// The request was refused as too large before or by the provider:
+    /// no round ran. The reason says which gate refused it, the
+    /// pre-dispatch precheck or the provider; the loop's state machine
+    /// (`models_loop`) hands its tag to the compactor.
+    Overflow(OverflowReason),
+    /// The round completed with reply text. A completion the caller builds
+    /// can deliver an empty string, which the loop reads as no reply.
+    Reply(String),
+    /// The round completed requesting these tool calls, unexecuted.
+    ToolCalls(Vec<ToolCallEvent>),
+    /// The round completed with neither text nor tool calls, holding the
+    /// client's fixed phrase naming the empty product when it named one.
+    /// The loop's state machine (`models_loop`) applies its exit rules
+    /// against the finish reason, and raises the phrase as the
+    /// `empty_model_reply` message when they reject the round, so the
+    /// author sees the text the client would have produced.
+    Empty(Option<String>),
+}
+
+/// One `chat` round's result, resumed into the loop shim as an opaque
 /// value: a userdata with no methods, which the loop's step takes back out
 /// whole, so no Lua code reads its fields.
-///
-/// When `overflow` is set the request was refused as too large before or
-/// by the provider: no round ran, `overflow_reason` says which of the two
-/// refused it, and every other field is absent or empty. Otherwise the
-/// round completed and at most one of `reply` and `tool_calls` is present:
-/// the round produced text or requested tools, never both. An empty reply
-/// is a completed round with no reply text (see `reply`) and, when the
-/// client named one, `empty_detail` naming the empty product, so the loop's
-/// state machine (`models_loop`) applies its exit rules against
-/// `finish_reason`. Callers branch on the presence of `tool_calls` and
-/// `reply`, never on `finish_reason` alone - backends routinely finish
-/// tool-call rounds with `stop`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatResult {
-    /// Whether the request was refused as too large before or by the
-    /// provider. No round ran; the loop's state machine (`models_loop`)
-    /// calls the compactor.
-    pub overflow: bool,
-    /// Which gate refused the request when `overflow` is set: the
-    /// pre-dispatch precheck or the provider. The loop's state machine
-    /// (`models_loop`) hands its tag to the compactor.
-    pub overflow_reason: Option<OverflowReason>,
-    /// The completed reply text. An empty reply usually arrives as `None`,
-    /// but a completion the caller builds can deliver an empty string; the
-    /// loop reads both as no reply.
-    pub reply: Option<String>,
-    /// The client's fixed phrase naming the empty product, when the round
-    /// completed with neither text nor tool calls. The loop's state machine
-    /// (`models_loop`) raises it as the `empty_model_reply` message when its
-    /// exit rules reject the round, so the author sees the text the client
-    /// would have produced.
-    pub empty_detail: Option<String>,
-    /// The tool calls the model requested, unexecuted, when it requested
-    /// any.
-    pub tool_calls: Option<Vec<ToolCallEvent>>,
-    /// The provider's finish reason, when it sent one.
+    /// What the round produced, or that no round ran.
+    pub outcome: ChatOutcome,
+    /// The provider's finish reason, when it sent one; absent when no
+    /// round ran.
     pub finish_reason: Option<String>,
     /// The turn the round was reported under: the advanced counter for a
     /// served or empty round, the unchanged counter when no round ran.
@@ -158,6 +154,67 @@ pub struct TaskDelivery<E> {
     pub outcome: std::result::Result<String, E>,
 }
 
+/// A task's lifecycle phase, as `tasks.status` reports it in `state`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskPhase {
+    /// The task's backing chain or request is still running.
+    Running,
+    /// The task ended with a result, whether or not a wait delivered it.
+    Done,
+    /// The owner cancelled the task.
+    Cancelled,
+    /// The task's owner ended while the task was live.
+    Abandoned,
+}
+
+impl TaskPhase {
+    /// The tag `tasks.status` reports: `running`, `done`, `cancelled`, or
+    /// `abandoned`.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            TaskPhase::Running => "running",
+            TaskPhase::Done => "done",
+            TaskPhase::Cancelled => "cancelled",
+            TaskPhase::Abandoned => "abandoned",
+        }
+    }
+}
+
+/// What a task's live backing chain is waiting on, as `tasks.status`
+/// reports it in `blocked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Blocked {
+    /// A `chat` round.
+    Chat,
+    /// A tool call.
+    ToolCall,
+    /// A store operation.
+    Store,
+    /// A task wait.
+    Tasks,
+    /// A `call` chain.
+    Call,
+    /// A concurrency slot, before admission.
+    Queued,
+}
+
+impl Blocked {
+    /// The tag `tasks.status` reports: `chat`, `tool_call`, `store`,
+    /// `tasks`, `call`, or `queued`.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Blocked::Chat => "chat",
+            Blocked::ToolCall => "tool_call",
+            Blocked::Store => "store",
+            Blocked::Tasks => "tasks",
+            Blocked::Call => "call",
+            Blocked::Queued => "queued",
+        }
+    }
+}
+
 /// One task's status, as `tasks.status` reports it: the slot's facts plus
 /// a live backing chain's position. Every optional field resumes as nil
 /// when absent, so an author tests presence.
@@ -167,19 +224,16 @@ pub struct TaskStatus {
     pub target: String,
     /// The principal that started the task.
     pub origin: TaskOrigin,
-    /// The lifecycle state tag: `running`, `done`, `cancelled`, or
-    /// `abandoned` (a delivered task reports `done`).
-    pub state: &'static str,
+    /// The lifecycle phase; a delivered task reports [`TaskPhase::Done`].
+    pub state: TaskPhase,
     /// Whether the task ended well: `None` while it runs, `Some(false)`
     /// for a failed, cancelled, or abandoned task.
     pub ok: Option<bool>,
     /// The section the backing chain is currently in, while it is live and
     /// inside one.
     pub section: Option<String>,
-    /// What the backing chain is parked on (`chat`, `tool_call`, `store`,
-    /// `timer`, `tasks`, `call`), or `queued`
-    /// while it waits for a concurrency slot, while it is.
-    pub blocked: Option<&'static str>,
+    /// What the backing chain is waiting on, while it waits.
+    pub blocked: Option<Blocked>,
     /// The task's model-turn count so far.
     pub turns: u32,
     /// The live tasks the task's chain owns, in spawn order.
@@ -193,13 +247,16 @@ pub struct TaskStatus {
 /// One dispatched request's outcome, rendered to the `(ok, result)` envelope
 /// at resume time.
 ///
-/// On failure the envelope holds only the display string for the shim to
-/// raise, and [`into_envelope`](Answer::into_envelope) hands the typed
-/// error back to the driver, which retains it against the pending request
-/// and substitutes it when the shim-raised error surfaces as the
-/// coroutine's failure. This holds uniformly for leaf and structural
-/// answers: the enum owns the typed error until the envelope is rendered,
-/// so a `Call` or `JoinAny` failure round-trips with its structure intact.
+/// On failure the envelope holds the error's structured table for the
+/// shim to raise, and the driver
+/// ([`SectionVm::resume_block_coro_answer`](crate::SectionVm::resume_block_coro_answer))
+/// retains the typed error beside that very table. When the block fails
+/// by raising that table, the shim's own raise or the block's re-raise of
+/// the value it caught, the typed error is substituted back; any other
+/// failure, one carrying the same message included, stays the block's
+/// own. This holds uniformly for leaf and structural answers: the enum
+/// owns the typed error until the envelope is rendered, so a `Call` or
+/// `JoinAny` failure round-trips with its structure intact.
 ///
 /// The error type is the driver's: the Lua side produces
 /// `Answer<`[`Error`]`>` (argument-validation failures at the yield

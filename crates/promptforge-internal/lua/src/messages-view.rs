@@ -48,13 +48,13 @@ fn field_position(key: &Value) -> Option<usize> {
 /// The field `name` of `record`, or nil when the record has none.
 fn field(lua: &Lua, record: &MessageRecord, name: &str) -> mlua::Result<Value> {
     match name {
-        "role" => lua.to_value(record.role.as_str()),
+        "role" => lua.to_value(record.role.kind().as_str()),
         "content" => lua.to_value(&record.content.to_json()),
         "tool_calls" => match record.tool_calls_json() {
             Some(calls) => lua.to_value(&calls),
             None => Ok(Value::Nil),
         },
-        "tool_call_id" => match &record.tool_call_id {
+        "tool_call_id" => match record.role.tool_call_id() {
             Some(id) => lua.to_value(id),
             None => Ok(Value::Nil),
         },

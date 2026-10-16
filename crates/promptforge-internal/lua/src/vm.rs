@@ -1,4 +1,7 @@
-//! The per-section Lua VM: construction, Engine injection, coroutine stepping, and chunk execution.
+//! The per-section Lua VM: its construction, the typestate that orders
+//! Engine injection before every later step, and the local tools it
+//! registers. Injection is in `inject`, the later installs in `install`,
+//! block coroutines in `run`, and state reads in `state`.
 //!
 //! A local tool registered with `tools.offer_local` runs inside the calling
 //! block's coroutine, never as an Engine function. The VM keeps only each
@@ -9,6 +12,7 @@
 //! report. Every suspending call the handler makes in between is an
 //! ordinary yield of the same coroutine.
 
+mod inject;
 mod install;
 mod run;
 mod state;
@@ -35,10 +39,9 @@ use crate::models::{ModelRuntime, RawModelIds};
 use crate::program::LuaProgram;
 use crate::scope::ToolRuntime;
 
+pub use inject::InjectFailure;
 pub use run::CoroStep;
 pub(crate) use run::scalar_return;
-#[cfg(test)]
-pub(crate) use run::{LuaOutcome, run_chunk};
 pub use state::{current_tool_bindings, resolve_model_binding};
 
 /// Default per-VM Lua heap ceiling, matching the executor's `RunLimits`.
@@ -47,7 +50,8 @@ pub(crate) const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 /// Default per-VM `log()` event budget, matching the executor's `RunLimits`.
 pub(crate) const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
 
-/// The failure of a VM step taken before Engine injection.
+/// The failure of a `prose` read on a VM whose live `sys` slot was never
+/// filled, which Engine injection fills.
 pub(crate) const NOT_INJECTED: &str = "section VM Engine values have not been injected";
 
 /// The failure of a poisoned live `sys` slot.
@@ -71,37 +75,53 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
     Ok(table)
 }
 
+/// A section VM's stage before Engine injection: construction, the run's
+/// limits, the cancel flag, and the raw-model-id opt-in.
+#[derive(Debug)]
+pub struct Uninjected;
+
+/// A section VM's stage once Engine injection ran, holding the chain
+/// step's VFS access capability: the `store` table's closures share it, so
+/// every store op is attributed to the identity the executor installed.
+#[derive(Debug)]
+pub struct Injected {
+    access: Arc<Access>,
+}
+
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
 /// The VM owns one Lua environment from construction until drop. Construction
-/// hardens the sandbox and installs `untrusted`; the caller then drives one
-/// linear startup: apply the run's limits, inject the Engine values, install
-/// the persistent Engine globals, the control globals, and `require`, and
-/// only then walk the section's blocks with
-/// [`start_block_coro`](Self::start_block_coro). A single
-/// instruction hook covers every program run by this VM, on the main state
-/// and on every block coroutine, so cancellation reaches any chunk.
+/// hardens the sandbox and installs `untrusted`, giving a
+/// [`SectionVm<Uninjected>`]; the caller applies the run's limits and then
+/// injects the Engine values, which consumes it and gives the injected VM.
+/// Only an injected VM installs the persistent Engine globals, the control
+/// globals, and `require`, and walks the section's blocks with
+/// [`start_block_coro`](Self::start_block_coro), so no step runs before
+/// injection and injection runs once. A single instruction hook covers every
+/// program run by this VM, on the main state and on every block coroutine,
+/// so cancellation reaches any chunk.
 ///
-/// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
-/// hardening, Engine injection, instruction accounting, and report delivery on
-/// the one owned path. Each section must receive a new instance; dropping it
-/// destroys all Lua memory belonging to that section. Once Lua allocation
-/// succeeds, construction and setup failures cross the same explicit
-/// observed teardown boundary as later lifecycle failures.
+/// The underlying [`Lua`] is reachable through `lua`, on the injected VM
+/// only, for the section setup's installers and the driver's yield
+/// parsing; hardening, Engine injection, instruction accounting, and
+/// report delivery stay on the VM's own path. Each section must receive a
+/// new instance; dropping it destroys all Lua memory belonging to that
+/// section. Once Lua allocation succeeds, construction failures cross the
+/// same explicit observed teardown boundary as later lifecycle failures.
 #[derive(Debug)]
-pub struct SectionVm {
+pub struct SectionVm<S = Injected> {
     lua: Lua,
     /// The run's shared tool set: the declared plugins and the offering.
     /// Shared with the run, not snapshotted; nothing writes it during a
     /// run.
-    bound_tools: Arc<ToolSet>,
+    pub(crate) bound_tools: Arc<ToolSet>,
     /// The run's shared model set: the frontmatter's filled roles plus the
     /// prompt-wide default. Shared for the same reason (`models.default`).
-    bound_models: Arc<Mutex<ModelSet>>,
+    pub(crate) bound_models: Arc<Mutex<ModelSet>>,
     /// The section's tool-addition runtime, read by the executor's scope path.
-    pub tool_runtime: Arc<Mutex<ToolRuntime>>,
+    tool_runtime: Arc<Mutex<ToolRuntime>>,
     /// The section's model-selection runtime, read by the executor's scope path.
-    pub model_runtime: Arc<Mutex<ModelRuntime>>,
+    model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Set by Lua `jump` before it aborts the current chunk.
     jump_slot: Arc<Mutex<Option<String>>>,
     /// How many local tool handlers are running on this VM; `jump` refuses
@@ -117,16 +137,11 @@ pub struct SectionVm {
     /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
-    /// The section's VFS access capability: the `store` table's closures
-    /// share it, so every store op is attributed to the identity the
-    /// executor installed for this chain step.
-    access: Option<Arc<Access>>,
     /// The slot the direct store closures record a claims-model conflict
     /// into while the Plugin preludes install, for the executor to read
     /// once they return via
     /// [`take_store_conflict`](Self::take_store_conflict).
     store_conflicts: Arc<Mutex<Option<String>>>,
-    values_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
     /// Remaining cumulative `log()` message bytes this VM may emit. Bounds total
@@ -141,79 +156,11 @@ pub struct SectionVm {
     /// The raw-model-id fallback, resolved whenever the caller passes an
     /// application-state snapshot (`RunContext::ui`): then `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id. Set
-    /// by [`allow_raw_model_ids`](Self::allow_raw_model_ids) before Engine
-    /// injection; refused everywhere else.
+    /// by [`allow_raw_model_ids`](SectionVm::allow_raw_model_ids) before
+    /// Engine injection; refused everywhere else.
     raw_model_ids: RawModelIds,
-    /// Test-support only: the live-section-VM tally guard. Its presence
-    /// counts this VM as live from construction until the VM drops (its
-    /// teardown); the Engine's scheduler suite reads the tally to pin the
-    /// admission ceiling's cost - a queued task holds no VM.
-    #[cfg(feature = "test-support")]
-    _vm_tally: vm_tally::Guard,
-}
-
-/// Test-support only: a per-thread tally of live section VMs.
-///
-/// The Engine's scheduler suite drives one run on the test's own thread
-/// (the serial `Scenario` and the rig step it there), and Rust's built-in
-/// test harness gives each test its own thread, so thread-locals keep
-/// concurrent tests independent. A test resets the peak, drives a run,
-/// and reads back the most VMs alive at any moment.
-#[cfg(feature = "test-support")]
-mod vm_tally {
-    use std::cell::Cell;
-
-    thread_local! {
-        static LIVE: Cell<usize> = const { Cell::new(0) };
-        static PEAK: Cell<usize> = const { Cell::new(0) };
-    }
-
-    /// One section VM holds one guard: entering counts it, dropping it
-    /// releases the count.
-    #[derive(Debug)]
-    pub(super) struct Guard;
-
-    impl Guard {
-        pub(super) fn enter() -> Self {
-            LIVE.with(|live| {
-                let now = live.get() + 1;
-                live.set(now);
-                PEAK.with(|peak| peak.set(peak.get().max(now)));
-            });
-            Self
-        }
-    }
-
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            LIVE.with(|live| live.set(live.get() - 1));
-        }
-    }
-
-    /// Resets the peak, so a test measures one run only.
-    pub(super) fn reset_peak() {
-        PEAK.with(|peak| peak.set(0));
-    }
-
-    /// The most section VMs alive at once since the last reset.
-    pub(super) fn peak() -> usize {
-        PEAK.with(Cell::get)
-    }
-}
-
-/// Test-support only: resets the live-section-VM peak tally, so a test
-/// measures the one run it drives next.
-#[cfg(feature = "test-support")]
-pub fn reset_section_vm_peak() {
-    vm_tally::reset_peak();
-}
-
-/// Test-support only: the most section VMs alive at once since the last
-/// [`reset_section_vm_peak`]: the admission test's cost pin.
-#[cfg(feature = "test-support")]
-#[must_use]
-pub fn section_vm_peak() -> usize {
-    vm_tally::peak()
+    /// The lifecycle stage: [`Uninjected`] or [`Injected`].
+    state: S,
 }
 
 /// Local tool registrations owned by a section VM.
@@ -278,7 +225,7 @@ impl LocalTools {
     }
 }
 
-impl SectionVm {
+impl SectionVm<Uninjected> {
     /// Creates a hardened section VM.
     ///
     /// Construction installs only the sandbox (the `_G` guard included),
@@ -297,15 +244,15 @@ impl SectionVm {
     /// every id.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
+    /// Returns [`Error::LuaRuntime`] if the VM cannot be built or hardened.
     pub fn new(nonce: &GuardNonce, emitter: &Emitter, section: &str) -> Result<Self> {
-        #[cfg(feature = "test-support")]
-        let tally = vm_tally::Guard::enter();
         let lua = Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
         )
         .map_err(Error::lua)?;
+        #[cfg(any(test, feature = "test-support"))]
+        crate::test_support::count_live_vm(&lua);
         // Bound the VM heap by default; `apply_lua_limits` may tighten or relax
         // it to the caller's `RunLimits`. A safe non-env default keeps every VM
         // bounded even when the run installs no explicit limits.
@@ -322,16 +269,13 @@ impl SectionVm {
             library_load_depth: Arc::new(AtomicU32::new(0)),
             library_programs: Arc::new(Mutex::new(Vec::new())),
             sys_live: Arc::new(Mutex::new(None)),
-            access: None,
             store_conflicts: Arc::new(Mutex::new(None)),
-            values_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
             instruction_budget: InstructionBudget::default(),
             raw_model_ids: RawModelIds::Refused,
-            #[cfg(feature = "test-support")]
-            _vm_tally: tally,
+            state: Uninjected,
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, emitter, section);
@@ -348,6 +292,7 @@ impl SectionVm {
         }
         Ok(vm)
     }
+
     /// Creates a section VM sharing the run's tool and model sets.
     ///
     /// The sets are the run's own handles, not snapshots: the offering and
@@ -358,7 +303,7 @@ impl SectionVm {
     /// during a run. H1 is section 0 on this same path.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
+    /// Returns [`Error::LuaRuntime`] if the VM cannot be built or hardened.
     pub fn new_for_section(
         nonce: &GuardNonce,
         tools: &Arc<ToolSet>,
@@ -372,22 +317,12 @@ impl SectionVm {
         Ok(vm)
     }
 
-    /// Installs the run's cancel flag on this VM's instruction hook: every
-    /// block coroutine the VM starts polls it, and a set flag aborts the
-    /// running chunk as [`Error::Interrupted`]. A VM without one is never
-    /// cancelled. The first install wins.
-    pub fn set_cancel(&self, cancel: promptforge_types::cancel::CancelHandle) {
-        self.instruction_budget.set_cancel(cancel);
-    }
-
     /// Opts the VM into the raw-model-id fallback, on whenever the caller
     /// passes an application-state snapshot (`RunContext::ui`): `models.get`
     /// resolves an undeclared alias as a raw gateway catalog model id.
-    ///
-    /// Must be called before [`inject_values_with_var`](Self::inject_values_with_var),
-    /// whose H2 `models` table install reads the flag. A run without a
-    /// snapshot never calls it, so it keeps strict declared-alias
-    /// resolution.
+    /// Engine injection's `models` table install reads the flag, so only an
+    /// uninjected VM takes it. A run without a snapshot never calls it, so
+    /// it keeps strict declared-alias resolution.
     pub fn allow_raw_model_ids(&mut self) {
         self.raw_model_ids = RawModelIds::Resolved;
     }
@@ -401,7 +336,8 @@ impl SectionVm {
     /// non-env defaults installed in [`SectionVm::new`].
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.
+    /// Returns [`Error::LuaRuntime`] if the underlying VM rejects the memory
+    /// limit.
     pub fn apply_lua_limits(&self, memory_bytes: usize, log_events: u32) -> Result<()> {
         self.lua
             .set_memory_limit(memory_bytes)
@@ -412,6 +348,41 @@ impl SectionVm {
         Ok(())
     }
 
+    fn construction_failed(self, error: Error, emitter: &Emitter, section: &str) -> Result<Self> {
+        self.teardown(emitter, section);
+        Err(error)
+    }
+
+    /// Borrows the inner Lua state before injection, for the test that
+    /// shows construction already installs `untrusted`.
+    #[cfg(test)]
+    pub(crate) fn uninjected_lua(&self) -> &Lua {
+        &self.lua
+    }
+}
+
+impl<S> SectionVm<S> {
+    /// Installs the run's cancel flag on this VM's instruction hook: every
+    /// block coroutine the VM starts polls it, and a set flag aborts the
+    /// running chunk as [`Error::Interrupted`]. A VM without one is never
+    /// cancelled. The first install wins.
+    pub fn set_cancel(&self, cancel: promptforge_types::cancel::CancelHandle) {
+        self.instruction_budget.set_cancel(cancel);
+    }
+
+    /// The section's tool-addition runtime: what `tools.offer`,
+    /// `plugins.offer`, and `tools.allow_tasks` recorded.
+    #[must_use]
+    pub fn tool_runtime(&self) -> &Arc<Mutex<ToolRuntime>> {
+        &self.tool_runtime
+    }
+
+    /// The section's model-selection runtime: what `models.use` recorded.
+    #[must_use]
+    pub fn model_runtime(&self) -> &Arc<Mutex<ModelRuntime>> {
+        &self.model_runtime
+    }
+
     /// Destroys this section VM at an explicit observed lifecycle boundary.
     ///
     /// The emitter is borrowed only for this synchronous call.
@@ -420,9 +391,14 @@ impl SectionVm {
         drop(self);
         emitter.report(section, lifecycle::LUA_TEARDOWN_SUCCEEDED);
     }
+}
 
-    fn construction_failed(self, error: Error, emitter: &Emitter, section: &str) -> Result<Self> {
-        self.teardown(emitter, section);
-        Err(error)
+impl SectionVm {
+    /// Borrows the inner Lua state, for the section setup's installers
+    /// (the `ui` global, the loop and store shims, the Plugin preludes) and
+    /// the driver's yield parsing and answer rendering.
+    #[must_use]
+    pub fn lua(&self) -> &Lua {
+        &self.lua
     }
 }

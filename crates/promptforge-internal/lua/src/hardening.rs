@@ -173,9 +173,9 @@ fn budget_hook(
             ));
         }
         if fired.fetch_add(1, Ordering::Relaxed) == HOOK_BUDGET {
-            return Err(mlua::Error::RuntimeError(
-                crate::error::lua_quota::INSTRUCTION.to_string(),
-            ));
+            return Err(mlua::Error::external(crate::error::QuotaExceeded(
+                crate::error::QuotaResource::Instruction,
+            )));
         }
         Ok(VmState::Continue)
     }

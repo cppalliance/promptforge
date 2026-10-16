@@ -66,18 +66,21 @@ fn shared_tools() -> Arc<ToolSet> {
     Arc::new(ToolSet::default())
 }
 
+/// A section VM over `models` with empty Engine values injected.
 fn section_vm_with_models(
     models: &Arc<Mutex<ModelSet>>,
     emitter: &Emitter,
     section: &str,
 ) -> Result<SectionVm> {
-    Ok(SectionVm::new_for_section(
+    SectionVm::new_for_section(
         &GuardNonce::from_seed(&TEST_SEED),
         &shared_tools(),
         models,
         emitter,
         section,
-    )?)
+    )?
+    .inject_values("", &json!({}), &fresh_access())
+    .map_err(|failure| Error::from(failure.teardown(emitter, section)))
 }
 
 /// Reads the section's effective model binding through a view over the VM's

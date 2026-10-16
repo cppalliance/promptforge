@@ -1,14 +1,13 @@
 //! Tests for the `messages.new()` list and its parse through the protocol.
 
 use mlua::{AnyUserData, Lua, LuaSerdeExt, Value};
-use promptforge_model_client::client::Role;
 use serde_json::json;
 
 use super::MessageList;
 use crate::Error;
 use crate::protocol::{Answer, Request, YieldParse};
 use crate::test_vm::TestVm;
-use crate::tests::text;
+use crate::tests::{system, user};
 
 #[path = "messages-tests-list.rs"]
 mod list;
@@ -91,10 +90,7 @@ fn a_non_empty_list_parses_to_a_chat_request_holding_that_list() {
         .expect("msgs is a MessageList")
         .to_records();
     assert_eq!(list.to_records(), held);
-    assert_eq!(
-        list.to_records(),
-        vec![text(Role::System, "be terse"), text(Role::User, "hi")]
-    );
+    assert_eq!(list.to_records(), vec![system("be terse"), user("hi")]);
     lua.load("msgs:user('more')")
         .exec()
         .expect("test source runs");

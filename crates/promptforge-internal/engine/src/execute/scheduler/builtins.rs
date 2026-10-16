@@ -32,7 +32,7 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_types::tools::OutputTrust;
 use serde_json::Value;
 
-use crate::execute::protocol::{Answer, TaskStatus, ToolCallOutcome};
+use crate::execute::protocol::{Answer, SpawnVia, TaskPhase, TaskStatus, ToolCallOutcome};
 use crate::execute::section_context::TaskSeed;
 use crate::lua::{SectionVm, TaskAllowlist};
 use crate::{Error, Result};
@@ -59,7 +59,7 @@ pub(super) fn is_task_builtin(name: &str) -> bool {
 /// Returns [`Error::Lua`] when the runtime's mutex is poisoned.
 pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
     let runtime = vm
-        .tool_runtime
+        .tool_runtime()
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
     Ok(runtime.allowed_tasks.clone())
@@ -118,8 +118,12 @@ fn task_id_argument(name: &str, args: &Value) -> std::result::Result<TaskId, Str
 /// chain reports - where it is, what it waits on, its turns, its own live
 /// tasks, and its latest note.
 fn render_status(task: &TaskId, status: &TaskStatus) -> String {
-    let mut text = format!("Task id={task} (## {}): {}", status.target, status.state);
-    if status.state == "done" {
+    let mut text = format!(
+        "Task id={task} (## {}): {}",
+        status.target,
+        status.state.tag()
+    );
+    if status.state == TaskPhase::Done {
         text.push_str(if status.ok == Some(true) {
             ", ok"
         } else {
@@ -130,7 +134,7 @@ fn render_status(task: &TaskId, status: &TaskStatus) -> String {
         let _ = write!(text, ", in ## {section}");
     }
     if let Some(blocked) = status.blocked {
-        let _ = write!(text, ", waiting on {blocked}");
+        let _ = write!(text, ", waiting on {}", blocked.tag());
     }
     let _ = write!(text, ", turns {}", status.turns);
     if !status.tasks.is_empty() {
@@ -273,7 +277,15 @@ impl Scheduler {
             item: None,
             index: None,
         };
-        match self.prepare_spawn(id, target, input, seed, var, TaskOrigin::Model, false) {
+        match self.prepare_spawn(
+            id,
+            target,
+            input,
+            seed,
+            var,
+            TaskOrigin::Model,
+            SpawnVia::Spawn,
+        ) {
             Ok((task, child)) => Ok(BuiltinAnswer {
                 text: format!("Task id={task} started"),
                 ok: true,

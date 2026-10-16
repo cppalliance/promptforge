@@ -103,7 +103,7 @@ fn models_use_selects_a_bound_role_by_label() {
     let handle: String = vm.eval("local h = models.use('writer'); return h.label .. '|' .. h.name");
     assert_eq!(handle, "writer|writer");
     assert_eq!(
-        used(&vm.model_runtime.lock().expect("runtime lock")),
+        used(&vm.model_runtime().lock().expect("runtime lock")),
         Some("writer")
     );
 }
@@ -129,7 +129,7 @@ fn models_use_options_reach_the_returned_handle() {
     assert!((temperature - 0.3).abs() < f64::EPSILON);
     assert_eq!(max_tokens, 256);
     assert_eq!(
-        used(&vm.model_runtime.lock().expect("runtime lock")),
+        used(&vm.model_runtime().lock().expect("runtime lock")),
         Some("writer")
     );
 }
@@ -206,7 +206,7 @@ fn models_use_rejects_invalid_options_without_selecting() {
             "{chunk}: expected {expected:?} in {error}"
         );
         assert!(
-            used(&vm.model_runtime.lock().expect("runtime lock")).is_none(),
+            used(&vm.model_runtime().lock().expect("runtime lock")).is_none(),
             "{chunk}: a rejected call must not select"
         );
     }
@@ -245,7 +245,7 @@ fn models_use_reports_the_first_bad_option_in_key_order_on_every_state() {
 /// way the Engine's Chat-effect sites read it.
 #[track_caller]
 fn effective_sampling(vm: &BuiltVm) -> (Option<f64>, Option<u32>) {
-    let binding = crate::resolve_model_binding(vm.models.as_ref(), &vm.model_runtime)
+    let binding = crate::resolve_model_binding(vm.models.as_ref(), vm.model_runtime())
         .expect("the model state is readable")
         .expect("a selection resolves");
     let invocation = binding.invocation();
@@ -362,7 +362,7 @@ fn the_raw_id_fallback_still_validates_the_gateway_id() {
 #[test]
 fn a_poisoned_model_set_reaches_the_caller_as_an_internal_error() {
     let vm = models_vm();
-    vm.model_runtime
+    vm.model_runtime()
         .lock()
         .expect("runtime lock")
         .select(alias("writer"), UseOptions::default());
@@ -373,7 +373,7 @@ fn a_poisoned_model_set_reaches_the_caller_as_an_internal_error() {
     })
     .join();
 
-    let error = crate::resolve_model_binding(vm.models.as_ref(), &vm.model_runtime)
+    let error = crate::resolve_model_binding(vm.models.as_ref(), vm.model_runtime())
         .expect_err("a poisoned model set cannot resolve a binding");
     assert!(
         matches!(&error, crate::Error::Internal(message) if message == "model set mutex was poisoned"),

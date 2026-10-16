@@ -86,7 +86,7 @@ pub(crate) fn plugin_object(lua: &Lua, name: &str) -> mlua::Result<Option<AnyUse
 /// which records into the section's `runtime`.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if an object or function cannot be created or installed.
+/// Returns [`Error::LuaRuntime`] if an object or function cannot be created or installed.
 pub(crate) fn install_plugins(
     lua: &Lua,
     globals: &Table,
@@ -198,7 +198,10 @@ fn plugin_name(lua: &Lua, set: &ToolSet, value: &Value) -> mlua::Result<PluginId
     match value {
         Value::String(text) => {
             let text = text.to_string_lossy();
-            let name = PluginId::parse(&text).map_err(|_| rejected(format!("{text:?}")))?;
+            let name = match PluginId::parse(&text) {
+                Ok(name) => name,
+                Err(error) => return Err(rejected(format!("{text:?}: {error}"))),
+            };
             if let Some(Some(reason)) = set.roster().get(&name) {
                 return Err(mlua::Error::external(format!(
                     "plugins.offer: the {name} Plugin is unavailable in this run: {reason}"

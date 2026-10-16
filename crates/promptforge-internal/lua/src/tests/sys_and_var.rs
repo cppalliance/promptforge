@@ -62,10 +62,11 @@ fn writing_sys_field_is_a_lua_error() {
 }
 
 #[test]
-fn a_sys_write_raises_the_whole_refusal_for_a_string_or_integer_key() {
+fn a_sys_write_raises_the_whole_refusal_for_a_string_integer_or_other_key() {
     for (target, refusal) in [
         ("sys.extra", "sys is read-only; cannot set 'extra'"),
-        ("sys[1]", "sys is read-only; cannot set 'Integer(1)'"),
+        ("sys[1]", "sys is read-only; cannot set '1'"),
+        ("sys[true]", "sys is read-only; cannot set 'boolean'"),
     ] {
         let source =
             format!("local ok, err = pcall(function() {target} = 1 end)\nreturn tostring(err)");

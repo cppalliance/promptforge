@@ -6,7 +6,7 @@ use mlua::{Function, Lua, LuaOptions, StdLib};
 use promptforge_types::emitter::Emitter;
 use promptforge_types::event::lifecycle;
 
-use crate::error::{Error, QuotaResource, Result};
+use crate::error::{Error, QuotaExceeded, Result};
 
 /// Identifies whether temporary compiler setup or chunk compilation failed.
 enum CompilerError {
@@ -90,7 +90,7 @@ impl LuaProgram {
     /// # Errors
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
     /// retaining the source, location, and Lua diagnostic. Returns
-    /// [`Error::Lua`] if the temporary compiler VM cannot be created.
+    /// [`Error::LuaRuntime`] if the temporary compiler VM cannot be created.
     pub fn compile(
         source: &str,
         location: &str,
@@ -139,8 +139,8 @@ impl LuaProgram {
     /// `[string "{chunk name}"]:` marker).
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created
-    /// or the source fails to compile.
+    /// Returns [`Error::LuaRuntime`] if the temporary compiler VM cannot be
+    /// created or the source fails to compile.
     pub fn compile_internal(source: &str, location: &str) -> Result<Self> {
         let bytecode = compile_chunk(source, location).map_err(|error| match error {
             CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
@@ -172,28 +172,20 @@ impl LuaProgram {
     /// exposed as a persistence format.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the VM rejects the internally compiled
-    /// bytecode.
+    /// Returns [`Error::LuaRuntime`] if the VM rejects the internally
+    /// compiled bytecode.
     pub fn load(&self, lua: &Lua) -> Result<Function> {
         lua.load(self.bytecode.as_slice())
             .into_function()
             .map_err(Error::lua)
     }
 
-    /// Maps a Lua runtime failure of a chunk that ran with no library
-    /// programs loaded beside it: `map_runtime_error_among` with none
-    /// loaded.
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn map_runtime_error(&self, error: &mlua::Error) -> Error {
-        self.map_runtime_error_among(error, &[])
-    }
-
     /// Maps a Lua runtime failure to its ordered core outcome, for a chunk
     /// that ran beside `loaded`, the programs of the libraries loaded into
     /// its VM.
     ///
-    /// A recognized Engine quota returns [`Error::LuaQuota`]. All remaining
+    /// An Engine quota refusal, recognized by its typed value, returns
+    /// [`Error::LuaQuota`]. All remaining
     /// failures return [`Error::LuaRuntime`] with each chunk-relative line
     /// rewritten to an absolute prompt-source line by the program that owns
     /// that chunk, this one first when two share a chunk name. Nested errors
@@ -202,11 +194,12 @@ impl LuaProgram {
     /// aborted under the run's cancel flag is [`Error::Interrupted`] before
     /// the raw error reaches here.
     pub(crate) fn map_runtime_error_among(&self, error: &mlua::Error, loaded: &[Self]) -> Error {
-        let raw = error.to_string();
-        // An Engine-quota refusal is a stable typed error, not an authoring error.
-        if let Some(resource) = quota_resource(&raw) {
-            return Error::LuaQuota { resource };
+        if let Some(QuotaExceeded(resource)) = error.downcast_ref::<QuotaExceeded>() {
+            return Error::LuaQuota {
+                resource: *resource,
+            };
         }
+        let raw = error.to_string();
         let owners: Vec<(&str, &str, NonZeroU32)> = std::iter::once(self)
             .chain(loaded)
             .map(|program| {
@@ -234,23 +227,6 @@ impl LuaProgram {
     }
 }
 
-/// Maps a raw Lua error string to the exhausted Engine-quota resource, if any.
-///
-/// Recognizes the stable quota messages our Engine functions emit so a refusal
-/// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
-fn quota_resource(raw: &str) -> Option<QuotaResource> {
-    use crate::error::lua_quota;
-    if raw.contains(lua_quota::LOG_EVENT) {
-        Some(QuotaResource::LogEvent)
-    } else if raw.contains(lua_quota::LOG_BYTE) {
-        Some(QuotaResource::LogByte)
-    } else if raw.contains(lua_quota::INSTRUCTION) {
-        Some(QuotaResource::Instruction)
-    } else {
-        None
-    }
-}
-
 /// Rewrites chunk-relative line numbers for the named chunks in `owners`,
 /// each a chunk name, the display location it maps to, and the
 /// prompt-source line its chunk starts at, to absolute prompt-source lines.
@@ -263,8 +239,7 @@ fn quota_resource(raw: &str) -> Option<QuotaResource> {
 /// library both VMs loaded. The message gains a single leading
 /// `{location}:{line}:` tag for the first occurrence rewritten; a message
 /// with none passes through unchanged. A chunk line whose absolute mapping
-/// would overflow `u32` keeps its original marker and digits (the finding's
-/// "return the original diagnostic on overflow").
+/// would overflow `u32` keeps its original marker and digits.
 pub(crate) fn map_chunk_line_to_absolute(
     message: &str,
     owners: &[(&str, &str, NonZeroU32)],
@@ -295,14 +270,7 @@ pub(crate) fn map_chunk_line_to_absolute(
         let digit_end = after
             .find(|c: char| !c.is_ascii_digit())
             .unwrap_or(after.len());
-        // absolute = source_line + chunk_line - 1, with overflow guarded so
-        // a pathological line count cannot wrap into a wrong number.
-        let absolute = after[..digit_end]
-            .parse::<u32>()
-            .ok()
-            .and_then(|chunk_line| source_line.get().checked_add(chunk_line))
-            .and_then(|sum| sum.checked_sub(1));
-        if let Some(absolute) = absolute {
+        if let Some(absolute) = absolute_line(*source_line, &after[..digit_end]) {
             tag.get_or_insert((location, absolute));
             result.push_str(location);
             result.push(':');
@@ -321,5 +289,19 @@ pub(crate) fn map_chunk_line_to_absolute(
         format!("{location}:{absolute}: {result}")
     } else {
         result
+    }
+}
+
+/// The absolute prompt-source line of `chunk_line`, a chunk-relative line's
+/// digits, in a chunk starting at `source_line`: the two summed, less one.
+/// `None` when the digits or the sum overflow `u32`, so a pathological line
+/// count cannot wrap into a wrong number.
+fn absolute_line(source_line: NonZeroU32, chunk_line: &str) -> Option<u32> {
+    let Ok(chunk_line) = chunk_line.parse::<u32>() else {
+        return None;
+    };
+    match source_line.get().checked_add(chunk_line) {
+        Some(sum) => sum.checked_sub(1),
+        None => None,
     }
 }

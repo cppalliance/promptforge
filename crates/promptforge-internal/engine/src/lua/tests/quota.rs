@@ -14,7 +14,7 @@ use serde_json::json;
 use promptforge_lua::Error;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult, Request};
+use crate::execute::protocol::{Answer, ChatOutcome, ChatResult, Request};
 
 use super::{parse_request, resume_with, scheduler_vm_with_tools, test_models, test_tools};
 
@@ -40,11 +40,7 @@ const MEASURED_ROUNDS: i64 = 3;
 /// A completed round that requested one `tools_echo` call.
 fn tool_call_round() -> Answer<Error> {
     Answer::Chat(Ok(Box::new(ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: None,
-        empty_detail: None,
-        tool_calls: Some(vec![ToolCallEvent::new(
+        outcome: ChatOutcome::ToolCalls(vec![ToolCallEvent::new(
             "call_1",
             "tools_echo",
             json!({ "value": "hi" }),
@@ -57,11 +53,7 @@ fn tool_call_round() -> Answer<Error> {
 /// A completed round that produced the terminal reply.
 fn reply_round(text: &str) -> Answer<Error> {
     Answer::Chat(Ok(Box::new(ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: Some(text.to_owned()),
-        empty_detail: None,
-        tool_calls: None,
+        outcome: ChatOutcome::Reply(text.to_owned()),
         finish_reason: Some("stop".to_owned()),
         turn: 2,
     })))

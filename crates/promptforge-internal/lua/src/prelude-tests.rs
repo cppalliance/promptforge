@@ -111,7 +111,7 @@ fn a_table_global_is_sealed_at_its_top_level() {
 }
 
 #[test]
-fn a_sealed_global_raises_the_whole_refusal_for_a_string_or_integer_key() {
+fn a_sealed_global_raises_the_whole_refusal_for_a_string_integer_or_other_key() {
     let vm = section_vm();
     install_preludes(vm.lua(), &[prelude("kit", "kit = {}")]).expect("the prelude installs");
     for (target, refusal) in [
@@ -121,7 +121,11 @@ fn a_sealed_global_raises_the_whole_refusal_for_a_string_or_integer_key() {
         ),
         (
             "kit[1]",
-            "kit is read-only: Plugin `kit` defines it; cannot set 'Integer(1)'",
+            "kit is read-only: Plugin `kit` defines it; cannot set '1'",
+        ),
+        (
+            "kit[true]",
+            "kit is read-only: Plugin `kit` defines it; cannot set 'boolean'",
         ),
     ] {
         let message: String = vm.eval(&format!(

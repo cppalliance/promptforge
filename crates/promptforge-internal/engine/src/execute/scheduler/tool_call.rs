@@ -211,7 +211,7 @@ impl Scheduler {
             .frame
             .as_mut()
             .ok_or(Error::internal("a live chain holds its frame"))?;
-        let effective = current_tool_bindings(chain.ctx.tool_set(), &frame.vm()?.tool_runtime)?;
+        let effective = current_tool_bindings(chain.ctx.tool_set(), frame.vm()?.tool_runtime())?;
         frame.script_call_counts(&chain.ctx, &effective)
     }
 

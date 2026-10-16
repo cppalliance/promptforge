@@ -94,7 +94,7 @@ impl SectionContext {
         }
         ctx.emitter()
             .report(section.name(), lifecycle::SECTION_STARTED);
-        let mut vm = SectionVm::new_for_section(
+        let vm = SectionVm::new_for_section(
             ctx.nonce(),
             ctx.tool_set(),
             &ctx.model_set(),
@@ -136,12 +136,9 @@ impl SectionContext {
             access,
             section.name(),
         );
-        // Setup runs on the bare VM so a failure tears it down here: the
-        // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, read, resolve, render) {
-            vm.teardown(ctx.emitter(), section.name());
-            return Err(error);
-        }
+        // Setup runs on the bare VM and tears it down itself on failure:
+        // the frame does not exist yet, so its `Drop` cannot own this path.
+        let vm = setup_section_vm(vm, &setup, read, resolve, render)?;
         Ok(Self {
             vm: Some(vm),
             name: section.name().to_owned(),
@@ -186,7 +183,7 @@ impl SectionContext {
         // The pass is the root chain, and the root chain is task `0`.
         let root_task = TaskId::from(ChainId::root());
         let sys = ctx.sys_json(section_id, &root_task, title);
-        let mut vm = SectionVm::new_for_section(
+        let vm = SectionVm::new_for_section(
             ctx.nonce(),
             ctx.tool_set(),
             &ctx.model_set(),
@@ -211,12 +208,9 @@ impl SectionContext {
         // freeze (see the scheduler's H1-to-walk handoff).
         let mut setup = ctx.vm_setup(&sys, VmSeed::default(), access, title);
         setup.argv_writable = true;
-        // Setup runs on the bare VM so a failure tears it down here: the
-        // frame does not exist yet, so its `Drop` cannot own this path.
-        if let Err(error) = setup_section_vm(&mut vm, &setup, read, resolve, render) {
-            vm.teardown(ctx.emitter(), title);
-            return Err(error);
-        }
+        // Setup runs on the bare VM and tears it down itself on failure:
+        // the frame does not exist yet, so its `Drop` cannot own this path.
+        let vm = setup_section_vm(vm, &setup, read, resolve, render)?;
         Ok(Self {
             vm: Some(vm),
             name: title.to_owned(),

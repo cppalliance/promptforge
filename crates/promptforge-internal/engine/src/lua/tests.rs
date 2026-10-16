@@ -109,7 +109,7 @@ struct VmBinds<'a> {
 #[track_caller]
 fn set_up_vm(binds: &VmBinds<'_>) -> SectionVm {
     let emitter = null_emitter();
-    let mut vm = SectionVm::new_for_section(
+    let vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(&TEST_SEED),
         &Arc::new(binds.tools.clone()),
         &Arc::new(Mutex::new(binds.models.clone())),
@@ -139,11 +139,10 @@ fn set_up_vm(binds: &VmBinds<'_>) -> SectionVm {
             "no library `{heading}` in reach"
         )))
     };
-    setup_section_vm(&mut vm, &setup, read, resolve, |template, _| {
+    setup_section_vm(vm, &setup, read, resolve, |template, _| {
         Ok(template.to_owned())
     })
-    .expect("the setup installs");
-    vm
+    .expect("the setup installs")
 }
 
 /// Starts `source` as a coroutine on the VM and runs it to its first

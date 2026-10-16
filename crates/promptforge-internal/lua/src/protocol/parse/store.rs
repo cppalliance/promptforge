@@ -4,8 +4,8 @@
 use mlua::Value;
 
 use crate::Error;
+use crate::protocol::{Request, VfsOp};
 
-use super::super::request::{Request, VfsOp};
 use super::{FieldFailure, call_string};
 
 /// Reads one author-supplied optional line bound: absent or nil is `None`,

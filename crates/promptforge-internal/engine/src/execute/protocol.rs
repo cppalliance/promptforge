@@ -11,6 +11,7 @@
 //! unchanged, so existing `crate::execute::protocol::*` paths keep working.
 
 pub(crate) use promptforge_lua::{
-    Answer, ChatResult, LocalToolOutcome, MessageContent, MessageRecord, Request, TaskDelivery,
-    TaskStatus, ToolCallOutcome, ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
+    Answer, Blocked, ChatOutcome, ChatResult, LocalToolOutcome, MessageContent, MessageRecord,
+    RecordRole, Request, SpawnVia, TaskDelivery, TaskPhase, TaskStatus, ToolCallOutcome,
+    ToolCallRecord, VfsOp, VfsOutcome, YieldParse,
 };

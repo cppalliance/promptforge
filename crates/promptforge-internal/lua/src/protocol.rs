@@ -12,21 +12,28 @@
 //! are the compiler-checked per-message contract.
 //!
 //! The submodules split the protocol along that boundary: `request` the
-//! request vocabulary (the [`Request`] and [`VfsOp`] enums and the
-//! message-record types), `answer` the answer vocabulary (the [`Answer`]
-//! enum and its payload types), `parse` the yield-to-request validation,
-//! and `render` the answer-to-envelope rendering.
+//! request vocabulary (the [`Request`] and [`VfsOp`] enums), `record` the
+//! message-record types a chat request is built from, `answer` the answer
+//! vocabulary (the [`Answer`] enum and its payload types), `parse` the
+//! yield-to-request validation, and `render` the answer-to-envelope
+//! rendering. `non_empty` holds the [`NonEmpty`] sequence two of them use.
 
 mod answer;
+mod non_empty;
 mod parse;
+mod record;
 mod render;
 mod request;
 #[cfg(test)]
 mod tests;
 
-pub use answer::{Answer, ChatResult, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
+pub use answer::{
+    Answer, Blocked, ChatOutcome, ChatResult, TaskDelivery, TaskPhase, TaskStatus, ToolCallOutcome,
+    VfsOutcome,
+};
+pub use non_empty::NonEmpty;
 pub use parse::YieldParse;
 pub(crate) use parse::{NOT_A_LIST, parse_record};
-pub use request::{
-    ContentPart, LocalToolOutcome, MessageContent, MessageRecord, Request, ToolCallRecord, VfsOp,
-};
+pub use record::{ContentPart, MessageContent, MessageRecord, RecordRole, ToolCallRecord};
+pub(crate) use render::Retained;
+pub use request::{LocalToolOutcome, Request, SpawnVia, VfsOp};

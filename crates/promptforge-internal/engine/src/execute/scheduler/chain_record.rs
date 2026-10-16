@@ -11,7 +11,7 @@ use promptforge_types::metrics::Usage;
 use promptforge_vfs::Access;
 
 use crate::execute::context::RunState;
-use crate::execute::protocol::Answer;
+use crate::execute::protocol::{Answer, Blocked};
 use crate::execute::scope::DispatchTarget;
 use crate::execute::section_context::{SectionContext, TaskSeed};
 use crate::execute::walk_target::SlicePath;
@@ -124,12 +124,11 @@ pub(super) struct Chain {
     /// while the chain is not parked on a batch.
     pub(super) batch: Vec<Option<Result<String>>>,
     /// What the chain's suspended request is parked on, as `tasks.status`
-    /// reports it (`chat`, `tool_call`, `store`, `timer`, `tasks`, `call`,
-    /// or `queued` while the chain waits for a
-    /// concurrency slot): set at dispatch or spawn, cleared when the
+    /// reports it, or [`Blocked::Queued`] while the chain waits for a
+    /// concurrency slot: set at dispatch or spawn, cleared when the
     /// answer resumes the chain. `None` while the chain runs or between
     /// blocks.
-    pub(super) blocked: Option<&'static str>,
+    pub(super) blocked: Option<Blocked>,
     /// Model-task notices not yet delivered into the chain's next model
     /// round, in arrival order: queued (with their task) when a model
     /// task the chain owns ends, drained - each drain joining its task -

@@ -12,9 +12,8 @@ fn models_use_selects_a_bound_role_by_label() {
         Some(true),
         &["thinking", "frontier"],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     vm.run_chunk(
         &chunk(r#"models.use("analyst")"#),
         &null_emitter(),
@@ -42,9 +41,8 @@ fn no_use_or_default_leaves_the_section_unbound() {
         None,
         &[],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     let model = resolve_section_model(&vm).expect("the resolution reads the shared set");
     assert!(model.is_none());
     vm.teardown(&null_emitter(), "Section");
@@ -60,9 +58,8 @@ fn models_use_rejects_an_unbound_label() {
         None,
         &[],
     )]);
-    let mut vm =
+    let vm =
         section_vm_with_models(&models, &null_emitter(), "Section").expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access()).unwrap();
     let error = vm
         .run_chunk(
             &chunk(r#"models.use("missing")"#),

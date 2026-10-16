@@ -13,7 +13,7 @@ use promptforge_types::emitter::Emitter;
 use promptforge_types::untrusted::GuardNonce;
 use promptforge_vfs::Access;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, QuotaExceeded, QuotaResource, Result};
 
 pub use store::store_error_message;
 pub(crate) use store::{install_store_table, route_store_to_shims};
@@ -47,7 +47,9 @@ fn log_checkpoint(
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
         .is_err()
     {
-        return Err(mlua::Error::external(crate::error::lua_quota::LOG_EVENT));
+        return Err(mlua::Error::external(QuotaExceeded(
+            QuotaResource::LogEvent,
+        )));
     }
     let Some(Value::String(message)) = arguments.into_iter().next() else {
         return Err(mlua::Error::external("log message must be a UTF-8 string"));
@@ -74,7 +76,7 @@ fn log_checkpoint(
         })
         .is_err()
     {
-        return Err(mlua::Error::external(crate::error::lua_quota::LOG_BYTE));
+        return Err(mlua::Error::external(QuotaExceeded(QuotaResource::LogByte)));
     }
     emitter.lua(section, &message);
     Ok(())

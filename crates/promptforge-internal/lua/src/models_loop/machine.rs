@@ -14,13 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use promptforge_model_client::client::Role;
 use promptforge_types::metrics::ToolCallEvent;
 
 use crate::compactors::OverflowReason;
 use crate::error_value::{ErrorField, ErrorKind, Raised};
 use crate::messages::MessageList;
-use crate::protocol::{ChatResult, MessageContent, MessageRecord, ToolCallRecord};
+use crate::protocol::{
+    ChatOutcome, ChatResult, MessageContent, MessageRecord, RecordRole, ToolCallRecord,
+};
 
 /// The message the empty-reply rule raises when the answer names no
 /// empty detail.
@@ -130,11 +131,10 @@ pub(super) enum Then<V> {
     /// Yield `{ op = "tool_call", alias = call.name, args = call.arguments,
     /// call_id = call.id, turn = turn }`.
     ToolCall { call: ToolCallEvent, turn: u32 },
-    /// Call the compactor with the reason's tag, or nil when there is
-    /// none.
+    /// Call the compactor with the reason's tag.
     Compact {
         compactor: V,
-        reason: Option<OverflowReason>,
+        reason: OverflowReason,
     },
     /// Call the handler with its arguments table.
     Handle { handler: V, args: V },
@@ -247,29 +247,33 @@ impl<V: Clone> Machine<V> {
     /// empty reply that finished with `stop` after an answered call is the
     /// clean exit, and anything else raises `empty_model_reply`.
     fn judge(&mut self, round: ChatResult) -> Then<V> {
-        if round.overflow {
-            self.phase = Phase::Compacting;
-            return Then::Compact {
-                compactor: self.compactor.clone(),
-                reason: round.overflow_reason,
-            };
-        }
-        if let Some(calls) = round.tool_calls {
-            self.turn = round.turn;
-            self.calls = calls;
-            self.results.clear();
-            return self.next_call();
-        }
-        if let Some(reply) = round.reply.filter(|reply| !reply.is_empty()) {
-            let record = text_record(Role::Assistant, reply);
-            return self.push(vec![record], |_| Then::Return);
-        }
+        let detail = match round.outcome {
+            ChatOutcome::Overflow(reason) => {
+                self.phase = Phase::Compacting;
+                return Then::Compact {
+                    compactor: self.compactor.clone(),
+                    reason,
+                };
+            }
+            ChatOutcome::ToolCalls(calls) => {
+                self.turn = round.turn;
+                self.calls = calls;
+                self.results.clear();
+                return self.next_call();
+            }
+            ChatOutcome::Reply(reply) if !reply.is_empty() => {
+                let record = text_record(RecordRole::Assistant, reply);
+                return self.push(vec![record], |_| Then::Return);
+            }
+            ChatOutcome::Reply(_) => None,
+            ChatOutcome::Empty(detail) => detail,
+        };
         if round.finish_reason.as_deref() == Some("stop") && self.answered > 0 {
-            let record = text_record(Role::Assistant, String::new());
+            let record = text_record(RecordRole::Assistant, String::new());
             return self.push(vec![record], |_| Then::Return);
         }
         let mut empty = raised(ErrorKind::EmptyModelReply, EMPTY_MODEL_REPLY);
-        if let Some(detail) = round.empty_detail {
+        if let Some(detail) = detail {
             empty.message = detail;
         }
         if let Some(reason) = round.finish_reason {
@@ -316,7 +320,7 @@ impl<V: Clone> Machine<V> {
         let calls = std::mem::take(&mut self.calls);
         let results = std::mem::take(&mut self.results);
         self.answered += calls.len();
-        let mut assistant = text_record(Role::Assistant, String::new());
+        let mut assistant = text_record(RecordRole::Assistant, String::new());
         assistant.tool_calls = calls
             .iter()
             .map(|call| ToolCallRecord {
@@ -327,9 +331,12 @@ impl<V: Clone> Machine<V> {
             .collect();
         let mut records = vec![assistant];
         records.extend(calls.into_iter().zip(results).map(|(call, result)| {
-            let mut record = text_record(Role::Tool, result);
-            record.tool_call_id = Some(call.id);
-            record
+            text_record(
+                RecordRole::Tool {
+                    tool_call_id: call.id,
+                },
+                result,
+            )
         }));
         self.push(records, Self::next_round)
     }
@@ -353,12 +360,11 @@ impl<V: Clone> Machine<V> {
 }
 
 /// A record of `role` holding the plain text `content`.
-fn text_record(role: Role, content: String) -> MessageRecord {
+fn text_record(role: RecordRole, content: String) -> MessageRecord {
     MessageRecord {
         role,
         content: MessageContent::Text(content),
         tool_calls: Vec::new(),
-        tool_call_id: None,
     }
 }
 

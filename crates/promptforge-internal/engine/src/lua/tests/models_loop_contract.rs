@@ -6,7 +6,7 @@
 
 use promptforge_lua::Error;
 
-use crate::execute::protocol::{Answer, ChatResult, Request};
+use crate::execute::protocol::{Answer, ChatOutcome, ChatResult, Request};
 
 use super::{parse_request, resume_with, scheduler_vm, start, test_models};
 
@@ -14,11 +14,7 @@ use super::{parse_request, resume_with, scheduler_vm, start, test_models};
 /// ending for `finish_reason`.
 fn empty_round(finish_reason: Option<&str>) -> Answer<Error> {
     Answer::Chat(Ok(Box::new(ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: None,
-        empty_detail: None,
-        tool_calls: None,
+        outcome: ChatOutcome::Empty(None),
         finish_reason: finish_reason.map(str::to_owned),
         turn: 1,
     })))

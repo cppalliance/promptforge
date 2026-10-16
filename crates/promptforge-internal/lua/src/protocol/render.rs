@@ -1,12 +1,23 @@
 //! The rendering half of the protocol: an answer becomes the `(ok, result)`
 //! resume envelope.
 
-use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
+use mlua::{Lua, LuaSerdeExt, MultiValue, Table, Value};
 
 use crate::error_value::{ErrorValue, error_table};
 use crate::tools::local_handler;
 
 use super::answer::{Answer, TaskDelivery, TaskStatus, ToolCallOutcome, VfsOutcome};
+
+/// An answer's typed error, retained while the shim raises its rendered
+/// error table, beside that table: the block's raise of this very table,
+/// and no other value, is the retained error's.
+#[derive(Debug)]
+pub(crate) struct Retained<E> {
+    /// The typed error the answer owned.
+    pub(crate) error: E,
+    /// The error table the envelope holds.
+    pub(crate) table: Table,
+}
 
 /// Renders one [`TaskStatus`] as the plain Lua status table. Absent
 /// optional fields are never set, so they resume as nil; `tasks` is always
@@ -15,7 +26,7 @@ fn task_status_table(lua: &Lua, status: TaskStatus) -> mlua::Result<mlua::Table>
     let table = lua.create_table()?;
     table.raw_set("target", status.target)?;
     table.raw_set("origin", status.origin.tag())?;
-    table.raw_set("state", status.state)?;
+    table.raw_set("state", status.state.tag())?;
     if let Some(ok) = status.ok {
         table.raw_set("ok", ok)?;
     }
@@ -23,7 +34,7 @@ fn task_status_table(lua: &Lua, status: TaskStatus) -> mlua::Result<mlua::Table>
         table.raw_set("section", section)?;
     }
     if let Some(blocked) = status.blocked {
-        table.raw_set("blocked", blocked)?;
+        table.raw_set("blocked", blocked.tag())?;
     }
     table.raw_set("turns", status.turns)?;
     table.raw_set("tasks", task_id_sequence(lua, &status.tasks)?)?;
@@ -68,11 +79,18 @@ fn store_value(lua: &Lua, outcome: VfsOutcome) -> mlua::Result<Value> {
 fn delivery_values<E: ErrorValue>(
     lua: &Lua,
     delivery: TaskDelivery<E>,
-) -> mlua::Result<(Vec<Value>, Option<E>)> {
+) -> mlua::Result<(Vec<Value>, Option<Retained<E>>)> {
     let id = Value::String(lua.create_string(delivery.task.to_string())?);
     let (ok, result, retained) = match delivery.outcome {
         Ok(text) => (true, Value::String(lua.create_string(&text)?), None),
-        Err(error) => (false, Value::Table(error_table(lua, &error)?), Some(error)),
+        Err(error) => {
+            let table = error_table(lua, &error)?;
+            (
+                false,
+                Value::Table(table.clone()),
+                Some(Retained { error, table }),
+            )
+        }
     };
     Ok((vec![id, Value::Boolean(ok), result], retained))
 }
@@ -85,15 +103,15 @@ impl<E: ErrorValue> Answer<E> {
     /// (`kind`, `message` as the error's display string, and the kind's
     /// fields, with `tostring` returning the message) - the shim raises it
     /// with `error(result, 0)`, so a printing author sees exactly the Engine's
-    /// message and a branching one reads `kind` - and the typed error
-    /// is returned alongside for the driver to retain. A successful
+    /// message and a branching one reads `kind` - and the typed error is
+    /// retained beside that table, which identifies its raise. A successful
     /// `join_any` whose member failed retains the member's error the same
     /// way, since a shim may re-raise it at once.
     ///
     /// # Errors
     /// Returns an `mlua` error if a Lua string, userdata, or table cannot be
     /// created on `lua`.
-    pub fn into_envelope(self, lua: &Lua) -> mlua::Result<(MultiValue, Option<E>)> {
+    pub(crate) fn render(self, lua: &Lua) -> mlua::Result<(MultiValue, Option<Retained<E>>)> {
         let mut retained = None;
         let values = match self {
             Answer::Infer(Ok(text))
@@ -158,8 +176,8 @@ impl<E: ErrorValue> Answer<E> {
             | Answer::Store(Err(error)) => {
                 let table = error_table(lua, &error)?;
                 return Ok((
-                    MultiValue::from_vec(vec![Value::Boolean(false), Value::Table(table)]),
-                    Some(error),
+                    MultiValue::from_vec(vec![Value::Boolean(false), Value::Table(table.clone())]),
+                    Some(Retained { error, table }),
                 ));
             }
         };

@@ -24,7 +24,7 @@ use promptforge_types::ids::{TaskId, TaskOrigin};
 use promptforge_vfs::ExecId;
 use promptforge_vfs::detail::{access_id, access_spawn};
 
-use crate::execute::protocol::Answer;
+use crate::execute::protocol::{Answer, Blocked, SpawnVia};
 use crate::execute::section_context::TaskSeed;
 use crate::execute::support::MAX_CALL_DEPTH;
 use crate::{Error, Result};
@@ -111,11 +111,12 @@ impl Scheduler {
     /// enqueued behind the spawner, so `spawn` returns before the child
     /// runs. Every dispatch failure - the depth cap, target resolution, the
     /// worker check, chain construction - is the call's answer, resumed
-    /// into the spawner so an author `pcall` can catch it. `fanout` marks
-    /// a `fanout` arm, whose depth-cap refusal is named after `tasks.fanout`.
+    /// into the spawner so an author `pcall` can catch it. `via` names the
+    /// call that started the task: a `fanout` arm's depth-cap refusal is
+    /// named after `tasks.fanout`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
+        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and starting call explicit"
     )]
     pub(super) fn dispatch_spawn(
         &mut self,
@@ -125,9 +126,9 @@ impl Scheduler {
         seed: TaskSeed,
         var: serde_json::Value,
         origin: TaskOrigin,
-        fanout: bool,
+        via: SpawnVia,
     ) {
-        match self.prepare_spawn(id, target, input, seed, var, origin, fanout) {
+        match self.prepare_spawn(id, target, input, seed, var, origin, via) {
             Ok((task, child)) => {
                 self.answer_inline(id, Answer::Spawn(Ok(task)));
                 // The child waits for admission, queued behind the
@@ -156,7 +157,7 @@ impl Scheduler {
     /// record stashed; the drain admits it when a slot frees up.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and fanout mark explicit"
+        reason = "the spawn keeps the request's target, input, seeds, var snapshot, origin, and starting call explicit"
     )]
     pub(super) fn prepare_spawn(
         &mut self,
@@ -166,7 +167,7 @@ impl Scheduler {
         seed: TaskSeed,
         var: serde_json::Value,
         origin: TaskOrigin,
-        fanout: bool,
+        via: SpawnVia,
     ) -> Result<(TaskId, ChainIndex)> {
         let chain = &self.chains[id.index()];
         let depth = chain.call_depth + 1;
@@ -175,7 +176,10 @@ impl Scheduler {
         // another section.
         let spawner_section = chain.section_name().to_owned();
         if depth > MAX_CALL_DEPTH {
-            let tripped = if fanout { "tasks.fanout" } else { "call" };
+            let tripped = match via {
+                SpawnVia::Fanout => "tasks.fanout",
+                SpawnVia::Spawn => "call",
+            };
             return Err(Error::Lua(format!(
                 "{tripped} recursion exceeded cap of {MAX_CALL_DEPTH}"
             )));
@@ -245,7 +249,7 @@ impl Scheduler {
         // `queued` in `tasks.status` (the slot's state is still
         // `Running`), and the spawn record holds what the start event
         // reports once the task first runs.
-        spawned.blocked = Some("queued");
+        spawned.blocked = Some(Blocked::Queued);
         spawned.pending_spawn = Some(SpawnRecord {
             input: input.map(str::to_owned),
             section: spawner_section,

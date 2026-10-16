@@ -19,9 +19,9 @@ use std::sync::{Arc, Mutex};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use promptforge_lua::{
-    LuaProgram, MessageContent, MessageRecord, SectionVm, ToolCallRecord, ToolSet, project_messages,
+    LuaProgram, MessageContent, MessageRecord, RecordRole, SectionVm, ToolCallRecord, ToolSet,
+    project_messages,
 };
-use promptforge_model_client::client::Role;
 use promptforge_model_client::model::ModelSet;
 use promptforge_types::emitter::{DebugMode, Emitter, EventSink};
 use promptforge_types::seed::RunSeed;
@@ -39,15 +39,15 @@ fn emitter() -> Emitter {
 /// A section VM with Engine values injected, so the `messages` namespace is
 /// installed as the executor installs it.
 fn builder_vm() -> SectionVm {
-    let mut vm = SectionVm::new_for_section(
+    SectionVm::new_for_section(
         &GuardNonce::from_seed(&RunSeed::from_bytes([1; 32])),
         &Arc::new(ToolSet::default()),
         &Arc::new(Mutex::new(ModelSet::default())),
         &emitter(),
         SECTION,
     )
-    .expect("the bench VM builds");
-    vm.inject_values(
+    .expect("the bench VM builds")
+    .inject_values(
         "",
         &json!({}),
         &std::sync::Arc::new(
@@ -56,8 +56,7 @@ fn builder_vm() -> SectionVm {
                 .expect("the stock backend acquires"),
         ),
     )
-    .expect("value injection installs the messages namespace");
-    vm
+    .expect("value injection installs the messages namespace")
 }
 
 /// Builds one message list through the Rust-backed `messages.new()` list:
@@ -89,34 +88,31 @@ fn message_building(c: &mut Criterion) {
 /// Projects one conversation covering the active shapes: leading system,
 /// alternating user and assistant text, and one complete tool exchange.
 fn projection(c: &mut Criterion) {
-    let text = |role: Role, body: &str| MessageRecord {
+    let text = |role: RecordRole, body: &str| MessageRecord {
         role,
         content: MessageContent::Text(body.to_owned()),
         tool_calls: Vec::new(),
-        tool_call_id: None,
     };
     let messages = vec![
-        text(Role::System, "you are careful"),
-        text(Role::User, "summarize this"),
-        text(Role::Assistant, "a summary"),
-        text(Role::User, "now with tools"),
+        text(RecordRole::System, "you are careful"),
+        text(RecordRole::User, "summarize this"),
+        text(RecordRole::Assistant, "a summary"),
+        text(RecordRole::User, "now with tools"),
         MessageRecord {
-            role: Role::Assistant,
-            content: MessageContent::Text(String::new()),
             tool_calls: vec![ToolCallRecord {
                 id: "call_1".to_owned(),
                 name: "echo".to_owned(),
                 arguments: json!({ "value": "polish" }),
             }],
-            tool_call_id: None,
+            ..text(RecordRole::Assistant, "")
         },
-        MessageRecord {
-            role: Role::Tool,
-            content: MessageContent::Text("echoed: polish".to_owned()),
-            tool_calls: Vec::new(),
-            tool_call_id: Some("call_1".to_owned()),
-        },
-        text(Role::Assistant, "refined text"),
+        text(
+            RecordRole::Tool {
+                tool_call_id: "call_1".to_owned(),
+            },
+            "echoed: polish",
+        ),
+        text(RecordRole::Assistant, "refined text"),
     ];
     c.bench_function("projection", |b| {
         b.iter(|| {

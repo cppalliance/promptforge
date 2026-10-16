@@ -22,10 +22,7 @@ fn two_fresh_section_vms_yield_the_same_key_order() {
                   do out[#out+1] = k end \
                   return out";
     let order = |section: &str| -> Vec<String> {
-        let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), section)
-            .expect("section VM construction cannot fail");
-        vm.inject_values("", &json!({}), &fresh_access())
-            .expect("Engine values must inject");
+        let vm = TestVm::new().section(section).inject();
         let keys: Vec<String> = vm
             .lua()
             .load(source)
@@ -61,9 +58,12 @@ fn section_vm_preserves_one_environment_across_all_phases() {
     store
         .write("seed.txt", b"seeded")
         .expect("the memory store can seed a file");
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("input", &json!({ "id": 7 }), &access)
-        .expect("Engine values must inject");
+    let sys = json!({ "id": 7 });
+    let vm = TestVm::new()
+        .args("input")
+        .sys(&sys)
+        .access(access)
+        .inject();
     vm.install_engine_globals(&null_emitter(), "Test")
         .expect("Engine globals must install");
     run_scalar(&vm, &first, &null_emitter(), "Test")
@@ -97,28 +97,42 @@ fn section_vm_preserves_one_environment_across_all_phases() {
 }
 
 #[test]
-fn section_vm_requires_delayed_single_value_injection() {
-    let no_op = program("return args");
-    let access = fresh_access();
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-
-    let error = run_scalar(&vm, &no_op, &null_emitter(), "Test")
-        .expect_err("programs cannot run before value injection");
-    assert!(error.to_string().contains("not been injected"));
-
-    vm.inject_values("first", &json!({}), &access)
-        .expect("first injection must succeed");
-    let error = vm
-        .inject_values("second", &json!({}), &access)
-        .expect_err("Engine values cannot be replaced");
-    assert!(error.to_string().contains("already injected"));
+fn a_refused_injection_hands_back_the_vm_for_its_teardown() {
+    // A `var` seed that is not an object is refused, and the failure tears
+    // the uninjected VM down under its section.
+    let recorder = Recorder::default();
+    let failure = SectionVm::new(&test_nonce(), recorder.emitter(), "Seed")
+        .expect("VM must build")
+        .inject_values_with_var(
+            "",
+            &json!({}),
+            &fresh_access(),
+            Some(&json!(5)),
+            Argv::Frozen(None),
+        )
+        .expect_err("a non-object var seed is refused");
+    assert!(
+        matches!(failure.error(), Error::Internal(message) if message.contains("JSON object")),
+        "the refusal names the seed's shape: {:?}",
+        failure.error()
+    );
+    let error = failure.teardown(recorder.emitter(), "Seed");
+    assert!(matches!(error, Error::Internal(_)));
+    assert_eq!(
+        recorder.observations(),
+        [detail::LUA_TEARDOWN_STARTED, detail::LUA_TEARDOWN_SUCCEEDED]
+            .into_iter()
+            .map(|detail| ("Seed".to_owned(), detail.clone()))
+            .collect::<Vec<_>>(),
+        "the refused VM's teardown is observed"
+    );
 }
 
 #[test]
 fn untrusted_global_is_callable_before_engine_values_inject() {
     // Construction installs `untrusted`, ahead of every later setup step.
     let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.lua()
+    vm.uninjected_lua()
         .load(
             "local wrapped = untrusted('a < b')\n\
              assert(wrapped:find('a &lt; b', 1, true), 'the caller sees the escaped body')",
@@ -162,9 +176,7 @@ fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
 
 #[test]
 fn a_section_vm_reads_back_an_empty_var_after_injection() {
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Test").expect("VM must build");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
+    let vm = TestVm::new().inject();
     assert_eq!(vm.var().expect("var must serialize"), json!({}));
     vm.teardown(&null_emitter(), "Test");
 }
@@ -183,16 +195,16 @@ fn section_vm_value_injection_bypasses_chunk_global_metatables() {
          args .. ',' .. type(fixtures_search) .. ',' .. tools.get('fixtures/search').id",
     );
     let bindings = fixture_set(&[("search", "search the web")]);
-    let mut vm = SectionVm::new_for_section(
+    let vm = SectionVm::new_for_section(
         &test_nonce(),
         &Arc::new(bindings),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),
         "Test",
     )
-    .expect("VM must build");
-    vm.inject_values("private input", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
+    .expect("VM must build")
+    .inject_values("private input", &json!({}), &fresh_access())
+    .expect("Engine values must inject");
     let observer = null_emitter();
     vm.install_engine_globals(&observer, "Test")
         .expect("Engine globals must install");
@@ -211,9 +223,10 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     let write = program("store.write('state.txt', args)");
     let read = program("return store.read('state.txt')");
     let recorder = Arc::new(Recorder::default());
-    let mut vm = SectionVm::new(&test_nonce(), &null_emitter(), "Gather").expect("VM must build");
-    vm.inject_values("private input", &json!({}), &fresh_access())
-        .expect("Engine values must inject");
+    let vm = TestVm::new()
+        .section("Gather")
+        .args("private input")
+        .inject();
     let observer = recorder.emitter().clone();
     vm.install_engine_globals(&observer, "Gather")
         .expect("Engine globals must install");
@@ -300,9 +313,9 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let prologue = program("var.value = args");
     let epilog = program("return 'epilog done'");
     let recorder = Arc::new(Recorder::default());
-    let mut vm =
-        SectionVm::new(&test_nonce(), recorder.emitter(), "Gather").expect("VM must build");
-    vm.inject_values("private input", &json!({}), &fresh_access())
+    let vm = SectionVm::new(&test_nonce(), recorder.emitter(), "Gather")
+        .expect("VM must build")
+        .inject_values("private input", &json!({}), &fresh_access())
         .expect("Engine values must inject");
     let observer = recorder.emitter().clone();
     vm.install_engine_globals(&observer, "Gather")
@@ -359,17 +372,6 @@ fn section_lifecycle_failures_report_their_phase() {
         .collect::<Vec<_>>()
     );
     assert!(!format!("{observations:?}").contains("private chunk failure"));
-
-    let recorder = Recorder::default();
-    let vm = SectionVm::new(&test_nonce(), &null_emitter(), "Prologue").expect("VM must build");
-    run_scalar(&vm, &program("return nil"), recorder.emitter(), "Prologue")
-        .expect_err("prologue before injection must fail");
-    assert!(
-        recorder
-            .observations()
-            .iter()
-            .any(|(_, event)| *event == detail::LUA_CHUNK_FAILED)
-    );
 }
 
 #[test]

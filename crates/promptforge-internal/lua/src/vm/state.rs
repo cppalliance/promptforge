@@ -1,20 +1,16 @@
 //! Section VM state reads: `var`, bare globals, `argv`, the tool call
-//! counts, the shared tool and model sets, and the section's effective
-//! tool and model bindings.
+//! counts, the local tools, and the section's effective tool and model
+//! bindings.
 
 use std::borrow::Cow;
-#[cfg(any(test, feature = "test-support"))]
-use std::sync::Arc;
 use std::sync::Mutex;
 
-use mlua::{Lua, LuaSerdeExt, Value};
+use mlua::{LuaSerdeExt, Value};
 use promptforge_model_client::client::ToolSchema;
-#[cfg(any(test, feature = "test-support"))]
-use promptforge_model_client::model::ModelSet;
 use promptforge_model_client::model::{ModelBinding, ModelView};
 use serde_json::Value as Json;
 
-use super::{NOT_INJECTED, SectionVm};
+use super::SectionVm;
 use crate::error::{Error, Result};
 use crate::handles::{ToolBinding, ToolSet};
 use crate::models::ModelRuntime;
@@ -27,12 +23,9 @@ impl SectionVm {
     /// table behind the guarded proxy (not the proxy, which stays empty).
     ///
     /// # Errors
-    /// Returns [`Error::Internal`] if Engine values have not been injected,
-    /// or [`Error::Lua`] if `var` cannot be represented as JSON.
+    /// Returns [`Error::Lua`] if the author reassigned the `var` global, or
+    /// [`Error::LuaRuntime`] if `var` cannot be represented as JSON.
     pub fn var(&self) -> Result<Json> {
-        if !self.values_injected {
-            return Err(Error::Internal(NOT_INJECTED.into()));
-        }
         var_to_json(&self.lua)
     }
 
@@ -82,7 +75,7 @@ impl SectionVm {
     /// is the same `LuaSerdeExt` bridge that seeds `var`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the value cannot convert or the global
+    /// Returns [`Error::LuaRuntime`] if the value cannot convert or the global
     /// cannot be set.
     pub fn set_global_json(&self, name: &str, value: &Json) -> Result<()> {
         let value = self.lua.to_value(value).map_err(Error::lua)?;
@@ -104,48 +97,9 @@ impl SectionVm {
     /// increment it.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
+    /// Returns [`Error::LuaRuntime`] when installing the `tools.calls` index fails.
     pub fn install_tool_call_counts(&self, bindings: &[ToolBinding]) -> Result<ToolCallCounts> {
         install_tool_call_counts_impl(&self.lua, &self.bound_tools, bindings)
-    }
-
-    /// Returns the shared tool set and the live section addition runtime.
-    ///
-    /// A test helper for `promptforge-engine`'s executor tests, so it exists
-    /// only under `test-support`.
-    #[cfg(any(test, feature = "test-support"))]
-    #[must_use]
-    pub fn tool_bag_handles(&self) -> (Arc<ToolSet>, Arc<Mutex<ToolRuntime>>) {
-        (
-            Arc::clone(&self.bound_tools),
-            Arc::clone(&self.tool_runtime),
-        )
-    }
-
-    /// Returns a snapshot of the shared model set and the live section
-    /// selection runtime.
-    ///
-    /// Test-only: production reads the run's shared set through the model
-    /// view; tests snapshot straight from the VM, so it exists only under
-    /// `test-support`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Internal`] if the shared model set's mutex is poisoned.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn model_bag_handles(&self) -> Result<(ModelSet, Arc<Mutex<ModelRuntime>>)> {
-        let models = self
-            .bound_models
-            .lock()
-            .map_err(|_| Error::Internal("model set mutex was poisoned".into()))?
-            .clone();
-        Ok((models, Arc::clone(&self.model_runtime)))
-    }
-
-    /// Borrows the inner Lua state, so the shim installs and the
-    /// scheduler's scoped H1 steps can drive coroutines on the VM.
-    #[must_use]
-    pub fn lua(&self) -> &Lua {
-        &self.lua
     }
 
     /// Returns the schemas of every registered local tool.

@@ -29,7 +29,7 @@ use promptforge_types::ids::RoundId;
 use serde_json::{Map, Value as Json};
 
 use crate::error::{Error, Result};
-use crate::protocol::{MessageRecord, parse_record};
+use crate::protocol::{MessageRecord, RecordRole, parse_record};
 
 #[path = "messages-view.rs"]
 mod view;
@@ -132,7 +132,11 @@ impl MessageList {
     /// position.
     pub fn push(&self, record: MessageRecord) -> std::result::Result<(), ListEditError> {
         let mut state = self.state();
-        if record.role == Role::System && state.records.iter().any(|held| held.role != Role::System)
+        if record.role == RecordRole::System
+            && state
+                .records
+                .iter()
+                .any(|held| held.role != RecordRole::System)
         {
             return Err(ListEditError::LateSystem {
                 index: state.records.len() + 1,
@@ -205,11 +209,11 @@ fn out_of_bounds(first: impl TryInto<i64>, last: impl TryInto<i64>, len: usize) 
 fn check_leading_system(records: &[Arc<MessageRecord>]) -> std::result::Result<(), ListEditError> {
     let lead = records
         .iter()
-        .take_while(|record| record.role == Role::System)
+        .take_while(|record| record.role == RecordRole::System)
         .count();
     match records[lead..]
         .iter()
-        .position(|record| record.role == Role::System)
+        .position(|record| record.role == RecordRole::System)
     {
         Some(offset) => Err(ListEditError::LateSystem {
             index: lead + offset + 1,

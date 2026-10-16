@@ -2,14 +2,15 @@
 //! return, and the record JSON form they serialize through.
 
 use mlua::{LuaSerdeExt, Value};
-use promptforge_model_client::client::Role;
 use serde_json::{Value as Json, json};
 
 use super::list::refusal;
 use crate::messages::MessageList;
-use crate::protocol::{ContentPart, MessageContent, MessageRecord, ToolCallRecord, parse_record};
+use crate::protocol::{
+    ContentPart, MessageContent, MessageRecord, NonEmpty, ToolCallRecord, parse_record,
+};
 use crate::test_vm::{BuiltVm, TestVm};
-use crate::tests::text;
+use crate::tests::{assistant, system, tool_result, user};
 
 /// One record table of each shape, held in the global `shapes` and
 /// appended to `msgs` in order: plain text, content parts, tool calls,
@@ -45,13 +46,15 @@ fn read(vm: &BuiltVm, expr: &str) -> Option<Json> {
 #[test]
 fn to_json_round_trips_every_record_shape_through_parse_record() {
     let records = [
-        text(Role::System, "be terse"),
+        system("be terse"),
         MessageRecord {
-            content: MessageContent::Parts(vec![
+            content: MessageContent::Parts(NonEmpty::new(
                 ContentPart::Text("look".to_owned()),
-                ContentPart::ImageUrl("data:image/png;base64,AA==".to_owned()),
-            ]),
-            ..text(Role::User, "")
+                vec![ContentPart::ImageUrl(
+                    "data:image/png;base64,AA==".to_owned(),
+                )],
+            )),
+            ..user("")
         },
         MessageRecord {
             tool_calls: vec![ToolCallRecord {
@@ -59,12 +62,9 @@ fn to_json_round_trips_every_record_shape_through_parse_record() {
                 name: "echo".to_owned(),
                 arguments: json!({ "value": "hi" }),
             }],
-            ..text(Role::Assistant, "working")
+            ..assistant("working")
         },
-        MessageRecord {
-            tool_call_id: Some("call_1".to_owned()),
-            ..text(Role::Tool, "echoed: hi")
-        },
+        tool_result("call_1", "echoed: hi"),
     ];
     assert_eq!(
         records

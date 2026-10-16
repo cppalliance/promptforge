@@ -1,13 +1,14 @@
-//! The test VM builder: a section VM set up the way section setup builds
-//! one, through construction, the run's limits, Engine injection, and the
-//! persistent Engine globals, with the control globals and coroutine shims
-//! on request, handed back with named handles to what the VM shares. Also
-//! the tool fixtures as data and the scope a VM's offers resolve to.
+//! The lua test hub: the test VM builder, a section VM set up the way
+//! section setup builds one, through construction, the run's limits,
+//! Engine injection, and the persistent Engine globals, with the control
+//! globals and coroutine shims on request, handed back with named handles
+//! to what the VM shares; the one-shot [`run_chunk`]; the tool fixtures as
+//! data; and the scope a VM's offers resolve to.
 
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
-use mlua::FromLuaMulti;
+use mlua::{FromLuaMulti, MultiValue};
 use promptforge_model_client::model::ModelSet;
 use promptforge_types::emitter::Emitter;
 use promptforge_types::seed::RunSeed;
@@ -16,7 +17,9 @@ use promptforge_types::untrusted::GuardNonce;
 use promptforge_vfs::{Access, Origin, VfsRef};
 use serde_json::{Value as Json, json};
 
+use crate::error::{Error, Result};
 use crate::tests::recording::null_emitter;
+use crate::vm::scalar_return;
 use crate::{Argv, MessageList, SectionText, SectionVm, ToolSet};
 
 /// The one guard-nonce seed of every test VM.
@@ -42,6 +45,51 @@ pub(crate) fn fresh_access() -> Arc<Access> {
             .acquire(Origin::new("lua test fixture"))
             .expect("the stock backend acquires"),
     )
+}
+
+/// The result of running a section's Lua block with [`run_chunk`].
+#[derive(Debug, Clone)]
+pub(crate) struct LuaOutcome {
+    /// The chunk's top-level return value, if it returned one (the finish case).
+    pub(crate) returned: Option<String>,
+    /// The `var` table after the block ran, as JSON, for prose substitution.
+    pub(crate) var: Json,
+}
+
+/// Runs a section's Lua chunk with `args` and `sys` exposed, a writable `var`
+/// table available, and a `store` table backed by `access`, returning the
+/// chunk's return value and the final `var`. Store operations and `log`
+/// report through `emitter` under `section`; direct `print` is unavailable.
+///
+/// The `tools` table is the same validating one every section VM installs,
+/// over an empty shared set: a chunk that calls `tools.offer(...)` fails
+/// loudly because the run offers no tool.
+///
+/// # Errors
+/// Returns the failure if the sandbox cannot be built, `sys`, `var`, or
+/// `store` cannot be bridged, the chunk fails to run (including a failing
+/// `store` op, which raises a Lua error), or it returns a value that cannot
+/// be rendered as a result string.
+pub(crate) fn run_chunk(
+    source: &str,
+    args: &str,
+    sys: &Json,
+    access: &Arc<Access>,
+    emitter: &Emitter,
+    section: &str,
+) -> Result<LuaOutcome> {
+    let vm = SectionVm::new(
+        &GuardNonce::from_seed(&RunSeed::from_bytes([0; 32])),
+        emitter,
+        section,
+    )?
+    .inject_values(args, sys, access)
+    .map_err(|failure| failure.teardown(emitter, section))?;
+    vm.install_engine_globals(emitter, section)?;
+    let returned: MultiValue = vm.lua().load(source).eval().map_err(Error::lua)?;
+    let returned = scalar_return(returned)?;
+    let var = vm.var()?;
+    Ok(LuaOutcome { returned, var })
 }
 
 /// A tool as data under `id`, described as `<id> tool`.
@@ -87,6 +135,8 @@ pub(crate) struct TestVm<'a> {
     access: Option<Arc<Access>>,
     emitter: Emitter,
     section: &'a str,
+    args: &'a str,
+    sys: Option<&'a Json>,
     argv: Argv<'a>,
     var: Option<&'a Json>,
     limits: Option<(usize, u32)>,
@@ -104,6 +154,8 @@ impl<'a> TestVm<'a> {
             access: None,
             emitter: null_emitter(),
             section: TEST_SECTION,
+            args: "",
+            sys: None,
             argv: Argv::Frozen(None),
             var: None,
             limits: None,
@@ -145,6 +197,20 @@ impl<'a> TestVm<'a> {
     #[track_caller]
     pub(crate) fn section(mut self, section: &'a str) -> Self {
         self.section = section;
+        self
+    }
+
+    /// The `args` string Engine injection installs.
+    #[track_caller]
+    pub(crate) fn args(mut self, args: &'a str) -> Self {
+        self.args = args;
+        self
+    }
+
+    /// The `sys` value Engine injection seals.
+    #[track_caller]
+    pub(crate) fn sys(mut self, sys: &'a Json) -> Self {
+        self.sys = Some(sys);
         self
     }
 
@@ -192,24 +258,24 @@ impl<'a> TestVm<'a> {
         self
     }
 
+    /// Builds the VM through Engine injection and stops there, so nothing
+    /// installs after it, the persistent Engine globals included, failing
+    /// the test at the first setup step that fails. [`shims`](Self::shims)
+    /// and [`messages`](Self::messages) need the Engine globals, so a VM
+    /// stopped here takes neither.
+    #[track_caller]
+    pub(crate) fn inject(mut self) -> SectionVm {
+        assert!(
+            !self.shims && !self.messages,
+            "shims() and messages() need the Engine globals, which inject() stops before"
+        );
+        self.run_injection().0
+    }
+
     /// Builds the VM, failing the test at the first setup step that fails.
     #[track_caller]
-    pub(crate) fn build(self) -> BuiltVm {
-        let tools = Arc::new(self.tools);
-        let models = Arc::new(Mutex::new(self.models));
-        let access = self.access.unwrap_or_else(fresh_access);
-        let mut vm =
-            SectionVm::new_for_section(&test_nonce(), &tools, &models, &self.emitter, self.section)
-                .expect("the test VM builds");
-        if let Some((memory_bytes, log_events)) = self.limits {
-            vm.apply_lua_limits(memory_bytes, log_events)
-                .expect("the limits apply");
-        }
-        if self.raw_model_ids {
-            vm.allow_raw_model_ids();
-        }
-        vm.inject_values_with_var("", &json!({}), &access, self.var, self.argv)
-            .expect("the Engine values inject");
+    pub(crate) fn build(mut self) -> BuiltVm {
+        let (mut vm, models, access) = self.run_injection();
         vm.install_engine_globals(&self.emitter, self.section)
             .expect("the Engine globals install");
         if self.shims {
@@ -240,6 +306,38 @@ impl<'a> TestVm<'a> {
             emitter: self.emitter,
             section: self.section.to_owned(),
         }
+    }
+
+    /// Construction, the limits, the raw-model-id opt-in, and Engine
+    /// injection, handing back the injected VM beside the model set and
+    /// access it shares.
+    #[track_caller]
+    fn run_injection(&mut self) -> (SectionVm, Arc<Mutex<ModelSet>>, Arc<Access>) {
+        let tools = Arc::new(std::mem::take(&mut self.tools));
+        let models = Arc::new(Mutex::new(std::mem::take(&mut self.models)));
+        let access = self.access.take().unwrap_or_else(fresh_access);
+        let mut fresh =
+            SectionVm::new_for_section(&test_nonce(), &tools, &models, &self.emitter, self.section)
+                .expect("the test VM builds");
+        if let Some((memory_bytes, log_events)) = self.limits {
+            fresh
+                .apply_lua_limits(memory_bytes, log_events)
+                .expect("the limits apply");
+        }
+        if self.raw_model_ids {
+            fresh.allow_raw_model_ids();
+        }
+        let empty = json!({});
+        let vm = fresh
+            .inject_values_with_var(
+                self.args,
+                self.sys.unwrap_or(&empty),
+                &access,
+                self.var,
+                self.argv,
+            )
+            .expect("the Engine values inject");
+        (vm, models, access)
     }
 }
 

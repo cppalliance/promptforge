@@ -25,11 +25,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use promptforge_model_client::client::Role;
 use promptforge_model_client::detail::tool_call_arguments;
 use promptforge_types::metrics::ToolCallEvent;
 
-use crate::execute::protocol::{Answer, ChatResult, MessageContent, MessageRecord};
+use crate::execute::protocol::{
+    Answer, ChatOutcome, ChatResult, MessageContent, MessageRecord, RecordRole,
+};
 use crate::execute::run::Effect;
 use crate::execute::scope::{DispatchTarget, prepare_effective_scope};
 use crate::execute::support::{Served, advance_turn, report_model_turn};
@@ -49,15 +50,11 @@ use super::builtins::{advertise_task_builtins, task_allowlist};
 use super::{ChainIndex, Continuation, Scheduler};
 
 /// The answer for a round refused as too large by `reason`'s gate, before
-/// or by the provider: no round ran, so every other field is absent and
+/// or by the provider: no round ran, so no finish reason is present and
 /// `turn` is the unadvanced counter.
 fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
     ChatResult {
-        overflow: true,
-        overflow_reason: Some(reason),
-        reply: None,
-        empty_detail: None,
-        tool_calls: None,
+        outcome: ChatOutcome::Overflow(reason),
         finish_reason: None,
         turn,
     }
@@ -66,10 +63,9 @@ fn overflow_result(reason: OverflowReason, turn: u32) -> ChatResult {
 /// A model-task notice as the user record the round carries it in.
 fn notice_record(notice: String) -> MessageRecord {
     MessageRecord {
-        role: Role::User,
+        role: RecordRole::User,
         content: MessageContent::Text(notice),
         tool_calls: Vec::new(),
-        tool_call_id: None,
     }
 }
 
@@ -140,7 +136,7 @@ impl Scheduler {
         let binding = if let Some(binding) = binding {
             binding
         } else {
-            let current = resolve_model_binding(chain.ctx.models(), &vm.model_runtime)?;
+            let current = resolve_model_binding(chain.ctx.models(), vm.model_runtime())?;
             current.ok_or_else(|| Error::ModelRequired {
                 section: section.clone(),
             })?
@@ -149,7 +145,7 @@ impl Scheduler {
         // calls since the last model operation shape this round's
         // advertised set, which is the section's effective bindings plus
         // every local Lua tool.
-        let bound = current_tool_bindings(chain.ctx.tool_set(), &vm.tool_runtime)?;
+        let bound = current_tool_bindings(chain.ctx.tool_set(), vm.tool_runtime())?;
         let locals = vm.local_tool_schemas()?;
         let handles = frame.reporting_handles();
         let emitter = handles.emitter;
@@ -316,11 +312,7 @@ impl ArrivedRound {
                 self.emitter
                     .report(&self.section, lifecycle::MODEL_TURN_COMPLETED);
                 Ok(Box::new(ChatResult {
-                    overflow: false,
-                    overflow_reason: None,
-                    reply: None,
-                    empty_detail: Some(error.message().to_owned()),
-                    tool_calls: None,
+                    outcome: ChatOutcome::Empty(Some(error.message().to_owned())),
                     finish_reason: error.finish_reason().map(str::to_owned),
                     turn,
                 }))
@@ -354,11 +346,7 @@ impl ArrivedRound {
     /// [`report_model_turn`].
     fn text_reply(served: &Served, text: String, turn: u32) -> ChatResult {
         ChatResult {
-            overflow: false,
-            overflow_reason: None,
-            reply: Some(text),
-            empty_detail: None,
-            tool_calls: None,
+            outcome: ChatOutcome::Reply(text),
             finish_reason: served.finish_reason.clone(),
             turn,
         }
@@ -402,11 +390,7 @@ impl ArrivedRound {
             });
         }
         Ok(ChatResult {
-            overflow: false,
-            overflow_reason: None,
-            reply: None,
-            empty_detail: None,
-            tool_calls: Some(events),
+            outcome: ChatOutcome::ToolCalls(events),
             finish_reason: served.finish_reason.clone(),
             turn,
         })

@@ -1,33 +1,33 @@
 //! The yield-to-request validation: every field of a yielded table is
 //! checked before use, a malformed yield fails the block with the fixed
 //! direct-yield message, and an author-argument failure becomes the call's
-//! answer so the shim raises it at the call site. The chat request parser,
-//! which owns the message-record validation, sits in the `chat` sibling.
+//! answer so the shim raises it at the call site. The per-op parsers sit
+//! in the siblings: `chat` (which owns the message-record validation),
+//! `store`, `tasks`, and `tools`.
 
 mod chat;
 mod store;
 mod tasks;
+mod tools;
 
-use mlua::{Lua, LuaSerdeExt, MultiValue, Value};
+use mlua::{Lua, LuaSerdeExt, Value};
 use promptforge_model_client::model::ModelBinding;
-use promptforge_types::ids::TaskOrigin;
 
 use chat::parse_chat;
 pub(crate) use chat::{NOT_A_LIST, parse_record};
 use store::parse_store;
 use tasks::{
     parse_cancel, parse_concurrency, parse_join_any, parse_note, parse_pending, parse_ready,
-    parse_status, parse_timer,
+    parse_spawn, parse_status, parse_timer,
 };
+use tools::{parse_local_tool_done, parse_tool_call, parse_tool_calls};
 
 use crate::error::{Error, Result};
 use crate::handles::resolve_section_target;
 use crate::models::LuaModelHandle;
-use crate::tools::tool_name;
-use crate::vm::scalar_return;
 
 use super::answer::Answer;
-use super::request::{LocalToolOutcome, Request, ToolCallRecord};
+use super::request::Request;
 
 /// The fixed failure for a yield that is not a well-formed request table.
 ///
@@ -74,17 +74,29 @@ enum FieldFailure {
     Call(Error),
 }
 
+/// Frames one author-argument failure as the call's error.
+fn call_error(message: String) -> FieldFailure {
+    FieldFailure::Call(Error::Lua(message))
+}
+
+/// Reads one author-supplied string value as UTF-8 text; invalid UTF-8 is
+/// the call's error naming the argument.
+fn call_text(value: &mlua::LuaString, name: &str) -> std::result::Result<String, FieldFailure> {
+    match value.to_str() {
+        Ok(text) => Ok(text.to_owned()),
+        Err(_) => Err(call_error(format!("{name} must be a valid UTF-8 string"))),
+    }
+}
+
 /// Reads one author-supplied required string argument. Every wrong shape,
 /// absent included, is the call's error, raised at the call site.
 fn call_string(table: &mlua::Table, name: &str) -> std::result::Result<String, FieldFailure> {
     match table.raw_get::<Value>(name) {
-        Ok(Value::String(value)) => value.to_str().map(|value| value.to_owned()).map_err(|_| {
-            FieldFailure::Call(Error::Lua(format!("{name} must be a valid UTF-8 string")))
-        }),
-        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+        Ok(Value::String(value)) => call_text(&value, name),
+        Ok(other) => Err(call_error(format!(
             "{name} must be a string, got {}",
             other.type_name()
-        )))),
+        ))),
         Err(_) => Err(FieldFailure::Malformed),
     }
 }
@@ -97,18 +109,11 @@ fn call_optional_string(
 ) -> std::result::Result<Option<String>, FieldFailure> {
     match table.raw_get::<Value>(name) {
         Ok(Value::Nil) => Ok(None),
-        Ok(Value::String(value)) => {
-            value
-                .to_str()
-                .map(|value| Some(value.to_owned()))
-                .map_err(|_| {
-                    FieldFailure::Call(Error::Lua(format!("{name} must be a valid UTF-8 string")))
-                })
-        }
-        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+        Ok(Value::String(value)) => call_text(&value, name).map(Some),
+        Ok(other) => Err(call_error(format!(
             "{name} must be a string, got {}",
             other.type_name()
-        )))),
+        ))),
         Err(_) => Err(FieldFailure::Malformed),
     }
 }
@@ -122,10 +127,10 @@ fn shim_optional_string(
 ) -> std::result::Result<Option<String>, FieldFailure> {
     match table.raw_get::<Value>(name) {
         Ok(Value::Nil) => Ok(None),
-        Ok(Value::String(value)) => value
-            .to_str()
-            .map(|value| Some(value.to_owned()))
-            .map_err(|_| FieldFailure::Malformed),
+        Ok(Value::String(value)) => match value.to_str() {
+            Ok(text) => Ok(Some(text.to_owned())),
+            Err(_) => Err(FieldFailure::Malformed),
+        },
         Ok(_) | Err(_) => Err(FieldFailure::Malformed),
     }
 }
@@ -140,9 +145,10 @@ fn shim_optional_u32(
 ) -> std::result::Result<Option<u32>, FieldFailure> {
     match table.raw_get::<Value>(name) {
         Ok(Value::Nil) => Ok(None),
-        Ok(Value::Integer(value)) => u32::try_from(value)
-            .map(Some)
-            .map_err(|_| FieldFailure::Malformed),
+        Ok(Value::Integer(value)) => match u32::try_from(value) {
+            Ok(value) => Ok(Some(value)),
+            Err(_) => Err(FieldFailure::Malformed),
+        },
         Ok(_) | Err(_) => Err(FieldFailure::Malformed),
     }
 }
@@ -155,6 +161,18 @@ fn shim_var(
     table: &mlua::Table,
 ) -> std::result::Result<serde_json::Value, FieldFailure> {
     json_field(lua, table, "var").map_err(|_| FieldFailure::Malformed)
+}
+
+/// Reads the author-supplied `target` of a `call` or `spawn` with the
+/// `resolve_section_target` rule, so a non-string target keeps its
+/// byte-identical error.
+fn call_target(table: &mlua::Table) -> std::result::Result<String, FieldFailure> {
+    match table.raw_get::<Value>("target") {
+        Ok(value) => {
+            resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))
+        }
+        Err(_) => Err(FieldFailure::Malformed),
+    }
 }
 
 /// How one yielded value parsed at the resume boundary.
@@ -265,14 +283,12 @@ fn call_handle(
         Ok(Value::Nil) => Ok(None),
         Ok(Value::UserData(userdata)) => match userdata.borrow::<LuaModelHandle>() {
             Ok(handle) => Ok(Some(handle.binding().clone())),
-            Err(_) => Err(FieldFailure::Call(Error::Lua(format!(
-                "{call} handle must be a model handle"
-            )))),
+            Err(_) => Err(call_error(format!("{call} handle must be a model handle"))),
         },
-        Ok(other) => Err(FieldFailure::Call(Error::Lua(format!(
+        Ok(other) => Err(call_error(format!(
             "{call} handle must be a model handle, got {}",
             other.type_name()
-        )))),
+        ))),
         Err(_) => Err(FieldFailure::Malformed),
     }
 }
@@ -281,182 +297,8 @@ fn call_handle(
 /// with the `resolve_section_target` rule, keeping its byte-identical
 /// error) and `input`, plus the shim-produced `var` snapshot.
 fn parse_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let target = match table.raw_get::<Value>("target") {
-        Ok(value) => {
-            resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))?
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
+    let target = call_target(table)?;
     let input = call_optional_string(table, "input")?;
     let var = shim_var(lua, table)?;
     Ok(Request::Call { target, input, var })
-}
-
-/// Parses a `spawn` request: the author-supplied `target` (validated with
-/// the `resolve_section_target` rule, as `call`'s is), the optional
-/// author-supplied `input`, `item`, and `index` seeds, plus the
-/// shim-produced `var` snapshot, `origin`, and `fanout` mark.
-fn parse_spawn(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let target = match table.raw_get::<Value>("target") {
-        Ok(value) => {
-            resolve_section_target(value).map_err(|error| FieldFailure::Call(Error::lua(error)))?
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let input = call_optional_string(table, "input")?;
-    let item = match table.raw_get::<Value>("item") {
-        Ok(Value::Nil) => None,
-        Ok(value @ (Value::Function(_) | Value::UserData(_) | Value::Thread(_))) => {
-            return Err(FieldFailure::Call(Error::Lua(format!(
-                "item must be JSON data, got {}",
-                value.type_name()
-            ))));
-        }
-        Ok(value) => Some(lua.from_value(value).map_err(|_| {
-            FieldFailure::Call(Error::Lua(
-                "item must be a JSON-representable value".to_owned(),
-            ))
-        })?),
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let index = match table.raw_get::<Value>("index") {
-        Ok(Value::Nil) => None,
-        Ok(Value::Integer(index)) => Some(u64::try_from(index).map_err(|_| {
-            FieldFailure::Call(Error::Lua(format!(
-                "index must be a non-negative integer, got {index}"
-            )))
-        })?),
-        Ok(other) => {
-            return Err(FieldFailure::Call(Error::Lua(format!(
-                "index must be a non-negative integer, got {}",
-                other.type_name()
-            ))));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let var = shim_var(lua, table)?;
-    // The origin is shim-produced: the author shim always says `author`,
-    // so any other shape is a hand-built yield.
-    let origin = match table.raw_get::<Value>("origin") {
-        Ok(Value::String(tag)) => tag
-            .to_str()
-            .ok()
-            .and_then(|tag| tag.parse::<TaskOrigin>().ok())
-            .ok_or(FieldFailure::Malformed)?,
-        Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
-    };
-    // Shim-produced as well: the `fanout` shim marks its arms, `tasks.spawn`
-    // leaves the field absent, and any other shape is a hand-built yield.
-    let fanout = match table.raw_get::<Value>("fanout") {
-        Ok(Value::Nil) => false,
-        Ok(Value::Boolean(fanout)) => fanout,
-        Ok(_) | Err(_) => return Err(FieldFailure::Malformed),
-    };
-    Ok(Request::Spawn {
-        target,
-        input,
-        item,
-        index,
-        var,
-        origin,
-        fanout,
-    })
-}
-
-/// Parses a `tools.call` request: the author-supplied `alias` (a string or
-/// a Tool object, decoded through the one alias-or-Tool polymorphism) and
-/// `args`, plus the shim-produced optional `call_id` and `turn`.
-///
-/// An absent or nil `args` parses as the empty object (the empty-argument
-/// call every tool accepts). A non-table or JSON-unrepresentable `args` is
-/// the call's error, framed as the other author-argument failures are,
-/// so an author `pcall` catches it at the call site. `call_id` is set only
-/// by the loop shim for a model-issued call, so a present non-string is a
-/// malformed yield rather than a call error; `turn`, set by the same shim,
-/// is likewise malformed unless it is an integer within `u32` range.
-fn parse_tool_call(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let alias = match table.raw_get::<Value>("alias") {
-        // Flatten to the call-error string so the answer frames exactly as
-        // the other author-argument failures (`Error::Lua`, not a runtime
-        // wrapper).
-        Ok(value) => {
-            tool_name(&value).map_err(|error| FieldFailure::Call(Error::Lua(error.to_string())))?
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let args = match table.raw_get::<Value>("args") {
-        Ok(Value::Nil) => serde_json::Value::Object(serde_json::Map::new()),
-        Ok(Value::Table(_)) => json_field(lua, table, "args").map_err(|_| {
-            FieldFailure::Call(Error::Lua(
-                "args must be a JSON-representable table".to_owned(),
-            ))
-        })?,
-        Ok(other) => {
-            return Err(FieldFailure::Call(Error::Lua(format!(
-                "args must be a table, got {}",
-                other.type_name()
-            ))));
-        }
-        Err(_) => return Err(FieldFailure::Malformed),
-    };
-    let call_id = shim_optional_string(table, "call_id")?;
-    let turn = shim_optional_u32(table, "turn")?;
-    Ok(Request::ToolCall {
-        alias,
-        args,
-        call_id,
-        turn,
-    })
-}
-
-/// Parses a `tool_calls` request, which only the loop's step yields: the
-/// required `turn` and the `calls` sequence, each entry read as a
-/// `tool_call` request's `alias`, `args`, and required `call_id`. Any
-/// other shape is a malformed yield.
-fn parse_tool_calls(lua: &Lua, table: &mlua::Table) -> std::result::Result<Request, FieldFailure> {
-    let turn = shim_optional_u32(table, "turn")?.ok_or(FieldFailure::Malformed)?;
-    let Ok(Value::Table(entries)) = table.raw_get::<Value>("calls") else {
-        return Err(FieldFailure::Malformed);
-    };
-    let calls = (1..=entries.raw_len())
-        .map(|index| {
-            let Ok(Value::Table(entry)) = entries.raw_get::<Value>(index) else {
-                return Err(FieldFailure::Malformed);
-            };
-            match parse_tool_call(lua, &entry)? {
-                Request::ToolCall {
-                    alias,
-                    args,
-                    call_id: Some(id),
-                    ..
-                } => Ok(ToolCallRecord {
-                    id,
-                    name: alias,
-                    arguments: args,
-                }),
-                _ => Err(FieldFailure::Malformed),
-            }
-        })
-        .collect::<std::result::Result<_, _>>()?;
-    Ok(Request::ToolCalls { calls, turn })
-}
-
-/// Parses a `local_tool_done` request: the shim-produced `ok` flag and,
-/// when the handler returned, its first return value as `value`. A
-/// returned value takes the scalar-return rule a block's return takes, so
-/// nil reads as `""` and a table is a [`LocalToolOutcome::BadReturn`].
-/// `None` for a missing or non-boolean `ok`.
-fn parse_local_tool_done(table: &mlua::Table) -> Option<Request> {
-    let outcome = match table.raw_get::<Value>("ok").ok()? {
-        Value::Boolean(true) => {
-            let value = table.raw_get::<Value>("value").ok()?;
-            match scalar_return(MultiValue::from_vec(vec![value])) {
-                Ok(text) => LocalToolOutcome::Returned(text.unwrap_or_default()),
-                Err(error) => LocalToolOutcome::BadReturn(error),
-            }
-        }
-        Value::Boolean(false) => LocalToolOutcome::Raised,
-        _ => return None,
-    };
-    Some(Request::LocalToolDone { outcome })
 }

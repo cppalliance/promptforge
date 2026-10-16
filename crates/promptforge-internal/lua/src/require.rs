@@ -63,7 +63,7 @@ pub(crate) struct VmShare<'a> {
 /// through a clone of `emitter` under `section`, and working on `vm`.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the loader chunk or its helpers cannot be
+/// Returns [`Error::LuaRuntime`] if the loader chunk or its helpers cannot be
 /// built or installed.
 pub(crate) fn install<R, E, P>(
     lua: &Lua,
@@ -151,7 +151,6 @@ fn begin_load_capture(
     let section = section.to_owned();
     lua.create_function(move |lua, library: AnyUserData| {
         let library = library.take::<Library>()?;
-        let mut loading = lock(&loading, "library-load state")?;
         emitter.library_load(&section, &library.heading, LibraryLoad::Started);
         let blocks = library
             .blocks
@@ -173,6 +172,14 @@ fn begin_load_capture(
                 programs.push(block.program);
             }
         }
+        drop(programs);
+        let mut loading = match lock(&loading, "library-load state") {
+            Ok(loading) => loading,
+            Err(error) => {
+                emitter.library_load(&section, &library.heading, LibraryLoad::Failed);
+                return Err(error);
+            }
+        };
         loading.push((library.key, library.heading));
         depth.fetch_add(1, Ordering::Relaxed);
         Ok((blocks, templates))

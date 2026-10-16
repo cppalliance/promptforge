@@ -84,16 +84,16 @@ fn a_section_offer_by_id_scopes_the_tool_and_dispatches_it() {
     ]);
     let (tool, called) = scoped_tool("section", "Section concrete.");
     let tools = offering_of("tools_section", "capability", &tool);
-    let mut vm = SectionVm::new_for_section(
+    let vm = SectionVm::new_for_section(
         &GuardNonce::from_seed(&TEST_SEED),
         &Arc::new(tools),
         &Arc::new(Mutex::new(ModelSet::default())),
         &null_emitter(),
         "Only",
     )
-    .expect("the section VM builds");
-    vm.inject_values("", &json!({}), &fresh_access())
-        .expect("values must inject");
+    .expect("the section VM builds")
+    .inject_values("", &json!({}), &fresh_access())
+    .expect("values must inject");
 
     // The section's `tools.offer` lands in its tool runtime; the scope
     // snapshot over it includes the offered tool's wire name.

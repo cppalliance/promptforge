@@ -3,13 +3,14 @@
 //! The submodules follow the protocol's own split: `parse` the generic
 //! yield-to-request validation, `parse_chat` the message-list request,
 //! `parse_tasks` the task-operation requests, `parse_tool_call` the
-//! `tool_call` request, `answer` the answer-to-envelope round trips, and
-//! `answer_chat` the `chat` answer's typed error. The helpers below are
-//! shared.
+//! `tool_call` request, `answer` the answer-to-envelope round trips,
+//! `answer_chat` the `chat` answer's typed error, and `answer_retained`
+//! when a block's failure is the answer's retained error. The helpers
+//! below are shared.
 
 use std::num::NonZeroU32;
 
-use mlua::{AnyUserData, Function, Lua, MultiValue, Value};
+use mlua::{AnyUserData, Function, Lua, LuaSerdeExt, MultiValue, Value};
 use serde_json::json;
 
 use promptforge_model_client::model::{ModelBinding, ModelId, ModelInvocation};
@@ -101,6 +102,7 @@ fn lua_table(lua: &Lua, source: &str) -> mlua::Table {
 
 mod answer;
 mod answer_chat;
+mod answer_retained;
 mod parse;
 mod parse_chat;
 mod parse_tasks;

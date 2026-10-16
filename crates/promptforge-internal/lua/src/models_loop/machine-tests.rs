@@ -6,7 +6,7 @@ use super::super::tests::{echo_call, round};
 use super::{Input, Machine, Phase, Then};
 use crate::compactors::OverflowReason;
 use crate::messages::MessageList;
-use crate::protocol::{ChatResult, MessageContent, MessageRecord};
+use crate::protocol::{ChatOutcome, ChatResult, MessageContent, MessageRecord};
 
 type V = &'static str;
 
@@ -24,12 +24,7 @@ fn show(then: &Then<V>) -> String {
             let ids: Vec<&str> = calls.iter().map(|call| call.id.as_str()).collect();
             format!("tool_calls {}@{turn}", ids.join(","))
         }
-        Then::Compact { compactor, reason } => {
-            format!(
-                "compact {compactor} {}",
-                reason.map_or("nil", OverflowReason::tag)
-            )
-        }
+        Then::Compact { compactor, reason } => format!("compact {compactor} {}", reason.tag()),
         Then::Handle { handler, args } => format!("handle {handler} {args}"),
         Then::Report(returned) => format!("report {}", returned.unwrap_or("raised")),
         Then::Return => "return".to_owned(),
@@ -53,8 +48,12 @@ fn records(list: &MessageList) -> Vec<String> {
             .iter()
             .map(|call| call.id.clone())
             .collect();
-        let id = record.tool_call_id.as_deref().unwrap_or("");
-        format!("{} {text}|{}|{id}", record.role.as_str(), calls.join(","))
+        let id = record.role.tool_call_id().unwrap_or("");
+        format!(
+            "{} {text}|{}|{id}",
+            record.role.kind().as_str(),
+            calls.join(",")
+        )
     };
     list.to_records().iter().map(line).collect()
 }
@@ -67,7 +66,7 @@ fn answered(round: ChatResult) -> Input<V> {
 /// A round requesting one call per id, in order.
 fn batch(ids: &[&str]) -> Input<V> {
     answered(ChatResult {
-        tool_calls: Some(ids.iter().copied().map(echo_call).collect()),
+        outcome: ChatOutcome::ToolCalls(ids.iter().copied().map(echo_call).collect()),
         ..round()
     })
 }
@@ -75,7 +74,7 @@ fn batch(ids: &[&str]) -> Input<V> {
 /// A round replying `text`.
 fn reply(text: &str) -> Input<V> {
     answered(ChatResult {
-        reply: Some(text.to_owned()),
+        outcome: ChatOutcome::Reply(text.to_owned()),
         ..round()
     })
 }
@@ -134,40 +133,28 @@ fn a_round_starts_with_the_chat_naming_the_handle_and_pushes_nothing() {
 }
 
 #[test]
-fn a_round_is_judged_overflow_then_calls_then_reply_then_clean_exit_then_empty() {
-    let full = ChatResult {
-        overflow: true,
-        overflow_reason: Some(OverflowReason::Precheck),
-        reply: Some("text".to_owned()),
-        tool_calls: Some(vec![echo_call("c1")]),
+fn each_round_outcome_is_judged_overflow_calls_reply_or_empty() {
+    let finished = |outcome| ChatResult {
+        outcome,
         finish_reason: Some("stop".to_owned()),
-        empty_detail: Some("nothing".to_owned()),
         ..round()
     };
     let cases = [
-        (full.clone(), "compact compactor precheck"),
         (
-            ChatResult {
-                overflow: false,
-                ..full.clone()
-            },
+            finished(ChatOutcome::Overflow(OverflowReason::Precheck)),
+            "compact compactor precheck",
+        ),
+        (
+            finished(ChatOutcome::ToolCalls(vec![echo_call("c1")])),
             "tool_calls c1@7",
         ),
+        (finished(ChatOutcome::Reply("text".to_owned())), "return"),
         (
-            ChatResult {
-                overflow: false,
-                tool_calls: None,
-                ..full.clone()
-            },
-            "return",
+            finished(ChatOutcome::Reply(String::new())),
+            r#"new empty_model_reply|empty model reply|String("stop")"#,
         ),
         (
-            ChatResult {
-                overflow: false,
-                tool_calls: None,
-                reply: Some(String::new()),
-                ..full
-            },
+            finished(ChatOutcome::Empty(Some("nothing".to_owned()))),
             r#"new empty_model_reply|nothing|String("stop")"#,
         ),
     ];
@@ -274,7 +261,7 @@ fn the_cap_raises_after_the_last_allowed_batch_and_before_another_chat() {
 #[test]
 fn an_empty_reply_raises_its_detail_or_the_fallback() {
     let detailed = ChatResult {
-        empty_detail: Some("the reply was empty".to_owned()),
+        outcome: ChatOutcome::Empty(Some("the reply was empty".to_owned())),
         finish_reason: Some("length".to_owned()),
         ..round()
     };
@@ -374,7 +361,7 @@ fn cancellation_raises_a_failed_handler_or_compactor_raw_and_a_return_still_wins
         "report value"
     );
     let overflow = ChatResult {
-        overflow: true,
+        outcome: ChatOutcome::Overflow(OverflowReason::Provider),
         ..round()
     };
     let cases = [
@@ -391,7 +378,7 @@ fn cancellation_raises_a_failed_handler_or_compactor_raw_and_a_return_still_wins
         let mut machine = chatting(2, &list);
         assert_eq!(
             show(&machine.step(answered(overflow.clone()))),
-            "compact compactor nil"
+            "compact compactor provider"
         );
         assert_eq!(show(&machine.step(called(outcome, cancelled))), expected);
     }

@@ -108,5 +108,13 @@ fn record_validation_names_the_offending_index() {
             r#"{ { role = "user", content = "ok" }, { role = "tool", content = "r" } }"#,
             "messages[2] is a tool message and must set a string tool_call_id",
         ),
+        (
+            r#"{ { role = "user", content = "ok" }, { role = "user", content = "x", tool_call_id = "call_1" } }"#,
+            "messages[2] sets a tool_call_id but is not a tool message",
+        ),
+        (
+            r#"{ { role = "user", content = {} } }"#,
+            "messages[1] content must be a string or a non-empty array of content parts",
+        ),
     ]);
 }

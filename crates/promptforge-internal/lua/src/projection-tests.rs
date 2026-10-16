@@ -1,24 +1,15 @@
 //! Tests for projecting Lua message records onto the wire conversation shape.
 
 use mlua::{Lua, Value};
-use promptforge_model_client::client::Role;
 use serde_json::json;
 
 use super::project_messages;
 use crate::Error;
 use crate::protocol::{
-    ContentPart, MessageContent, MessageRecord, Request, ToolCallRecord, YieldParse,
+    ContentPart, MessageContent, MessageRecord, NonEmpty, RecordRole, Request, ToolCallRecord,
+    YieldParse,
 };
-use crate::tests::{assistant, system, user};
-
-fn tool(id: &str, text: &str) -> MessageRecord {
-    MessageRecord {
-        role: Role::Tool,
-        content: MessageContent::Text(text.to_owned()),
-        tool_calls: Vec::new(),
-        tool_call_id: Some(id.to_owned()),
-    }
-}
+use crate::tests::{assistant, system, tool_result as tool, user};
 
 fn call(id: &str, name: &str) -> ToolCallRecord {
     ToolCallRecord {
@@ -30,10 +21,8 @@ fn call(id: &str, name: &str) -> ToolCallRecord {
 
 fn assistant_calls(text: &str, calls: Vec<ToolCallRecord>) -> MessageRecord {
     MessageRecord {
-        role: Role::Assistant,
-        content: MessageContent::Text(text.to_owned()),
         tool_calls: calls,
-        tool_call_id: None,
+        ..assistant(text)
     }
 }
 
@@ -111,13 +100,12 @@ fn multiple_leading_system_messages_compose_into_one_without_mutating_the_source
 #[test]
 fn a_single_leading_system_message_passes_through_verbatim() {
     let parts = MessageRecord {
-        role: Role::System,
-        content: MessageContent::Parts(vec![
+        role: RecordRole::System,
+        content: MessageContent::Parts(NonEmpty::new(
             ContentPart::Text("look".to_owned()),
-            ContentPart::ImageUrl("data:image/png;base64,AA".to_owned()),
-        ]),
+            vec![ContentPart::ImageUrl("data:image/png;base64,AA".to_owned())],
+        )),
         tool_calls: Vec::new(),
-        tool_call_id: None,
     };
     let records = vec![parts, user("hi")];
     assert_eq!(
@@ -169,10 +157,11 @@ fn streaming_fragments_coalesce_into_one_assistant_result() {
     let mixed = vec![
         assistant(""),
         MessageRecord {
-            role: Role::Assistant,
-            content: MessageContent::Parts(vec![ContentPart::Text("a".to_owned())]),
-            tool_calls: Vec::new(),
-            tool_call_id: None,
+            content: MessageContent::Parts(NonEmpty::new(
+                ContentPart::Text("a".to_owned()),
+                Vec::new(),
+            )),
+            ..assistant("")
         },
         assistant("b"),
     ];
@@ -357,21 +346,16 @@ fn malformed_records_fail_at_projection_naming_the_index() {
         projection_error(&[with_calls]),
         "messages[1] sets tool_calls but is not an assistant message"
     );
-    let mut with_id = user("hi");
-    with_id.tool_call_id = Some("call_1".to_owned());
-    assert_eq!(
-        projection_error(&[with_id]),
-        "messages[1] sets a tool_call_id but is not a tool message"
-    );
     assert_eq!(
         projection_error(&[user("hi"), system("late")]),
         "messages[2] is a system message outside the leading system block"
     );
     let parts_system = MessageRecord {
-        role: Role::System,
-        content: MessageContent::Parts(vec![ContentPart::Text("look".to_owned())]),
-        tool_calls: Vec::new(),
-        tool_call_id: None,
+        content: MessageContent::Parts(NonEmpty::new(
+            ContentPart::Text("look".to_owned()),
+            Vec::new(),
+        )),
+        ..system("")
     };
     assert_eq!(
         projection_error(&[parts_system, system("be terse"), user("hi")]),

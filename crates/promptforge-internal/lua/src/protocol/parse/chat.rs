@@ -7,8 +7,10 @@ use promptforge_model_client::client::Role;
 
 use crate::Error;
 use crate::messages::MessageList;
+use crate::protocol::{
+    ContentPart, MessageContent, MessageRecord, NonEmpty, RecordRole, Request, ToolCallRecord,
+};
 
-use super::super::request::{ContentPart, MessageContent, MessageRecord, Request, ToolCallRecord};
 use super::{FieldFailure, call_handle};
 
 /// The refusal for a `messages` value that is not a `messages.new()`
@@ -64,13 +66,14 @@ pub(super) fn parse_chat(table: &mlua::Table) -> std::result::Result<Request, Fi
 /// error.
 ///
 /// The rules: a known role; `content` a string or a non-empty
-/// content-parts array with known part types and payloads; a present
-/// `tool_call_id` a string, required on tool records; a present
-/// `tool_calls` an array of normalized `{id, name, arguments}` records.
-/// Fields beyond the four a record holds (`role`, `content`,
-/// `tool_call_id`, `tool_calls`) are dropped. Cross-record checks - unique
-/// call IDs, complete call-result pairing, provider-required alternation -
-/// belong to the per-dispatch projection ([`crate::projection`]).
+/// content-parts array with known part types and payloads; a
+/// `tool_call_id` a string, required on tool records and refused on every
+/// other; a present `tool_calls` an array of normalized
+/// `{id, name, arguments}` records. Fields beyond the four a record holds
+/// (`role`, `content`, `tool_call_id`, `tool_calls`) are dropped.
+/// Cross-record checks - unique call IDs, complete call-result pairing,
+/// provider-required alternation - belong to the per-dispatch projection
+/// ([`crate::projection`]).
 pub(crate) fn parse_record(
     index: usize,
     entry: &serde_json::Value,
@@ -105,15 +108,13 @@ fn parse_message(
     };
     let content = match entry.get("content") {
         Some(serde_json::Value::String(text)) => MessageContent::Text(text.clone()),
-        Some(serde_json::Value::Array(parts)) if !parts.is_empty() => {
-            MessageContent::Parts(parse_content_parts(index, parts)?)
+        Some(serde_json::Value::Array(parts)) => {
+            match NonEmpty::from_vec(parse_content_parts(index, parts)?) {
+                Some(parts) => MessageContent::Parts(parts),
+                None => return Err(content_refusal(index)),
+            }
         }
-        _ => {
-            return Err(format!(
-                "messages[{index}] content must be a string or a non-empty \
-                 array of content parts"
-            ));
-        }
+        _ => return Err(content_refusal(index)),
     };
     let tool_call_id = match entry.get("tool_call_id") {
         None => None,
@@ -122,11 +123,29 @@ fn parse_message(
             return Err(format!("messages[{index}] tool_call_id must be a string"));
         }
     };
-    if role == Role::Tool && tool_call_id.is_none() {
-        return Err(format!(
-            "messages[{index}] is a tool message and must set a string tool_call_id"
-        ));
-    }
+    let role = match (role, tool_call_id) {
+        (Role::Tool, Some(tool_call_id)) => RecordRole::Tool { tool_call_id },
+        (Role::Tool, None) => {
+            return Err(format!(
+                "messages[{index}] is a tool message and must set a string tool_call_id"
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(format!(
+                "messages[{index}] sets a tool_call_id but is not a tool message"
+            ));
+        }
+        (Role::System, None) => RecordRole::System,
+        (Role::User, None) => RecordRole::User,
+        (Role::Assistant, None) => RecordRole::Assistant,
+        (other, None) => {
+            return Err(format!(
+                "messages[{index}] role {:?} is unknown; known roles: {}",
+                other.as_str(),
+                chat_roles()
+            ));
+        }
+    };
     let tool_calls = match entry.get("tool_calls") {
         None => Vec::new(),
         Some(serde_json::Value::Array(calls)) => calls
@@ -142,8 +161,13 @@ fn parse_message(
         role,
         content,
         tool_calls,
-        tool_call_id,
     })
+}
+
+/// The refusal for a `content` that is neither a string nor a non-empty
+/// content-parts array.
+fn content_refusal(index: usize) -> String {
+    format!("messages[{index}] content must be a string or a non-empty array of content parts")
 }
 
 /// Parses one message's content-parts array: each part is a table whose
@@ -189,17 +213,12 @@ fn parse_content_part(
             )),
         },
         "image_url" => {
-            let url = part
-                .get("image_url")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|image| image.get("url"))
-                .and_then(serde_json::Value::as_str);
-            match url {
-                Some(url) => Ok(ContentPart::ImageUrl(url.to_owned())),
-                None => Err(format!(
-                    "messages[{index}] content part {part_index} is an image_url \
-                     part and must set an image_url table with a string url field"
-                )),
+            let Some(serde_json::Value::Object(image)) = part.get("image_url") else {
+                return Err(image_url_refusal(index, part_index));
+            };
+            match image.get("url") {
+                Some(serde_json::Value::String(url)) => Ok(ContentPart::ImageUrl(url.clone())),
+                _ => Err(image_url_refusal(index, part_index)),
             }
         }
         unknown => Err(format!(
@@ -208,6 +227,15 @@ fn parse_content_part(
             CHAT_PART_TYPES.join(", ")
         )),
     }
+}
+
+/// The refusal for an `image_url` part without an `image_url` table
+/// holding a string `url`.
+fn image_url_refusal(index: usize, part_index: usize) -> String {
+    format!(
+        "messages[{index}] content part {part_index} is an image_url part and must set an \
+         image_url table with a string url field"
+    )
 }
 
 /// Parses one tool call into its normalized record: a string `id`, a

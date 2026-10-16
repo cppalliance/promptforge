@@ -18,7 +18,7 @@ use mlua::{Lua, LuaSerdeExt, Value};
 use serde_json::Value as Json;
 
 use crate::error::{Error, Result};
-use crate::proxy::read_only_proxy;
+use crate::proxy::{key_text, read_only_proxy};
 
 /// How a section VM installs the `argv` global at Engine injection. `None`
 /// installs nil either way, so `if argv then` is the idiomatic malformed
@@ -41,7 +41,7 @@ pub(crate) const ASSIGNMENT_REFUSAL: &str = "argv is frozen outside H1: assign i
 /// idiomatic malformed check.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the value cannot be bridged or installed.
+/// Returns [`Error::LuaRuntime`] if the value cannot be bridged or installed.
 pub(crate) fn install_writable(lua: &Lua, argv: Option<&Json>) -> Result<()> {
     let value = match argv {
         None | Some(Json::Null) => Value::Nil,
@@ -54,7 +54,7 @@ pub(crate) fn install_writable(lua: &Lua, argv: Option<&Json>) -> Result<()> {
 /// mode of every section but H1 - the value H1 left behind at the freeze.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the value cannot be bridged or the guard
+/// Returns [`Error::LuaRuntime`] if the value cannot be bridged or the guard
 /// cannot record it.
 pub(crate) fn install_frozen(lua: &Lua, argv: Option<&Json>) -> Result<()> {
     let frozen = frozen_json_value(lua, argv)?;
@@ -100,8 +100,8 @@ fn freeze_table(lua: &Lua, data: mlua::Table) -> Result<mlua::Table> {
         Value::Table(data),
         |key| {
             let field = match key {
-                Value::String(name) => format!("'{}'", name.to_string_lossy()),
-                other => format!("{other:?}"),
+                Value::String(_) => format!("'{}'", key_text(key)),
+                other => key_text(other),
             };
             format!("argv is frozen outside H1: cannot set field {field}")
         },

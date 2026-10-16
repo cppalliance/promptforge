@@ -176,7 +176,7 @@ fn local_params_schema_rejects_an_unsupported_type() {
 fn allow_tasks_records_the_section_allowlist_and_rejects_bad_targets() {
     let vm = TestVm::new().build();
     let allowlist = || {
-        vm.tool_runtime
+        vm.tool_runtime()
             .lock()
             .expect("the runtime mutex is not poisoned")
             .allowed_tasks

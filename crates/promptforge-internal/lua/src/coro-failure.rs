@@ -2,7 +2,7 @@
 //! block's raised value and raise-point traceback, and the take that reads
 //! them back when the failure reaches the Engine.
 
-use mlua::{Function, Lua, Value};
+use mlua::{Function, Lua, Table, Value};
 
 use crate::error::{Error, Result};
 use crate::error_value::{Raised, raised_from};
@@ -41,12 +41,23 @@ pub(crate) struct StashedFailure {
     /// error table built on this VM; `None` when it was a plain string, an
     /// author's own table, or a Rust callback's wrapped failure.
     pub(crate) raised: Option<Raised>,
+    /// The raised value itself when it was a table, which identifies the
+    /// raise of one particular table.
+    table: Option<Table>,
     /// The coroutine's traceback at the raise point, `stack traceback:`
     /// heading included, when the handler recorded one.
     traceback: Option<String>,
 }
 
 impl StashedFailure {
+    /// Whether the block raised `table` itself, not merely a table with
+    /// the same contents.
+    pub(crate) fn raised_table_is(&self, table: &Table) -> bool {
+        self.table
+            .as_ref()
+            .is_some_and(|raised| raised.to_pointer() == table.to_pointer())
+    }
+
     /// Restores the raise-point traceback onto a Lua-raised failure.
     ///
     /// mlua appends the coroutine's traceback to a runtime error when the
@@ -95,8 +106,14 @@ pub(crate) fn take_failure(lua: &Lua) -> Result<StashedFailure> {
         Value::String(text) => Some(text.to_str().map_err(Error::lua)?.to_owned()),
         _ => None,
     };
+    let raised = raised_from(lua, &failure).map_err(Error::lua)?;
+    let table = match failure {
+        Value::Table(table) => Some(table),
+        _ => None,
+    };
     Ok(StashedFailure {
-        raised: raised_from(lua, &failure).map_err(Error::lua)?,
+        raised,
+        table,
         traceback,
     })
 }

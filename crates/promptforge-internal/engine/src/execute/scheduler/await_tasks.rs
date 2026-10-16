@@ -29,6 +29,8 @@
 use promptforge_types::ids::{TaskId, TaskOrigin};
 use serde_json::Value;
 
+use crate::execute::protocol::Blocked;
+
 use super::builtins::{BuiltinAnswer, BuiltinOutcome};
 use super::{ChainIndex, Scheduler};
 
@@ -135,7 +137,7 @@ impl Scheduler {
             timer,
             seconds,
         });
-        chain.blocked = Some("tasks");
+        chain.blocked = Some(Blocked::Tasks);
         // Parking over live model tasks gives the chain's admission slots
         // back, exactly as an author's join does: the tasks it waits for
         // need them. A timeout-only wait keeps its slots.

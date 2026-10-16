@@ -187,10 +187,28 @@ pub enum Error {
     Raised(crate::error_value::Raised),
 }
 
-/// Stable messages emitted by Lua Engine-quota refusals.
+/// The typed value an Engine quota refusal raises through Lua.
 ///
-/// Kept as constants so [`crate`] emits them and the runtime-error boundary
-/// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].
+/// The runtime-error boundary recognizes a refusal by downcasting to this
+/// type and maps it to [`Error::LuaQuota`], so an author who raises the
+/// same text fails as an ordinary runtime error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct QuotaExceeded(pub(crate) QuotaResource);
+
+impl std::fmt::Display for QuotaExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self.0 {
+            QuotaResource::LogEvent => lua_quota::LOG_EVENT,
+            QuotaResource::LogByte => lua_quota::LOG_BYTE,
+            QuotaResource::Instruction => lua_quota::INSTRUCTION,
+        })
+    }
+}
+
+impl std::error::Error for QuotaExceeded {}
+
+/// The messages Lua Engine-quota refusals show: the [`QuotaExceeded`]
+/// display text.
 pub(crate) mod lua_quota {
     /// Log event-count budget exhausted.
     pub(crate) const LOG_EVENT: &str = "lua log event budget exceeded";

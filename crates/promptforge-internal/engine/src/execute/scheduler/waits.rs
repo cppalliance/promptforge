@@ -31,12 +31,14 @@
 //! once under its target; a task already in a terminal state is left as it
 //! is and reports nothing.
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use promptforge_types::ids::{TaskId, TaskOrigin};
 
-use crate::execute::protocol::{Answer, TaskDelivery, TaskStatus};
+use crate::execute::protocol::{Answer, TaskDelivery, TaskPhase, TaskStatus};
+use crate::lua::NonEmpty;
 use crate::{Error, Result};
 use promptforge_types::event::Event;
 
@@ -44,14 +46,14 @@ use super::notices::TaskEnd;
 use super::tasks::{TaskBacking, TaskSlot, TaskState};
 use super::{ChainIndex, Scheduler};
 
-/// The `state` tag `tasks.status` reports: a delivered task reads `done`,
-/// since delivery is the owner's bookkeeping, not a lifecycle change.
-fn state_tag(state: TaskState) -> &'static str {
+/// The phase `tasks.status` reports: a delivered task reads `done`, since
+/// delivery is the owner's bookkeeping, not a lifecycle change.
+fn task_phase(state: TaskState) -> TaskPhase {
     match state {
-        TaskState::Running => "running",
-        TaskState::Done | TaskState::Delivered => "done",
-        TaskState::Cancelled => "cancelled",
-        TaskState::Abandoned => "abandoned",
+        TaskState::Running => TaskPhase::Running,
+        TaskState::Done | TaskState::Delivered => TaskPhase::Done,
+        TaskState::Cancelled => TaskPhase::Cancelled,
+        TaskState::Abandoned => TaskPhase::Abandoned,
     }
 }
 
@@ -102,14 +104,14 @@ impl Scheduler {
     /// on the set until a member's chain end wakes it. Parking on a set
     /// with real members gives the chain's admission slots back, so its
     /// own tasks can run under its limit.
-    pub(super) fn dispatch_join_any(&mut self, id: ChainIndex, tasks: Vec<TaskId>) {
+    pub(super) fn dispatch_join_any(&mut self, id: ChainIndex, tasks: NonEmpty<TaskId>) {
         match self.first_terminal(id, &tasks) {
             Ok(Some(task)) => {
                 let delivery = self.deliver(&task);
                 self.answer_inline(id, Answer::JoinAny(Ok(delivery)));
             }
             Ok(None) => {
-                self.chains[id.index()].waiting_on = tasks;
+                self.chains[id.index()].waiting_on = tasks.into_vec();
                 self.park_wait(id);
             }
             Err(error) => self.answer_inline(id, Answer::JoinAny(Err(error))),
@@ -216,7 +218,7 @@ impl Scheduler {
         let mut status = TaskStatus {
             target: slot.target.clone(),
             origin: slot.origin,
-            state: state_tag(slot.state),
+            state: task_phase(slot.state),
             ok: slot.ok,
             section: None,
             blocked: None,
@@ -256,13 +258,13 @@ impl Scheduler {
     /// portable wherever it runs, tighter ceilings included; without one,
     /// the effective limit is read back. The clamp never preempts a task
     /// already running - the limit gates admissions from here on only.
-    pub(super) fn dispatch_concurrency(&mut self, id: ChainIndex, limit: Option<u64>) {
+    pub(super) fn dispatch_concurrency(&mut self, id: ChainIndex, limit: Option<NonZeroU64>) {
         let effective = if let Some(limit) = limit {
             let parent_limit = match self.enclosing(id) {
                 Some(parent) => self.chains[parent.index()].concurrency,
                 None => self.ctx.limits().concurrency().get(),
             };
-            let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+            let limit = usize::try_from(limit.get()).unwrap_or(usize::MAX);
             let effective = limit.min(parent_limit);
             self.chains[id.index()].concurrency = effective;
             effective

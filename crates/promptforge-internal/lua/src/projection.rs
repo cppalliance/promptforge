@@ -8,8 +8,9 @@
 //! dispatch, on every model call, over whichever records the author's list
 //! holds at that moment:
 //!
-//! - `tool_calls` belong to assistant records and `tool_call_id` to tool
-//!   records; a system message is legal only in the leading block.
+//! - `tool_calls` belong to assistant records (a record holds a
+//!   `tool_call_id` only as a tool result, by its type); a system message
+//!   is legal only in the leading block.
 //! - Tool-call IDs are unique across the whole list, and every assistant
 //!   tool-call batch is answered atomically: the records immediately
 //!   following the batch are its results, one per call, each exactly once.
@@ -33,12 +34,12 @@
 
 use std::collections::BTreeSet;
 
-use promptforge_model_client::client::{Message, Role};
+use promptforge_model_client::client::Message;
 use promptforge_model_client::detail::message_from_validated_parts;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
-use crate::protocol::{ContentPart, MessageContent, MessageRecord};
+use crate::protocol::{ContentPart, MessageContent, MessageRecord, NonEmpty, RecordRole};
 
 /// Validates and projects one author-built message list into the wire
 /// messages for one model dispatch.
@@ -46,10 +47,9 @@ use crate::protocol::{ContentPart, MessageContent, MessageRecord};
 /// # Errors
 /// Returns [`Error::Lua`] naming the offending 1-based index when the list
 /// violates a cross-record rule: a malformed record (tool calls on a
-/// non-assistant, a call ID on a non-tool, a system message outside the
-/// leading block, content parts in a system block that must be composed), a
-/// duplicate tool-call ID, an orphan tool record, or an assistant tool call
-/// with no result.
+/// non-assistant, a system message outside the leading block, content
+/// parts in a system block that must be composed), a duplicate tool-call
+/// ID, an orphan tool record, or an assistant tool call with no result.
 pub fn project_messages(messages: &[MessageRecord]) -> Result<Vec<Message>> {
     validate(messages)?;
     Ok(project(messages))
@@ -78,23 +78,18 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
     let mut pending: Option<(usize, Vec<&str>)> = None;
     for (position, record) in messages.iter().enumerate() {
         let index = position + 1;
-        if record.role != Role::Assistant && !record.tool_calls.is_empty() {
+        if record.role != RecordRole::Assistant && !record.tool_calls.is_empty() {
             return Err(Error::Lua(format!(
                 "messages[{index}] sets tool_calls but is not an assistant message"
             )));
         }
-        if record.role != Role::Tool && record.tool_call_id.is_some() {
-            return Err(Error::Lua(format!(
-                "messages[{index}] sets a tool_call_id but is not a tool message"
-            )));
-        }
-        match record.role {
-            Role::System if position >= system_len => {
+        match &record.role {
+            RecordRole::System if position >= system_len => {
                 return Err(Error::Lua(format!(
                     "messages[{index}] is a system message outside the leading system block"
                 )));
             }
-            Role::Assistant if !record.tool_calls.is_empty() => {
+            RecordRole::Assistant if !record.tool_calls.is_empty() => {
                 reject_unanswered(pending.as_ref())?;
                 for call in &record.tool_calls {
                     if !seen.insert(call.id.as_str()) {
@@ -114,10 +109,8 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
                         .collect(),
                 ));
             }
-            Role::Tool => {
-                // The protocol parse requires a string tool_call_id on every
-                // tool record, so the option is always some here.
-                let id = record.tool_call_id.as_deref().unwrap_or_default();
+            RecordRole::Tool { tool_call_id } => {
+                let id = tool_call_id.as_str();
                 match &mut pending {
                     Some((_, unanswered)) if unanswered.contains(&id) => {
                         unanswered.retain(|open| *open != id);
@@ -125,7 +118,7 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
                             pending = None;
                         }
                     }
-                    _ => {
+                    Some(_) | None => {
                         return Err(Error::Lua(format!(
                             "messages[{index}] is an orphan tool record: no pending \
                              assistant tool call with id {id:?}"
@@ -133,7 +126,9 @@ fn validate(messages: &[MessageRecord]) -> Result<()> {
                     }
                 }
             }
-            _ => reject_unanswered(pending.as_ref())?,
+            RecordRole::System | RecordRole::User | RecordRole::Assistant => {
+                reject_unanswered(pending.as_ref())?;
+            }
         }
     }
     reject_unanswered(pending.as_ref())
@@ -157,7 +152,7 @@ fn reject_unanswered(pending: Option<&(usize, Vec<&str>)>) -> Result<()> {
 fn leading_system_len(messages: &[MessageRecord]) -> usize {
     messages
         .iter()
-        .take_while(|record| record.role == Role::System)
+        .take_while(|record| record.role == RecordRole::System)
         .count()
 }
 
@@ -174,7 +169,7 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
         // Composition is textual; validation refused parts in a composed
         // block, so the visible text is the whole content.
         _ => projected.push(MessageRecord {
-            role: Role::System,
+            role: RecordRole::System,
             content: MessageContent::Text(
                 messages[..system_len]
                     .iter()
@@ -183,7 +178,6 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
                     .join("\n\n"),
             ),
             tool_calls: Vec::new(),
-            tool_call_id: None,
         }),
     }
     for record in &messages[system_len..] {
@@ -194,20 +188,20 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
                 if last.role == record.role
                     && last.tool_calls.is_empty()
                     && record.tool_calls.is_empty()
-                    && matches!(last.role, Role::User | Role::Assistant) =>
+                    && matches!(last.role, RecordRole::User | RecordRole::Assistant) =>
             {
                 let separator = match last.role {
-                    Role::User => "\n\n",
-                    _ => "",
+                    RecordRole::User => "\n\n",
+                    RecordRole::Assistant | RecordRole::System | RecordRole::Tool { .. } => "",
                 };
                 last.content = merge_content(&last.content, &record.content, separator);
             }
             // Visible text merges into the tool-call turn it precedes rather
             // than breaking provider alternation as a lone assistant message.
             Some(last)
-                if last.role == Role::Assistant
+                if last.role == RecordRole::Assistant
                     && last.tool_calls.is_empty()
-                    && record.role == Role::Assistant =>
+                    && record.role == RecordRole::Assistant =>
             {
                 last.content = merge_content(&last.content, &record.content, "");
                 last.tool_calls.clone_from(&record.tool_calls);
@@ -224,21 +218,28 @@ fn project(messages: &[MessageRecord]) -> Vec<Message> {
 /// text side contributes nothing, so stray empty fragments vanish into
 /// their run instead of poisoning the join.
 fn merge_content(left: &MessageContent, right: &MessageContent, separator: &str) -> MessageContent {
-    if let (MessageContent::Text(a), MessageContent::Text(b)) = (left, right) {
-        if a.is_empty() {
-            MessageContent::Text(b.clone())
-        } else if b.is_empty() {
-            MessageContent::Text(a.clone())
-        } else {
-            MessageContent::Text(format!("{a}{separator}{b}"))
+    let separator_part = (!separator.is_empty()).then(|| ContentPart::Text(separator.to_owned()));
+    match (left, right) {
+        (MessageContent::Text(a), MessageContent::Text(b)) => {
+            if a.is_empty() {
+                MessageContent::Text(b.clone())
+            } else if b.is_empty() {
+                MessageContent::Text(a.clone())
+            } else {
+                MessageContent::Text(format!("{a}{separator}{b}"))
+            }
         }
-    } else {
-        let mut parts = content_parts(left);
-        if !separator.is_empty() {
-            parts.push(ContentPart::Text(separator.to_owned()));
+        (MessageContent::Parts(parts), _) => {
+            let mut merged: NonEmpty<ContentPart> = parts.clone();
+            merged.extend(separator_part);
+            merged.extend(content_parts(right));
+            MessageContent::Parts(merged)
         }
-        parts.extend(content_parts(right));
-        MessageContent::Parts(parts)
+        (MessageContent::Text(_), MessageContent::Parts(parts)) => {
+            let mut leading = content_parts(left);
+            leading.extend(separator_part);
+            MessageContent::Parts(parts.clone().preceded_by(leading))
+        }
     }
 }
 
@@ -252,7 +253,7 @@ fn content_parts(content: &MessageContent) -> Vec<ContentPart> {
                 vec![ContentPart::Text(text.clone())]
             }
         }
-        MessageContent::Parts(parts) => parts.clone(),
+        MessageContent::Parts(parts) => parts.to_vec(),
     }
 }
 
@@ -315,9 +316,9 @@ fn wire_message(record: &MessageRecord) -> Message {
         )
     };
     message_from_validated_parts(
-        record.role,
+        record.role.kind(),
         content,
-        record.tool_call_id.clone(),
+        record.role.tool_call_id().map(str::to_owned),
         tool_calls,
     )
 }

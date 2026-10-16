@@ -131,20 +131,17 @@ fn tool_call_without_args_parses_the_empty_object() {
 fn a_tool_call_with_a_tool_object_decodes_to_its_id() {
     // The id-or-tool-object polymorphism at the protocol boundary: a tool
     // object stands for its canonical id, never its wire name.
-    let lua = Lua::new();
-    let table = request_table(&lua, "tool_call");
-    let descriptor = promptforge_types::tools::ToolDescriptor::new(
-        promptforge_types::tools::ToolId::parse("tools/echo").expect("valid id"),
-        "echo tool",
-        json!({ "type": "object" }),
-    );
-    let handle = crate::tools::LuaToolHandle::from_binding(&crate::ToolBinding::from_descriptor(
-        "tools_echo",
-        &descriptor,
+    let binding = crate::ToolBinding::from_descriptor("tools_echo", &crate::test_vm::echo_tool());
+    let vm = crate::test_vm::lua_over(crate::ToolSet::new(
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        vec![binding],
     ));
-    let userdata = lua.create_userdata(handle).expect("userdata");
-    table.raw_set("alias", userdata).expect("raw_set");
-    let request = expect_request(Request::from_yield(&lua, &Value::Table(table)));
+    let lua = vm.lua();
+    let table = request_table(lua, "tool_call");
+    let object: AnyUserData = vm.eval("return tools.get('tools/echo')");
+    table.raw_set("alias", object).expect("raw_set");
+    let request = expect_request(Request::from_yield(lua, &Value::Table(table)));
     match request {
         Request::ToolCall { alias, .. } => assert_eq!(alias, "tools/echo"),
         other => panic!("expected a tool_call request, got {other:?}"),
@@ -193,10 +190,16 @@ fn a_tool_call_with_an_unrepresentable_args_table_is_the_calls_error() {
         .create_function(|_, ()| Ok(()))
         .expect("function creation cannot fail");
     args.raw_set("f", member).expect("raw_set");
+    let cause = lua
+        .from_value::<serde_json::Value>(Value::Table(args.clone()))
+        .expect_err("a table holding a function has no JSON form");
     table.raw_set("args", args).expect("raw_set");
     match Request::from_yield(&lua, &Value::Table(table)) {
         YieldParse::Call(Answer::ToolCallResult(Err(Error::Lua(message)))) => {
-            assert_eq!(message, "args must be a JSON-representable table");
+            assert_eq!(
+                message,
+                format!("args must be a JSON-representable table: {cause}")
+            );
         }
         other => panic!("expected the args call error, got {other:?}"),
     }

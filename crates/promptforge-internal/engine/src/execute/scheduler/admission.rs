@@ -18,7 +18,7 @@ use std::sync::Arc;
 use promptforge_types::event::Event;
 
 use crate::Error;
-use crate::execute::protocol::Answer;
+use crate::execute::protocol::{Answer, Blocked};
 
 use super::{ChainIndex, Scheduler};
 
@@ -235,7 +235,7 @@ impl Scheduler {
         if requeue {
             // Waiting for a slot again reads `queued`, exactly as a
             // fresh spawn's wait does.
-            chain.blocked = Some("queued");
+            chain.blocked = Some(Blocked::Queued);
             self.resuming.push_back(id);
         } else {
             self.ready.push_back(id);

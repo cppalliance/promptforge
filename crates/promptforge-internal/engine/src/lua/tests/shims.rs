@@ -10,7 +10,8 @@ use promptforge_types::metrics::ToolCallEvent;
 use serde_json::json;
 
 use crate::execute::protocol::{
-    Answer, ChatResult, LocalToolOutcome, Request, ToolCallOutcome, VfsOp, VfsOutcome, YieldParse,
+    Answer, ChatOutcome, ChatResult, LocalToolOutcome, Request, SpawnVia, ToolCallOutcome, VfsOp,
+    VfsOutcome, YieldParse,
 };
 use crate::model::ModelSet;
 
@@ -63,7 +64,7 @@ fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
             index,
             var,
             origin,
-            fanout,
+            via,
         } => {
             assert_eq!(target, "### Worker");
             assert_eq!(input, None);
@@ -71,7 +72,7 @@ fn fanout_yields_a_spawn_per_member_starting_with_the_first() {
             assert_eq!(index, Some(1));
             assert_eq!(var, json!({}));
             assert_eq!(origin, TaskOrigin::Author);
-            assert!(fanout, "an arm's spawn sets the fanout mark");
+            assert_eq!(via, SpawnVia::Fanout, "an arm's spawn sets the fanout mark");
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }
@@ -113,7 +114,7 @@ fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
             index,
             var,
             origin,
-            fanout,
+            via,
         } => {
             assert_eq!(target, "## Child");
             assert_eq!(input.as_deref(), Some("in"));
@@ -121,7 +122,7 @@ fn tasks_spawn_yields_the_target_seeds_var_and_author_origin() {
             assert_eq!(index, Some(2));
             assert_eq!(var, json!({ "k": 1 }));
             assert_eq!(origin, TaskOrigin::Author);
-            assert!(!fanout, "`tasks.spawn` is not a fanout arm");
+            assert_eq!(via, SpawnVia::Spawn, "`tasks.spawn` is not a fanout arm");
         }
         other => panic!("expected a spawn request, got {other:?}"),
     }
@@ -266,11 +267,7 @@ fn the_loops_tool_call_yields_carry_the_turn_of_the_requesting_round() {
     assert!(matches!(parse_request(&vm, yielded), Request::Chat { .. }));
     let call = |id: &str| ToolCallEvent::new(id, "tools_echo", json!({ "value": id }));
     let round = ChatResult {
-        overflow: false,
-        overflow_reason: None,
-        reply: None,
-        empty_detail: None,
-        tool_calls: Some(vec![call("c1"), call("c2")]),
+        outcome: ChatOutcome::ToolCalls(vec![call("c1"), call("c2")]),
         finish_reason: Some("tool_calls".to_owned()),
         turn: 7,
     };
