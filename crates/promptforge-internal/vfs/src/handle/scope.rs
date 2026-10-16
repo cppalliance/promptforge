@@ -15,7 +15,39 @@ use crate::traits::ExecId;
 /// A scope id, vended from a process-wide counter: unique across every
 /// handle, because one scope's claims can land in several volumes'
 /// ledgers through the mounted-handle forward.
-pub(super) type ScopeId = u64;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) struct ScopeId(u64);
+
+impl ScopeId {
+    /// The next scope id: process-wide, so scope ids stay unique across
+    /// handles and the mounted-handle forward never aliases two scopes.
+    fn vend() -> ScopeId {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        ScopeId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// One identity's logical time: its own entry in a vector clock, or how
+/// much of another identity's activity a clock has seen.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub(super) struct Clock(u64);
+
+impl Clock {
+    /// The time before any access: an epoch at it races with nothing in
+    /// its own scope, and a slot never written reads as it.
+    pub(super) const ZERO: Clock = Clock(0);
+
+    /// An identity's first own entry. It starts at 1, not 0: a sibling
+    /// forked before the identity's first access reads a blank slot for
+    /// it, which counts as zero, so the first epoch must outrank that or
+    /// it would be mistaken for an unseen one.
+    const FIRST: Clock = Clock(1);
+
+    /// The entry after this one.
+    fn next(self) -> Clock {
+        Clock(self.0 + 1)
+    }
+}
 
 /// A scope: the root identity from [`VfsRef::acquire`] together with
 /// every identity forked from it. Every [`Access`] in the scope holds an
@@ -51,7 +83,7 @@ pub(super) struct Identity {
     /// identity's activity the identity has seen, without its own
     /// entry. Children fork this `Arc` read-only, so a fanout shares
     /// one map instead of copying it per arm.
-    pub(super) seen: Arc<HashMap<ExecId, u64>>,
+    pub(super) seen: Arc<HashMap<ExecId, Clock>>,
     /// The fork record: the parent identity and its own entry at fork
     /// time, frozen, chained through the parent's own record. A fresh
     /// acquire has none.
@@ -59,7 +91,7 @@ pub(super) struct Identity {
     /// The identity's own entry: its logical time, advanced once per
     /// admitted access. Outside the shared snapshot so a fork never
     /// copies the map.
-    pub(super) own: u64,
+    pub(super) own: Clock,
     /// The accesses holding the identity, however many volumes they
     /// touch through a mounted-handle forward.
     pub(super) refs: usize,
@@ -70,16 +102,24 @@ pub(super) struct Identity {
 }
 
 impl Identity {
+    /// A fresh identity holding one reference, its own entry at
+    /// [`Clock::FIRST`].
+    fn fresh(seen: Arc<HashMap<ExecId, Clock>>, forked: Option<Arc<ForkEdge>>) -> Identity {
+        Identity {
+            seen,
+            forked,
+            own: Clock::FIRST,
+            refs: 1,
+            ended: false,
+        }
+    }
+
     /// Refuses an operation on `path` once the identity's tool call has
     /// ended, before any claim or backend call.
     fn refuse_if_ended(&self, path: &VfsPath) -> Result<(), VfsError> {
         if self.ended {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::ScopeEnded {
                 path: path.to_string(),
-                reason: format!(
-                    "the tool call that owned this access has ended, so {path} can no longer be \
-                     touched through it; finish every operation before the call answers"
-                ),
             });
         }
         Ok(())
@@ -94,7 +134,7 @@ pub(super) struct ForkEdge {
     /// The parent the identity forked from.
     parent: ExecId,
     /// The parent's own entry at fork time.
-    clock: u64,
+    clock: Clock,
     /// The parent's fork record: the previous generation's snapshot.
     prev: Option<Arc<ForkEdge>>,
 }
@@ -104,8 +144,8 @@ pub(super) struct ForkEdge {
 /// so one check and its record read one epoch.
 pub(super) struct View {
     pub(super) id: ExecId,
-    pub(super) own: u64,
-    pub(super) seen: Arc<HashMap<ExecId, u64>>,
+    pub(super) own: Clock,
+    pub(super) seen: Arc<HashMap<ExecId, Clock>>,
     pub(super) forked: Option<Arc<ForkEdge>>,
 }
 
@@ -113,11 +153,11 @@ impl View {
     /// How much of `other`'s progress the view has seen: the identity's
     /// own entry for itself, the frozen fork snapshot for an ancestor,
     /// or the shared seen map for everyone else - whichever is newest.
-    pub(super) fn seen_clock(&self, other: ExecId) -> u64 {
+    pub(super) fn seen_clock(&self, other: ExecId) -> Clock {
         if other == self.id {
             return self.own;
         }
-        let mut seen = 0;
+        let mut seen = Clock::ZERO;
         let mut edge = self.forked.as_deref();
         while let Some(record) = edge {
             if record.parent == other {
@@ -125,7 +165,7 @@ impl View {
             }
             edge = record.prev.as_deref();
         }
-        seen.max(self.seen.get(&other).copied().unwrap_or(0))
+        seen.max(self.seen.get(&other).copied().unwrap_or(Clock::ZERO))
     }
 }
 
@@ -134,7 +174,7 @@ impl Scope {
     /// live.
     pub(crate) fn start() -> Arc<Scope> {
         Arc::new(Scope {
-            id: next_scope_id(),
+            id: ScopeId::vend(),
             live: AtomicUsize::new(0),
             closed: AtomicBool::new(false),
             inner: Mutex::new(ScopeInner {
@@ -164,12 +204,8 @@ impl Scope {
     /// any claim or backend call.
     pub(super) fn refuse_if_closed(&self, path: &VfsPath) -> Result<(), VfsError> {
         if self.closed.load(Ordering::Acquire) {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::ScopeEnded {
                 path: path.to_string(),
-                reason: format!(
-                    "the run that owned this access has ended, so {path} can no longer be \
-                     touched through it; acquire a fresh access"
-                ),
             });
         }
         Ok(())
@@ -180,8 +216,8 @@ impl Scope {
     /// of an existing identity joins its scope with one more reference.
     ///
     /// # Errors
-    /// Returns [`VfsError::PermissionDenied`], naming `path`, when the
-    /// scope is closed or `id`'s tool call has ended.
+    /// Returns [`VfsError::ScopeEnded`], naming `path`, when the scope is
+    /// closed or `id`'s tool call has ended.
     pub(super) fn attach(&self, id: ExecId, path: &VfsPath) -> Result<(), VfsError> {
         self.refuse_if_closed(path)?;
         let mut inner = self.lock();
@@ -191,18 +227,7 @@ impl Scope {
                 entry.get_mut().refs += 1;
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
-                // The own entry starts at 1, not 0: a sibling forked
-                // before this identity's first access reads a blank
-                // slot for it, which counts as 0, so the first epoch
-                // must outrank that or it would be mistaken for an
-                // unseen one.
-                entry.insert(Identity {
-                    seen: Arc::new(HashMap::new()),
-                    forked: None,
-                    own: 1,
-                    refs: 1,
-                    ended: false,
-                });
+                entry.insert(Identity::fresh(Arc::new(HashMap::new()), None));
                 self.live.fetch_add(1, Ordering::AcqRel);
             }
         }
@@ -215,8 +240,8 @@ impl Scope {
     /// later accesses are not ordered before the child's.
     ///
     /// # Errors
-    /// Returns [`VfsError::PermissionDenied`], naming `path`, when
-    /// `parent`'s tool call has ended.
+    /// Returns [`VfsError::ScopeEnded`], naming `path`, when `parent`'s
+    /// tool call has ended.
     pub(super) fn fork(
         &self,
         parent: ExecId,
@@ -224,25 +249,24 @@ impl Scope {
         path: &VfsPath,
     ) -> Result<(), VfsError> {
         let mut inner = self.lock();
+        #[expect(
+            clippy::expect_used,
+            reason = "a live access's identity stays registered until its scope is dropped"
+        )]
         let parent_identity = inner
             .identities
             .get_mut(&parent)
-            .unwrap_or_else(|| panic!("a live access's identity is registered"));
+            .expect("a live access's identity is registered");
         parent_identity.refuse_if_ended(path)?;
-        // The child's own entry starts at 1, as an attach's does: its
-        // first epoch must outrank every sibling's blank slot.
-        let child_identity = Identity {
-            seen: Arc::clone(&parent_identity.seen),
-            forked: Some(Arc::new(ForkEdge {
+        let child_identity = Identity::fresh(
+            Arc::clone(&parent_identity.seen),
+            Some(Arc::new(ForkEdge {
                 parent,
                 clock: parent_identity.own,
                 prev: parent_identity.forked.clone(),
             })),
-            own: 1,
-            refs: 1,
-            ended: false,
-        };
-        parent_identity.own += 1;
+        );
+        parent_identity.own = parent_identity.own.next();
         inner.identities.insert(child, child_identity);
         self.live.fetch_add(1, Ordering::AcqRel);
         Ok(())
@@ -294,14 +318,18 @@ impl Scope {
     /// here, so the ended check shares this lock with [`Scope::end`].
     ///
     /// # Errors
-    /// Returns [`VfsError::PermissionDenied`], naming `path`, when `id`'s
-    /// tool call has ended.
+    /// Returns [`VfsError::ScopeEnded`], naming `path`, when `id`'s tool
+    /// call has ended.
     pub(super) fn view(&self, id: ExecId, path: &VfsPath) -> Result<View, VfsError> {
         let inner = self.lock();
+        #[expect(
+            clippy::expect_used,
+            reason = "a live access's identity stays registered until its scope is dropped"
+        )]
         let identity = inner
             .identities
             .get(&id)
-            .unwrap_or_else(|| panic!("a live access's identity is registered"));
+            .expect("a live access's identity is registered");
         identity.refuse_if_ended(path)?;
         Ok(View {
             id,
@@ -313,10 +341,10 @@ impl Scope {
 
     /// Advances `id`'s own entry past its recorded epoch, so its next
     /// access records a fresh one.
-    pub(super) fn advance(&self, id: ExecId, tick: u64) {
+    pub(super) fn advance(&self, id: ExecId, tick: Clock) {
         let mut inner = self.lock();
         if let Some(identity) = inner.identities.get_mut(&id) {
-            identity.own = identity.own.max(tick + 1);
+            identity.own = identity.own.max(tick.next());
         }
     }
 }
@@ -339,14 +367,14 @@ impl ScopeInner {
         };
         let owner_seen = Arc::make_mut(&mut owner_identity.seen);
         // The child's own entry...
-        let slot = owner_seen.entry(child).or_insert(0);
+        let slot = owner_seen.entry(child).or_insert(Clock::ZERO);
         *slot = (*slot).max(child_view.own);
         // ...its frozen fork chain - the owner's own entry in the chain
         // is never newer than the owner's, so it is skipped - ...
         let mut edge = child_view.forked.as_deref();
         while let Some(record) = edge {
             if record.parent != owner {
-                let slot = owner_seen.entry(record.parent).or_insert(0);
+                let slot = owner_seen.entry(record.parent).or_insert(Clock::ZERO);
                 *slot = (*slot).max(record.clock);
             }
             edge = record.prev.as_deref();
@@ -356,17 +384,10 @@ impl ScopeInner {
             if other == owner {
                 continue;
             }
-            let slot = owner_seen.entry(other).or_insert(0);
+            let slot = owner_seen.entry(other).or_insert(Clock::ZERO);
             if other_clock > *slot {
                 *slot = other_clock;
             }
         }
     }
-}
-
-/// The next scope id: process-wide, so scope ids stay unique across
-/// handles and the mounted-handle forward never aliases two scopes.
-fn next_scope_id() -> ScopeId {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_add(1, Ordering::Relaxed)
 }

@@ -203,6 +203,16 @@ fn a_denied_operation_never_registers_a_claim() -> Result<(), VfsError> {
         }
         other => panic!("expected a denial, got {other:?}"),
     }
+    // An approval request refuses as its own variant, with its text.
+    *verdict.lock().unwrap_or_else(PoisonError::into_inner) =
+        Verdict::Ask("approve the write".to_owned());
+    assert_eq!(
+        denied.write("/f.txt", b"x"),
+        Err(VfsError::ApprovalRequired {
+            path: "/f.txt".to_owned(),
+            reason: "approve the write".to_owned(),
+        })
+    );
     // The caller flips the policy mid-run through shared state.
     *verdict.lock().unwrap_or_else(PoisonError::into_inner) = Verdict::Allow;
     let allowed = access(&vfs)?;
@@ -241,5 +251,38 @@ fn a_refused_claim_never_registers_a_claim() -> Result<(), VfsError> {
     conflict_message(copier.copy("/copied.txt", "/d/h"));
     let writer = access(&vfs)?;
     writer.write("/copied.txt", b"w")?;
+    Ok(())
+}
+
+#[test]
+fn two_threads_writing_one_path_in_two_scopes_leave_exactly_one_write_standing()
+-> Result<(), VfsError> {
+    let vfs = handle(TestFs::default());
+    // Both scopes are live before either writes, so whichever write is
+    // admitted second meets the first's claim, in either order.
+    let accesses = [access(&vfs)?, access(&vfs)?];
+    let start = std::sync::Barrier::new(accesses.len());
+    let outcomes: Vec<Result<(), VfsError>> = std::thread::scope(|threads| {
+        let writers: Vec<_> = accesses
+            .iter()
+            .map(|writer| {
+                let start = &start;
+                threads.spawn(move || {
+                    start.wait();
+                    writer.write("/shared.txt", b"x")
+                })
+            })
+            .collect();
+        writers
+            .into_iter()
+            .map(|writer| writer.join().expect("the writer thread does not panic"))
+            .collect()
+    });
+    let admitted = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+    let conflicts = outcomes
+        .iter()
+        .filter(|outcome| matches!(outcome, Err(VfsError::Conflict { .. })))
+        .count();
+    assert_eq!((admitted, conflicts), (1, 1), "{outcomes:?}");
     Ok(())
 }

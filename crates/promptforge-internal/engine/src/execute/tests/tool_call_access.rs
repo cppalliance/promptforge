@@ -98,13 +98,11 @@ fn perform_store(effect: &Effect) -> EffectAnswer {
 }
 
 /// Asserts that `result` is the refusal of an access whose tool call has
-/// ended, not of one whose run has.
+/// ended. The run and the tool call end an access as the same variant;
+/// the callers hold the run open, so the call's end is the one refused.
 fn assert_refused_as_ended<T: std::fmt::Debug>(result: std::result::Result<T, VfsError>) {
     match result {
-        Err(VfsError::PermissionDenied { reason, .. }) => assert!(
-            reason.contains("the tool call that owned this access has ended"),
-            "{reason}"
-        ),
+        Err(VfsError::ScopeEnded { .. }) => {}
         other => panic!("expected the ended-call refusal, got {other:?}"),
     }
 }

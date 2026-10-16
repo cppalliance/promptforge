@@ -12,14 +12,24 @@
 //! `exists`, `stat`, `mkdir`, `rename`) contain the parent and act on a
 //! final-component link as a link, never its target. Operations on
 //! contents (`read`, `read_range`, `write`, `append`, `list`, `glob`,
-//! `copy`) follow links under the containment check, which denies a
-//! link that resolves outside the root and refuses a path that passes
-//! through a dangling link.
+//! `copy`) follow links under the containment check, which refuses a
+//! link that resolves outside the root and a path that passes through
+//! a dangling link.
 
 mod files;
 mod resolve;
 #[cfg(test)]
 mod tests;
+
+#[cfg(unix)]
+#[path = "real/unix.rs"]
+mod platform;
+#[cfg(windows)]
+#[path = "real/windows.rs"]
+mod platform;
+#[cfg(not(any(unix, windows)))]
+#[path = "real/fallback.rs"]
+mod platform;
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -31,40 +41,40 @@ use crate::path::{VfsPath, canonicalize_absolute};
 use crate::stat::{Entry, Stat};
 use crate::traits::{AcquireContext, ExecId, Vfs, VfsAccess};
 
-use files::{atomic_write, create_parent, is_dir_link, stat_of, walk, walk_root};
-use resolve::{
-    RealRoot, contain, contain_no_follow, identity_to_real, identity_to_virtual, join_virtual,
-};
+use files::{atomic_write, create_parent, stat_of, utf8_name, walk, walk_root};
+use resolve::{RealRoot, contain, contain_no_follow, join_virtual};
 
 /// Maps an I/O failure to the error kind the trait surface promises.
 /// Each `path` field holds the canonical path alone, so a caller reading
 /// the field per its documented contract gets a path, never the OS
-/// error's text; the kind carries the OS failure, and only
-/// `PermissionDenied` keeps the extra text in `reason`.
+/// error's text. A failure outside the named kinds keeps its kind, its
+/// OS error code, and the OS text beside the path in `Io`.
 fn map_io(path: &str, err: &std::io::Error) -> VfsError {
-    let message = format!("{path}: {err}");
+    let path = path.to_owned();
     match err.kind() {
-        std::io::ErrorKind::NotFound => VfsError::NotFound {
-            path: path.to_owned(),
+        std::io::ErrorKind::NotFound => VfsError::NotFound { path },
+        std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists { path },
+        std::io::ErrorKind::IsADirectory => VfsError::IsADirectory { path },
+        std::io::ErrorKind::NotADirectory => VfsError::NotADirectory { path },
+        std::io::ErrorKind::DirectoryNotEmpty => VfsError::DirectoryNotEmpty { path },
+        kind => VfsError::Io {
+            path,
+            kind,
+            raw_os_error: err.raw_os_error(),
+            message: err.to_string(),
         },
-        std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied {
-            path: path.to_owned(),
-            reason: message,
-        },
-        std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists {
-            path: path.to_owned(),
-        },
-        std::io::ErrorKind::IsADirectory => VfsError::IsADirectory {
-            path: path.to_owned(),
-        },
-        std::io::ErrorKind::NotADirectory => VfsError::NotADirectory {
-            path: path.to_owned(),
-        },
-        std::io::ErrorKind::DirectoryNotEmpty => VfsError::DirectoryNotEmpty {
-            path: path.to_owned(),
-        },
-        _ => VfsError::Backend { message },
     }
+}
+
+/// Whether a [`RealBackend`] accepts mutations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Writability {
+    /// Reads and mutations are both served.
+    ReadWrite,
+    /// Reads are served, and every mutation is refused with
+    /// [`VfsError::ReadOnly`].
+    ReadOnly,
 }
 
 /// A filesystem backend that maps virtual paths onto real files and
@@ -74,6 +84,11 @@ fn map_io(path: &str, err: &std::io::Error) -> VfsError {
 /// [`RealBackend::rooted`] keeps every path inside its root directory.
 /// It checks containment both lexically and after canonicalizing the
 /// path. Writes, copies, and renames are failure-atomic.
+///
+/// On Windows and macOS, whose file systems treat paths that differ only
+/// in case as one file, the claims check of a handle that mounts a
+/// rooted backend keys each path below the mount by its lowercase
+/// spelling, so two spellings of one file conflict as one path does.
 ///
 /// The backend accepts an `ExecId` for attribution and ignores it,
 /// because every identity sees the same real filesystem.
@@ -106,13 +121,25 @@ impl RealBackend {
     ///
     /// # Errors
     ///
-    /// Returns [`VfsError::NotFound`] when `dir` is absent, or
+    /// Returns [`VfsError::NotUtf8`] when `dir` is not UTF-8,
+    /// [`VfsError::NotFound`] when `dir` is absent, or
     /// [`VfsError::NotADirectory`] when it is not a directory.
     pub fn rooted(dir: impl AsRef<Path>) -> Result<RealBackend, VfsError> {
-        let display = dir.as_ref().to_string_lossy().into_owned();
-        let canonical = fs::canonicalize(dir.as_ref()).map_err(|err| map_io(&display, &err))?;
+        let dir = dir.as_ref();
+        let bytes = dir.as_os_str().as_encoded_bytes();
+        let display = std::str::from_utf8(bytes).map_err(|err| VfsError::NotUtf8 {
+            // The bytes before `valid_up_to` are UTF-8 by the error's own
+            // account.
+            path: std::str::from_utf8(&bytes[..err.valid_up_to()])
+                .unwrap_or_default()
+                .to_owned(),
+            valid_up_to: err.valid_up_to(),
+        })?;
+        let canonical = fs::canonicalize(dir).map_err(|err| map_io(display, &err))?;
         if !canonical.is_dir() {
-            return Err(VfsError::NotADirectory { path: display });
+            return Err(VfsError::NotADirectory {
+                path: display.to_owned(),
+            });
         }
         Ok(RealBackend {
             root: RealRoot::Rooted(canonical),
@@ -127,6 +154,25 @@ impl RealBackend {
     pub fn with_read_only(mut self, read_only: bool) -> RealBackend {
         self.read_only = read_only;
         self
+    }
+
+    /// Sets whether the backend accepts mutations, as
+    /// [`RealBackend::with_read_only`] does.
+    #[must_use]
+    pub fn with_writability(self, writability: Writability) -> RealBackend {
+        self.with_read_only(match writability {
+            Writability::ReadWrite => false,
+            Writability::ReadOnly => true,
+        })
+    }
+
+    /// Whether the claims over this backend fold case: a rooted backend
+    /// on a platform whose file systems fold it.
+    pub(crate) fn folds_case(&self) -> bool {
+        match self.root {
+            RealRoot::Identity => false,
+            RealRoot::Rooted(_) => platform::FOLDS_CASE,
+        }
     }
 }
 
@@ -164,7 +210,7 @@ impl RealAccess {
     /// containment in rooted mode.
     fn resolve(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
-            RealRoot::Identity => Ok(identity_to_real(path.as_str())),
+            RealRoot::Identity => Ok(platform::identity_to_real(path.as_str())),
             RealRoot::Rooted(root) => {
                 let candidate = join_virtual(root, path.as_str());
                 contain(root, &candidate, path)
@@ -177,30 +223,10 @@ impl RealAccess {
     /// parent in rooted mode.
     fn resolve_no_follow(&self, path: &VfsPath) -> Result<PathBuf, VfsError> {
         match &self.root {
-            RealRoot::Identity => Ok(identity_to_real(path.as_str())),
+            RealRoot::Identity => Ok(platform::identity_to_real(path.as_str())),
             RealRoot::Rooted(root) => {
                 let candidate = join_virtual(root, path.as_str());
                 contain_no_follow(root, &candidate, path)
-            }
-        }
-    }
-
-    /// Translates a real path back to its virtual spelling.
-    fn to_virtual(&self, real: &Path) -> String {
-        match &self.root {
-            RealRoot::Identity => identity_to_virtual(real),
-            RealRoot::Rooted(root) => {
-                let relative = real.strip_prefix(root).unwrap_or(real);
-                let mut virtual_path = String::new();
-                for component in relative.components() {
-                    virtual_path.push('/');
-                    virtual_path.push_str(&component.as_os_str().to_string_lossy());
-                }
-                if virtual_path.is_empty() {
-                    "/".to_owned()
-                } else {
-                    virtual_path
-                }
             }
         }
     }
@@ -209,9 +235,8 @@ impl RealAccess {
     /// touched: a denied operation never partially applies.
     fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
         if self.read_only {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::ReadOnly {
                 path: path.to_string(),
-                reason: format!("the real backend is read-only, so {path} cannot be mutated"),
             });
         }
         Ok(())
@@ -256,7 +281,7 @@ impl VfsAccess for RealAccess {
             });
         }
         create_parent(&real, path)?;
-        atomic_write(&real, contents)
+        atomic_write(&real, path, contents)
     }
 
     fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
@@ -280,9 +305,8 @@ impl VfsAccess for RealAccess {
     fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
         self.check_writable(path)?;
         if path.as_str() == "/" {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::RootProtected {
                 path: path.to_string(),
-                reason: "the mounted root cannot be removed".into(),
             });
         }
         let real = self.resolve_no_follow(path)?;
@@ -295,7 +319,7 @@ impl VfsAccess for RealAccess {
             } else {
                 fs::remove_dir(&real)
             }
-        } else if is_dir_link(&metadata) {
+        } else if platform::is_dir_link(&metadata) {
             fs::remove_dir(&real)
         } else {
             fs::remove_file(&real)
@@ -324,15 +348,17 @@ impl VfsAccess for RealAccess {
             });
         }
         let tokens = compile_glob(pattern.as_bytes());
-        let root = self.resolve(&canonicalize_absolute(walk_root(pattern))?)?;
+        // The walk spells each match from the virtual walk root, so a
+        // link the root resolves through keeps the pattern's spelling.
+        let walk_from = canonicalize_absolute(walk_root(pattern))?;
+        let root = self.resolve(&walk_from)?;
         if !root.is_dir() {
             return Ok(Vec::new());
         }
         let mut found = Vec::new();
-        walk(&root, &mut found)?;
+        walk(&root, walk_from.as_str(), &mut found)?;
         let mut matches: Vec<String> = found
-            .iter()
-            .map(|real| self.to_virtual(real))
+            .into_iter()
             .filter(|virtual_path| matches_tokens(&tokens, virtual_path.as_bytes()))
             .collect();
         matches.sort_unstable();
@@ -345,15 +371,13 @@ impl VfsAccess for RealAccess {
         let mut result = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|err| map_io(path.as_str(), &err))?;
+            let file_name = entry.file_name();
+            let name = utf8_name(&file_name, path.as_str())?;
             // DirEntry::metadata does not follow symlinks.
             let metadata = entry
                 .metadata()
                 .map_err(|err| map_io(path.as_str(), &err))?;
-            result.push(Entry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                stat: stat_of(&metadata),
-                description: None,
-            });
+            result.push(Entry::new(name, stat_of(&metadata)));
         }
         result.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(result)
@@ -384,15 +408,13 @@ impl VfsAccess for RealAccess {
     fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
         self.check_writable(from)?;
         if from.as_str() == "/" {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::RootProtected {
                 path: from.to_string(),
-                reason: "the mounted root cannot be renamed".into(),
             });
         }
         if to.as_str() == "/" {
-            return Err(VfsError::PermissionDenied {
-                path: from.to_string(),
-                reason: "a path cannot be renamed onto the mounted root".into(),
+            return Err(VfsError::RootProtected {
+                path: to.to_string(),
             });
         }
         if to.as_str().starts_with(&format!("{}/", from.as_str())) {
@@ -426,6 +448,6 @@ impl VfsAccess for RealAccess {
             });
         }
         create_parent(&real_to, to)?;
-        atomic_write(&real_to, &bytes)
+        atomic_write(&real_to, to, &bytes)
     }
 }

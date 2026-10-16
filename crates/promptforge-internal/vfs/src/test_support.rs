@@ -23,6 +23,7 @@ pub(crate) enum Call {
 }
 
 type AcquireGate = dyn Fn(&AcquireContext) -> Result<(), VfsError> + Send + Sync;
+type ReleaseGate = dyn Fn(ExecId) -> Result<(), VfsError> + Send + Sync;
 type RemoveOverride = dyn Fn(&VfsPath, bool) -> Result<(), VfsError> + Send + Sync;
 type CallLog = Arc<Mutex<Vec<Call>>>;
 
@@ -36,6 +37,7 @@ pub(crate) struct TestFs {
     calls: CallLog,
     read_only: bool,
     on_acquire: Option<Arc<AcquireGate>>,
+    on_release: Option<Arc<ReleaseGate>>,
     on_remove: Option<Arc<RemoveOverride>>,
 }
 
@@ -69,6 +71,17 @@ impl TestFs {
         gate: impl Fn(&AcquireContext) -> Result<(), VfsError> + Send + Sync + 'static,
     ) -> TestFs {
         self.on_acquire = Some(Arc::new(gate));
+        self
+    }
+
+    /// Runs `gate` after each release reaches storage: an error is the
+    /// release's failure.
+    #[track_caller]
+    pub(crate) fn on_release(
+        mut self,
+        gate: impl Fn(ExecId) -> Result<(), VfsError> + Send + Sync + 'static,
+    ) -> TestFs {
+        self.on_release = Some(Arc::new(gate));
         self
     }
 
@@ -132,7 +145,11 @@ impl Vfs for TestFs {
 
     fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
         lock(&self.calls).push(Call::Release(id));
-        self.memory.release(id)
+        self.memory.release(id)?;
+        match &self.on_release {
+            Some(gate) => gate(id),
+            None => Ok(()),
+        }
     }
 
     fn read_only(&self) -> bool {

@@ -38,7 +38,7 @@ pub fn scope_handle(access: &Access) -> ScopeHandle {
 /// Ends the scope behind `scope`: its claims stop conflicting at once,
 /// and every access still held in it - a store view the caller kept past the
 /// run, a forwarded mount session - refuses its next operation, spawn,
-/// or store view with [`VfsError::PermissionDenied`]. Idempotent, and a
+/// or store view with [`VfsError::ScopeEnded`]. Idempotent, and a
 /// no-op once every access in the scope has dropped.
 pub fn end_scope(scope: &ScopeHandle) {
     if let Some(scope) = scope.0.upgrade() {
@@ -54,8 +54,8 @@ pub fn end_scope(scope: &ScopeHandle) {
 /// rules, and reports error paths as the caller supplied them.
 ///
 /// # Errors
-/// Returns an error when the handle the chain's access came from
-/// declares no store.
+/// Returns [`VfsError::NoStore`] when the handle the chain's access came
+/// from declares no store.
 pub fn store_view(access: &Access) -> Result<Access, VfsError> {
     access.store_view()
 }
@@ -67,8 +67,8 @@ pub fn store_view(access: &Access) -> Result<Access, VfsError> {
 /// lazily still runs.
 ///
 /// # Errors
-/// Returns an error when the handle declares no store, or when the
-/// store backend refuses the session or fails the stat.
+/// Returns [`VfsError::NoStore`] when the handle declares no store, or
+/// an error when the store backend refuses the session or fails the stat.
 pub fn probe_store(access: &Access) -> Result<(), VfsError> {
     access.store_view()?.probe_root()
 }
@@ -109,7 +109,7 @@ pub fn access_join(owner: &Access, child: ExecId) {
 /// when `owner` is `Some`, and drops its seen snapshot. Every access
 /// still holding `child` - the tool's own, a store view derived from it -
 /// refuses its next operation, spawn, or store view with
-/// [`VfsError::PermissionDenied`] while the scope stays open. A no-op
+/// [`VfsError::ScopeEnded`] while the scope stays open. A no-op
 /// once every access in the scope has dropped.
 pub fn end_access(scope: &ScopeHandle, owner: Option<ExecId>, child: ExecId) {
     if let Some(scope) = scope.0.upgrade() {

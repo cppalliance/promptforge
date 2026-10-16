@@ -7,7 +7,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use super::region::{may_create, parent_of, pattern_matches_path, subtree_covers};
-use super::scope::{Scope, ScopeId, View};
+use super::scope::{Clock, Scope, ScopeId, View};
 use crate::error::VfsError;
 use crate::path::VfsPath;
 use crate::traits::ExecId;
@@ -33,7 +33,7 @@ impl fmt::Display for ClaimKind {
 #[derive(Clone, Copy)]
 pub(super) struct Epoch {
     pub(super) id: ExecId,
-    pub(super) clock: u64,
+    pub(super) clock: Clock,
 }
 
 /// The bookkeeping of who touched what, shared by every scope of one
@@ -56,9 +56,9 @@ pub(super) struct RegionClaims {
     /// The last write epoch and its scope.
     pub(super) write: Option<(ScopeId, Epoch)>,
     /// Read epochs: the latest per identity, tagged by scope.
-    pub(super) reads: HashMap<ExecId, (ScopeId, u64)>,
+    pub(super) reads: HashMap<ExecId, (ScopeId, Clock)>,
     /// May-create write epochs: the latest per identity, tagged by scope.
-    pub(super) created: HashMap<ExecId, (ScopeId, u64)>,
+    pub(super) created: HashMap<ExecId, (ScopeId, Clock)>,
 }
 
 pub(super) struct ClaimsTables {
@@ -104,7 +104,7 @@ impl ClaimsTables {
         view: &View,
         other_scope: ScopeId,
         other: ExecId,
-        other_clock: u64,
+        other_clock: Clock,
     ) -> bool {
         if other_scope == scope.id {
             return other_clock > view.seen_clock(other);

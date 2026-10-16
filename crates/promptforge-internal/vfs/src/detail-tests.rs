@@ -28,16 +28,18 @@ fn an_ended_scope_refuses_spawns_views_and_arm_operations_and_frees_its_claims()
     let arm = access_spawn(&access, Origin::new("arm"))?;
     end_scope(&scope_handle(&access));
     let ended = |result: Result<Access, VfsError>| match result {
-        Err(VfsError::PermissionDenied { reason, .. }) => {
-            assert!(reason.contains("has ended"), "{reason}");
-        }
+        Err(VfsError::ScopeEnded { path }) => assert_eq!(path, "/"),
         other => panic!("expected an ended-run refusal, got {other:?}"),
     };
     ended(access_spawn(&access, Origin::new("late arm")));
     ended(store_view(&access));
     ended(store_view(&arm));
     match arm.read("/my/store/a.txt") {
-        Err(VfsError::PermissionDenied { path, .. }) => assert_eq!(path, "/my/store/a.txt"),
+        Err(VfsError::ScopeEnded { path }) => assert_eq!(path, "/my/store/a.txt"),
+        other => panic!("expected an ended-run refusal, got {other:?}"),
+    }
+    match view.read("a.txt") {
+        Err(VfsError::ScopeEnded { path }) => assert_eq!(path, "a.txt", "the logical path"),
         other => panic!("expected an ended-run refusal, got {other:?}"),
     }
     // Another scope writes the path at once: the ended scope's claim
@@ -68,6 +70,13 @@ fn each_strict_path_rule_is_reported_in_check_order() {
         ("dir/nul.txt", PathReason::ReservedName),
         ("com1", PathReason::ReservedName),
         ("LPT9.log", PathReason::ReservedName),
+        ("COM0", PathReason::ReservedName),
+        ("lpt0.txt", PathReason::ReservedName),
+        ("COM\u{b9}", PathReason::ReservedName),
+        ("dir/lpt\u{b2}.log", PathReason::ReservedName),
+        ("LPT\u{b3}", PathReason::ReservedName),
+        ("a:b.txt", PathReason::ReservedName),
+        ("C:", PathReason::ReservedName),
     ] {
         match view.read(path) {
             Err(VfsError::InvalidPath {
@@ -102,6 +111,8 @@ fn the_path_length_ceiling_is_1024_bytes() -> Result<(), VfsError> {
     // Names that merely contain a device substring are allowed.
     view.write("console.txt", b"ok")?;
     view.write("com10.txt", b"ok")?;
+    view.write("com\u{b9}0.txt", b"ok")?;
+    view.write("lpt\u{2074}.txt", b"ok")?;
     Ok(())
 }
 
@@ -175,16 +186,13 @@ fn a_read_only_store_reports_its_denial_in_the_callers_relative_form() {
     // The router refuses before the backend, naming the canonical
     // path; both spellings come back in the logical form.
     for (path, expected) in [("x.md", "x.md"), ("my/store/x.md", "my/store/x.md")] {
-        match view.write(path, b"denied") {
-            Err(VfsError::PermissionDenied { path, reason }) => {
-                assert_eq!(path, expected);
-                assert!(
-                    reason.contains(&format!("so {expected} cannot")),
-                    "{reason}"
-                );
-            }
-            other => panic!("expected a read-only denial for {path:?}, got {other:?}"),
-        }
+        assert_eq!(
+            view.write(path, b"denied"),
+            Err(VfsError::ReadOnly {
+                path: expected.to_owned(),
+            }),
+            "{path:?}"
+        );
     }
 }
 
@@ -344,12 +352,10 @@ fn the_outermost_declaration_counts() -> Result<(), VfsError> {
     // itself: the mounting handle declares no store, so no view.
     let inner = VfsRef::builder().store("/s", MemoryBackend::new()).build();
     let outer = VfsRef::builder().mount("/inner", inner).build();
-    match store_view(&access(&outer)?) {
-        Err(VfsError::Unsupported { detail, .. }) => {
-            assert!(detail.contains("no store"), "{detail}");
-        }
-        other => panic!("expected no declared store, got {other:?}"),
-    }
+    assert!(matches!(
+        store_view(&access(&outer)?),
+        Err(VfsError::NoStore)
+    ));
 
     // The outer builder's own declaration is the one the view uses.
     let inner = VfsRef::builder().store("/s", MemoryBackend::new()).build();
@@ -396,14 +402,12 @@ fn acquire_store_applies_the_strict_path_rules() -> Result<(), VfsError> {
 }
 
 #[test]
-fn acquire_store_on_a_handle_without_a_store_is_unsupported() {
+fn acquire_store_on_a_handle_without_a_store_is_refused_as_no_store() {
     let vfs = VfsRef::builder().mount("/", MemoryBackend::new()).build();
-    match vfs.acquire_store(Origin::new("acquire_store test")) {
-        Err(VfsError::Unsupported { detail, .. }) => {
-            assert!(detail.contains("no store"), "{detail}");
-        }
-        other => panic!("expected no declared store, got {other:?}"),
-    }
+    assert!(matches!(
+        vfs.acquire_store(Origin::new("acquire_store test")),
+        Err(VfsError::NoStore)
+    ));
 }
 
 #[test]

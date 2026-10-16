@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::claims::{ClaimsTables, Epoch, PRUNE_AT, RegionClaims};
-use super::scope::{ScopeId, View};
+use super::scope::{Clock, ScopeId, View};
 use crate::path::VfsPath;
 use crate::traits::ExecId;
 
@@ -123,7 +123,7 @@ fn prune_ordered_epochs(tables: &mut ClaimsTables) {
         if let Some((scope_id, epoch)) = &mut region.write
             && ordered_before_everyone(*scope_id, *epoch)
         {
-            epoch.clock = 0;
+            epoch.clock = Clock::ZERO;
         }
         collapse_ordered(&mut region.reads, &ordered_before_everyone);
         collapse_ordered(&mut region.created, &ordered_before_everyone);
@@ -148,7 +148,7 @@ fn prune_ordered_epochs(tables: &mut ClaimsTables) {
 /// per-identity counters, so that identity is not necessarily the most
 /// recent.
 fn collapse_ordered(
-    epochs: &mut HashMap<ExecId, (ScopeId, u64)>,
+    epochs: &mut HashMap<ExecId, (ScopeId, Clock)>,
     ordered: &impl Fn(ScopeId, Epoch) -> bool,
 ) {
     let mut kept: HashMap<ScopeId, Epoch> = HashMap::new();
@@ -164,6 +164,6 @@ fn collapse_ordered(
         false
     });
     for (scope_id, epoch) in kept {
-        epochs.insert(epoch.id, (scope_id, 0));
+        epochs.insert(epoch.id, (scope_id, Clock::ZERO));
     }
 }

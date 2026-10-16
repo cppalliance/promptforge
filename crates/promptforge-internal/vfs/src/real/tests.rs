@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::files::atomic_write;
-use super::resolve::identity_to_virtual;
-use super::{RealBackend, map_io};
+use super::{RealBackend, Writability, map_io};
 use crate::error::VfsError;
 use crate::stat::FileType;
 use crate::test_support::{context, path};
@@ -116,11 +115,13 @@ fn a_rooted_backend_round_trips_files_and_directories() -> Result<(), VfsError> 
         access.glob("/a/**/*.txt")?,
         vec!["/a/b/g.txt".to_owned(), "/a/c/h.txt".to_owned()]
     );
-    // The mounted root itself cannot be removed.
-    assert!(matches!(
-        access.remove(&path("/")?, true),
-        Err(VfsError::PermissionDenied { .. })
-    ));
+    // The mounted root itself cannot be removed, renamed, or replaced.
+    let root = || VfsError::RootProtected {
+        path: "/".to_owned(),
+    };
+    assert_eq!(access.remove(&path("/")?, true), Err(root()));
+    assert_eq!(access.rename(&path("/")?, &path("/b")?), Err(root()));
+    assert_eq!(access.rename(&path("/a")?, &path("/")?), Err(root()));
     access.remove(&path("/a")?, true)?;
     assert!(!access.exists(&path("/a")?)?);
     Ok(())
@@ -131,7 +132,7 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
     let temp = TempRoot::new("a_read_only_backend_rejects_every_mutation_but_serves_reads");
     fs::write(temp.path().join("keep.txt"), b"keep")
         .map_err(|err| map_io("seeding the kept file", &err))?;
-    let mut backend = RealBackend::rooted(temp.path())?.with_read_only(true);
+    let mut backend = RealBackend::rooted(temp.path())?.with_writability(Writability::ReadOnly);
     assert!(Vfs::read_only(&backend));
     let mut access = backend.acquire(&context())?;
     assert_eq!(access.read(&path("/keep.txt")?)?, b"keep");
@@ -147,8 +148,8 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
         access.copy(&path("/keep.txt")?, &path("/copy.txt")?),
     ] {
         assert!(
-            matches!(result, Err(VfsError::PermissionDenied { .. })),
-            "expected a read-only denial, got {result:?}"
+            matches!(result, Err(VfsError::ReadOnly { .. })),
+            "expected a read-only refusal, got {result:?}"
         );
     }
     assert_eq!(access.read(&path("/keep.txt")?)?, b"keep");
@@ -160,7 +161,7 @@ fn a_read_only_backend_rejects_every_mutation_but_serves_reads() -> Result<(), V
 fn an_identity_backend_maps_virtual_paths_directly_to_real_paths() -> Result<(), VfsError> {
     let temp = TempRoot::new("an_identity_backend_maps_virtual_paths_directly_to_real_paths");
     let real_file = temp.path().join("identity.txt");
-    let virtual_spelling = identity_to_virtual(&real_file);
+    let virtual_spelling = identity_spelling(&real_file);
     let mut backend = RealBackend::identity();
     let mut access = backend.acquire(&context())?;
     access.write(&path(&virtual_spelling)?, b"direct")?;
@@ -238,15 +239,91 @@ fn map_io_reports_the_canonical_path_not_the_os_sentence() {
             "the OS detail must not crowd out the path"
         );
     }
-    // PermissionDenied keeps the OS text beside the path, in its
-    // reason field.
-    match map_io("/x", &std::io::Error::from(ErrorKind::PermissionDenied)) {
-        VfsError::PermissionDenied { path, reason } => {
+    // Any other failure, a denied permission included, keeps its kind,
+    // its OS error code, and the OS text beside the path.
+    let access_denied = if cfg!(windows) { 5 } else { 13 };
+    match map_io("/x", &std::io::Error::from_raw_os_error(access_denied)) {
+        VfsError::Io {
+            path,
+            kind,
+            raw_os_error,
+            message,
+        } => {
             assert_eq!(path, "/x");
-            assert!(reason.contains("/x"), "{reason}");
+            assert_eq!(kind, ErrorKind::PermissionDenied);
+            assert_eq!(raw_os_error, Some(access_denied));
+            assert!(!message.is_empty());
         }
-        other => panic!("expected a permission denial, got {other:?}"),
+        other => panic!("expected an I/O failure, got {other:?}"),
     }
+    match map_io("/x", &std::io::Error::from(ErrorKind::TimedOut)) {
+        VfsError::Io {
+            kind, raw_os_error, ..
+        } => assert_eq!((kind, raw_os_error), (ErrorKind::TimedOut, None)),
+        other => panic!("expected an I/O failure, got {other:?}"),
+    }
+}
+
+/// The identity-mode virtual spelling of a real path: forward slashes,
+/// and a leading slash before a Windows drive letter.
+fn identity_spelling(real: &Path) -> String {
+    let spelled = real
+        .to_str()
+        .expect("the temp directory's path is UTF-8")
+        .replace('\\', "/");
+    if spelled.as_bytes().get(1) == Some(&b':') {
+        format!("/{spelled}")
+    } else {
+        spelled
+    }
+}
+
+/// A real file name that is not UTF-8: `b`, an unpaired surrogate, `d`.
+#[cfg(windows)]
+fn non_utf8_name() -> std::ffi::OsString {
+    use std::os::windows::ffi::OsStringExt;
+    std::ffi::OsString::from_wide(&[u16::from(b'b'), 0xd800, u16::from(b'd')])
+}
+
+/// A real file name that is not UTF-8: `b`, a lone continuation byte, `d`.
+#[cfg(unix)]
+fn non_utf8_name() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::OsStr::from_bytes(b"b\x80d").to_owned()
+}
+
+#[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS file systems refuse names that are not UTF-8"
+)]
+fn a_real_name_that_is_not_utf8_is_refused_with_its_offset() -> Result<(), VfsError> {
+    let temp = TempRoot::new("a_real_name_that_is_not_utf8_is_refused_with_its_offset");
+    let dir = temp.path().join("dir");
+    fs::create_dir(&dir).map_err(|err| map_io("creating the directory", &err))?;
+    fs::write(dir.join(non_utf8_name()), b"x")
+        .map_err(|err| map_io("seeding the non-UTF-8 name", &err))?;
+    let access = rooted_access(temp.path())?;
+    let refused = || VfsError::NotUtf8 {
+        path: "/dir".to_owned(),
+        valid_up_to: 1,
+    };
+    assert_eq!(access.list(&path("/dir")?), Err(refused()));
+    assert_eq!(access.glob("/dir/*"), Err(refused()));
+    assert_eq!(access.glob("/**"), Err(refused()));
+    let named = dir.join(non_utf8_name());
+    fs::remove_file(&named).map_err(|err| map_io("removing the name", &err))?;
+    fs::create_dir(&named).map_err(|err| map_io("creating the directory", &err))?;
+    // A root that is not UTF-8 is refused with the part that is.
+    let utf8_part = format!("{}/b", identity_spelling(&dir).trim_start_matches('/'));
+    match RealBackend::rooted(&named) {
+        Err(VfsError::NotUtf8 { path, valid_up_to }) => {
+            assert!(path.replace('\\', "/").ends_with(&utf8_part), "{path}");
+            assert_eq!(valid_up_to, path.len());
+        }
+        other => panic!("a root that is not UTF-8 must be refused, got {other:?}"),
+    }
+    Ok(())
 }
 
 #[test]
@@ -266,7 +343,12 @@ fn an_atomic_write_addressing_only_a_root_is_a_backend_failure() {
     // A destination without a parent or a file name names nothing
     // below the root; it is a backend impossibility, not a path rule
     // a caller broke, so it must not render as "path is empty".
-    let err = atomic_write(Path::new("/"), b"x").unwrap_err();
+    let err = atomic_write(
+        Path::new("/"),
+        &path("/").expect("the root is canonical"),
+        b"x",
+    )
+    .unwrap_err();
     assert!(
         matches!(err, VfsError::Backend { .. }),
         "a root-only destination is not a path-validation failure: {err:?}"

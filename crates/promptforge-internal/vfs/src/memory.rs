@@ -91,22 +91,10 @@ impl Tree {
     /// mtime would be nondeterministic.
     fn stat_of(&self, path: &str) -> Option<Stat> {
         if let Some(bytes) = self.files.get(path) {
-            return Some(Stat {
-                file_type: FileType::File,
-                size: bytes.len() as u64,
-                mode: None,
-                modified: None,
-                created: None,
-            });
+            return Some(Stat::new(FileType::File, bytes.len() as u64));
         }
         if self.dirs.contains(path) {
-            return Some(Stat {
-                file_type: FileType::Directory,
-                size: 0,
-                mode: None,
-                modified: None,
-                created: None,
-            });
+            return Some(Stat::new(FileType::Directory, 0));
         }
         None
     }
@@ -237,9 +225,8 @@ impl VfsAccess for MemoryAccess {
             });
         }
         if key == "/" {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::RootProtected {
                 path: path.to_string(),
-                reason: "the namespace root cannot be removed".into(),
             });
         }
         if tree.has_children(key) && !recursive {
@@ -304,11 +291,7 @@ impl VfsAccess for MemoryAccess {
             let Some(stat) = tree.stat_of(&full) else {
                 continue; // unreachable: children() only yields existing paths
             };
-            entries.push(Entry {
-                name,
-                stat,
-                description: None,
-            });
+            entries.push(Entry::new(name, stat));
         }
         Ok(entries)
     }
@@ -359,9 +342,8 @@ impl VfsAccess for MemoryAccess {
         let source = from.as_str();
         let dest = to.as_str();
         if source == "/" {
-            return Err(VfsError::PermissionDenied {
+            return Err(VfsError::RootProtected {
                 path: source.to_owned(),
-                reason: "the namespace root cannot be renamed".into(),
             });
         }
         if dest.starts_with(&format!("{source}/")) {
@@ -385,9 +367,8 @@ impl VfsAccess for MemoryAccess {
         // A directory moves with its whole subtree. Validation finishes
         // before any mutation, so a failed rename changes nothing.
         if dest == "/" {
-            return Err(VfsError::PermissionDenied {
-                path: source.to_owned(),
-                reason: "a directory cannot be renamed onto the namespace root".into(),
+            return Err(VfsError::RootProtected {
+                path: dest.to_owned(),
             });
         }
         if tree.files.contains_key(dest) {

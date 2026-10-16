@@ -117,10 +117,17 @@ fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
         Case {
             error: VfsError::NotUtf8 {
                 path: "a.bin".to_owned(),
+                valid_up_to: 4,
             },
             reason: "not_utf8",
-            fields: path_field("a.bin"),
-            message: "file in store is not UTF-8: a.bin",
+            fields: vec![
+                (
+                    "path".to_owned(),
+                    crate::ErrorField::String("a.bin".to_owned()),
+                ),
+                ("valid_up_to".to_owned(), crate::ErrorField::Integer(4)),
+            ],
+            message: "file in store is not UTF-8 after byte 4: a.bin",
         },
         Case {
             error: VfsError::IsADirectory {
@@ -162,6 +169,75 @@ fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
             reason: "permission_denied",
             fields: path_field("d"),
             message: "permission denied for store path d: read-only mount",
+        },
+        Case {
+            error: VfsError::ApprovalRequired {
+                path: "d".to_owned(),
+                reason: "ask first".to_owned(),
+            },
+            reason: "approval_required",
+            fields: path_field("d"),
+            message: "store path d needs approval, which this run cannot give: ask first",
+        },
+        Case {
+            error: VfsError::ScopeEnded {
+                path: "d".to_owned(),
+            },
+            reason: "scope_ended",
+            fields: path_field("d"),
+            message: "store access ended: the run or tool call that owned it has ended, so d \
+                      can no longer be touched through it",
+        },
+        Case {
+            error: VfsError::ReadOnly {
+                path: "d".to_owned(),
+            },
+            reason: "read_only",
+            fields: path_field("d"),
+            message: "store path is read-only: d",
+        },
+        Case {
+            error: VfsError::OutsideRoot {
+                path: "d".to_owned(),
+                detail: "d escapes the mounted root".to_owned(),
+            },
+            reason: "outside_root",
+            fields: path_field("d"),
+            message: "store path d is outside the mounted root: d escapes the mounted root",
+        },
+        Case {
+            error: VfsError::RootProtected {
+                path: "d".to_owned(),
+            },
+            reason: "root_protected",
+            fields: path_field("d"),
+            message: "the store's mounted root cannot be removed, renamed, or replaced: d",
+        },
+        Case {
+            error: VfsError::NoStore,
+            reason: "no_store",
+            fields: Vec::new(),
+            message: "no store is declared, so no store operation can run",
+        },
+        Case {
+            error: VfsError::CrossMount {
+                path: "d".to_owned(),
+                detail: "rename needs one mount".to_owned(),
+            },
+            reason: "cross_mount",
+            fields: path_field("d"),
+            message: "store operation on d spans two mounts: rename needs one mount",
+        },
+        Case {
+            error: VfsError::Io {
+                path: "d".to_owned(),
+                kind: std::io::ErrorKind::PermissionDenied,
+                raw_os_error: Some(13),
+                message: "access is denied".to_owned(),
+            },
+            reason: "io",
+            fields: path_field("d"),
+            message: "store I/O failure on d: access is denied",
         },
         Case {
             error: VfsError::Unsupported {

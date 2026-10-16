@@ -251,3 +251,103 @@ fn a_poisoned_model_set_maps_to_a_lua_error_and_never_a_completion_error() {
     );
     assert!(!crate::RunError::from(error).is_retryable());
 }
+
+#[test]
+fn every_store_failure_rebuilds_from_its_raised_table_under_its_own_tag() {
+    use promptforge_vfs::{PathReason, VfsError};
+    let path = || "notes.md".to_owned();
+    let failures = [
+        VfsError::NotFound { path: path() },
+        VfsError::AlreadyExists { path: path() },
+        VfsError::NotADirectory { path: path() },
+        VfsError::IsADirectory { path: path() },
+        VfsError::DirectoryNotEmpty { path: path() },
+        VfsError::NotUtf8 {
+            path: path(),
+            valid_up_to: 7,
+        },
+        VfsError::InvalidPath {
+            path: path(),
+            reason: PathReason::Traversal,
+        },
+        VfsError::InvalidRange {
+            path: path(),
+            reason: "the bounds are invalid",
+        },
+        VfsError::Anchor {
+            path: path(),
+            anchor: "TODO".to_owned(),
+            count: 2,
+        },
+        VfsError::PermissionDenied {
+            path: path(),
+            reason: "denied".to_owned(),
+        },
+        VfsError::ApprovalRequired {
+            path: path(),
+            reason: "ask".to_owned(),
+        },
+        VfsError::ScopeEnded { path: path() },
+        VfsError::ReadOnly { path: path() },
+        VfsError::OutsideRoot {
+            path: path(),
+            detail: "escapes".to_owned(),
+        },
+        VfsError::RootProtected { path: path() },
+        VfsError::NoStore,
+        VfsError::CrossMount {
+            path: path(),
+            detail: "two mounts".to_owned(),
+        },
+        VfsError::Io {
+            path: path(),
+            kind: std::io::ErrorKind::PermissionDenied,
+            raw_os_error: Some(13),
+            message: "denied".to_owned(),
+        },
+        VfsError::Unsupported {
+            path: path(),
+            detail: "no".to_owned(),
+        },
+        VfsError::Conflict {
+            path: path(),
+            detail: "raced".to_owned(),
+        },
+        VfsError::Backend {
+            message: "gone".to_owned(),
+        },
+    ];
+    for failure in failures {
+        let raised = promptforge_lua::Raised {
+            kind: promptforge_lua::ErrorKind::Store,
+            message: failure.to_string(),
+            fields: promptforge_lua::store_error_value_fields(&failure)
+                .into_iter()
+                .collect(),
+        };
+        let Error::Store { source, .. } = Error::from(LuaError::Raised(raised)) else {
+            panic!("a raised store table maps to a store error: {failure:?}");
+        };
+        assert_eq!(source.tag(), failure.tag(), "{failure:?}");
+        match (&source, &failure) {
+            (
+                VfsError::NotUtf8 { valid_up_to, .. },
+                VfsError::NotUtf8 {
+                    valid_up_to: raised_offset,
+                    ..
+                },
+            ) => assert_eq!(valid_up_to, raised_offset, "the offset survives"),
+            (
+                VfsError::Io {
+                    kind, raw_os_error, ..
+                },
+                _,
+            ) => assert_eq!(
+                (*kind, *raw_os_error),
+                (std::io::ErrorKind::Other, None),
+                "a table holds no I/O kind or OS code"
+            ),
+            _ => {}
+        }
+    }
+}

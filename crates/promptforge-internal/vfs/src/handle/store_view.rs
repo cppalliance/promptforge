@@ -54,6 +54,11 @@ pub(super) fn validate_store_path(raw: &str) -> Result<(), VfsError> {
     if raw.contains('\\') {
         return reject(PathReason::Backslash);
     }
+    // A colon names a drive or an alternate data stream on Windows, so
+    // the stored file would not be the one named.
+    if raw.contains(':') {
+        return reject(PathReason::ReservedName);
+    }
     for segment in raw.split('/') {
         if segment.is_empty() {
             return reject(PathReason::EmptySegment);
@@ -85,11 +90,16 @@ fn is_reserved_device_name(segment: &str) -> bool {
         || is_numbered_device(&upper, "LPT")
 }
 
-/// Whether `name` is `<prefix>N` for a single digit `1..=9`.
+/// Whether `name` is `<prefix>N` for one device digit: `0` through `9`,
+/// or the superscript `¹`, `²`, or `³`, which Windows also reserves.
 fn is_numbered_device(name: &str, prefix: &str) -> bool {
-    name.strip_prefix(prefix)
-        .and_then(|rest| rest.parse::<u8>().ok().filter(|_| rest.len() == 1))
-        .is_some_and(|n| (1..=9).contains(&n))
+    name.strip_prefix(prefix).is_some_and(|rest| {
+        let mut digits = rest.chars();
+        matches!(
+            (digits.next(), digits.next()),
+            (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+        )
+    })
 }
 
 /// Re-spells an error's canonical paths for a store view's caller: a
@@ -127,8 +137,9 @@ fn respell_error(err: VfsError, logical: impl Fn(&str) -> String) -> VfsError {
         VfsError::DirectoryNotEmpty { path } => VfsError::DirectoryNotEmpty {
             path: logical(&path),
         },
-        VfsError::NotUtf8 { path } => VfsError::NotUtf8 {
+        VfsError::NotUtf8 { path, valid_up_to } => VfsError::NotUtf8 {
             path: logical(&path),
+            valid_up_to,
         },
         VfsError::InvalidPath { path, reason } => VfsError::InvalidPath {
             path: logical(&path),
@@ -151,6 +162,39 @@ fn respell_error(err: VfsError, logical: impl Fn(&str) -> String) -> VfsError {
             reason: reason.replace(&path, &logical(&path)),
             path: logical(&path),
         },
+        VfsError::ApprovalRequired { path, reason } => VfsError::ApprovalRequired {
+            reason: reason.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::ScopeEnded { path } => VfsError::ScopeEnded {
+            path: logical(&path),
+        },
+        VfsError::ReadOnly { path } => VfsError::ReadOnly {
+            path: logical(&path),
+        },
+        VfsError::OutsideRoot { path, detail } => VfsError::OutsideRoot {
+            detail: detail.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::RootProtected { path } => VfsError::RootProtected {
+            path: logical(&path),
+        },
+        VfsError::NoStore => VfsError::NoStore,
+        VfsError::CrossMount { path, detail } => VfsError::CrossMount {
+            detail: detail.replace(&path, &logical(&path)),
+            path: logical(&path),
+        },
+        VfsError::Io {
+            path,
+            kind,
+            raw_os_error,
+            message,
+        } => VfsError::Io {
+            path: logical(&path),
+            kind,
+            raw_os_error,
+            message,
+        },
         VfsError::Unsupported { path, detail } => VfsError::Unsupported {
             detail: detail.replace(&path, &logical(&path)),
             path: logical(&path),
@@ -172,18 +216,15 @@ impl Access {
     /// Crate-internal: backs [`crate::detail::store_view`].
     ///
     /// # Errors
-    /// Returns an error when the handle declares no store, or
-    /// [`VfsError::PermissionDenied`], before any backend call, when the
-    /// run or the tool call that owned this access has ended.
+    /// Returns [`VfsError::NoStore`] when the handle declares no store,
+    /// or [`VfsError::ScopeEnded`], before any backend call, when the run
+    /// or the tool call that owned this access has ended.
     pub(crate) fn store_view(&self) -> Result<Access, VfsError> {
         self.scope
             .refuse_if_closed(&self.root)
             .map_err(|err| self.relativize(err))?;
         let Some(store) = &self.volume.store else {
-            return Err(VfsError::Unsupported {
-                path: self.root.to_string(),
-                detail: "the handle declares no store".to_owned(),
-            });
+            return Err(VfsError::NoStore);
         };
         // One mount - the store's own - behind a fresh router:
         // operations are confined to the store mount, so a store at
@@ -219,6 +260,7 @@ impl Access {
                 claims: Arc::clone(&self.volume.claims),
                 sink: self.volume.sink.clone(),
                 store: None,
+                folds: store.folds.clone(),
             }),
             policy: Arc::clone(&self.policy),
             scope: Arc::clone(&self.scope),
@@ -226,6 +268,7 @@ impl Access {
                 root: store.root.as_str().to_owned(),
                 inner,
             })),
+            released: false,
         })
     }
 

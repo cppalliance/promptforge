@@ -4,111 +4,10 @@
 
 use std::fmt;
 
-/// Why a path or glob pattern was rejected before any backend saw it.
-///
-/// Every [`VfsError::InvalidPath`] carries one. Store operations validate
-/// each path and report the first nine reasons. Only glob and rename
-/// operations report the last two: [`PathReason::Wildcard`] for a glob
-/// pattern whose wildcard grammar is invalid, and
-/// [`PathReason::IntoDescendant`] for a rename into the source's own
-/// descendant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PathReason {
-    /// The path was empty or contained only separators.
-    Empty,
-    /// The path began with `/`, so it addressed outside the run's namespace.
-    Absolute,
-    /// The path contained a `.` (current directory) or `..` (parent
-    /// directory) segment.
-    Traversal,
-    /// The path contained a control character (below `0x20`, or `0x7f`).
-    Control,
-    /// The path contained an empty segment (a `//` run, or a trailing `/`).
-    EmptySegment,
-    /// The path contained a backslash, which is ambiguous across backends (a
-    /// literal byte to one, a separator to another).
-    Backslash,
-    /// A segment was a platform-reserved device name (for example `CON`,
-    /// `NUL`, `COM1`), which some backends treat as the device itself.
-    ReservedName,
-    /// A segment ended in a byte some backends silently strip (a trailing `.`
-    /// or space), so the stored name would differ from the name supplied.
-    UnsafeSuffix,
-    /// The path exceeded the maximum supported length in bytes.
-    TooLong,
-    /// The wildcard grammar of a glob pattern is invalid: a run of three or
-    /// more `*`, or a `**` that shares its path segment with other characters.
-    Wildcard,
-    /// A rename named a destination inside the source's own subtree.
-    IntoDescendant,
-}
+#[path = "error-reason.rs"]
+mod reason;
 
-impl PathReason {
-    /// Returns the short tag for this reason, such as `empty` or `too_long`.
-    ///
-    /// A store error value holds this tag in its `rule` field.
-    /// [`PathReason::from_tag`] parses the same word back, so the two
-    /// round-trip.
-    #[must_use]
-    pub fn tag(self) -> &'static str {
-        match self {
-            PathReason::Empty => "empty",
-            PathReason::Absolute => "absolute",
-            PathReason::Traversal => "traversal",
-            PathReason::Control => "control",
-            PathReason::EmptySegment => "empty_segment",
-            PathReason::Backslash => "backslash",
-            PathReason::ReservedName => "reserved_name",
-            PathReason::UnsafeSuffix => "unsafe_suffix",
-            PathReason::TooLong => "too_long",
-            PathReason::Wildcard => "wildcard",
-            PathReason::IntoDescendant => "into_descendant",
-        }
-    }
-
-    /// Parses a tag from [`PathReason::tag`] back into its reason.
-    ///
-    /// Returns `None` for any other string.
-    #[must_use]
-    pub fn from_tag(tag: &str) -> Option<PathReason> {
-        match tag {
-            "empty" => Some(PathReason::Empty),
-            "absolute" => Some(PathReason::Absolute),
-            "traversal" => Some(PathReason::Traversal),
-            "control" => Some(PathReason::Control),
-            "empty_segment" => Some(PathReason::EmptySegment),
-            "backslash" => Some(PathReason::Backslash),
-            "reserved_name" => Some(PathReason::ReservedName),
-            "unsafe_suffix" => Some(PathReason::UnsafeSuffix),
-            "too_long" => Some(PathReason::TooLong),
-            "wildcard" => Some(PathReason::Wildcard),
-            "into_descendant" => Some(PathReason::IntoDescendant),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for PathReason {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let text = match self {
-            PathReason::Empty => "path is empty",
-            PathReason::Absolute => "path is absolute",
-            PathReason::Traversal => "path contains a traversal segment",
-            PathReason::Control => "path contains a control character",
-            PathReason::EmptySegment => "path contains an empty segment",
-            PathReason::Backslash => "path contains a backslash",
-            PathReason::ReservedName => "path contains a reserved device name",
-            PathReason::UnsafeSuffix => "path segment ends in an unsafe character",
-            PathReason::TooLong => "path is too long",
-            PathReason::Wildcard => "pattern contains invalid wildcard grammar",
-            PathReason::IntoDescendant => {
-                "a rename cannot move a directory into its own descendant"
-            }
-        };
-        formatter.write_str(text)
-    }
-}
+pub use reason::{ParsePathReasonError, PathReason};
 
 /// The single error type returned by every virtual filesystem operation.
 ///
@@ -148,10 +47,15 @@ pub enum VfsError {
         /// The canonical path of the directory that still has entries.
         path: String,
     },
-    /// Bytes that are invalid UTF-8 appeared where UTF-8 text was required.
+    /// Bytes that are invalid UTF-8 appeared where UTF-8 text was required:
+    /// in a file's contents, or in the name of a real file or directory.
     NotUtf8 {
-        /// The path of the file whose contents are invalid UTF-8.
+        /// The file whose contents are invalid UTF-8, or the directory
+        /// holding a name that is.
         path: String,
+        /// The length in bytes of the longest valid UTF-8 prefix of the
+        /// contents or the name.
+        valid_up_to: usize,
     },
     /// The path or glob pattern is malformed or escapes the namespace root.
     InvalidPath {
@@ -179,14 +83,66 @@ pub enum VfsError {
         /// and `2` or more when the edit would be ambiguous.
         count: usize,
     },
-    /// The operation was refused because a mount is read-only or a policy
-    /// denied it.
+    /// The handle's policy denied the operation.
     PermissionDenied {
         /// The canonical path the operation targeted.
         path: String,
-        /// Why the operation was refused: the policy's verdict text or the
-        /// mount's refusal, naming the rule that fired.
+        /// The policy's verdict text, naming the rule that fired.
         reason: String,
+    },
+    /// The handle's policy asked for the user's approval, which this layer
+    /// never grants, so the operation was refused.
+    ApprovalRequired {
+        /// The canonical path the operation targeted.
+        path: String,
+        /// The policy's approval text: what is asked and which rule fired.
+        reason: String,
+    },
+    /// The run or the tool call that owned the access has ended, so the
+    /// access refuses every later operation.
+    ScopeEnded {
+        /// The canonical path the operation targeted.
+        path: String,
+    },
+    /// The mount or backend that serves the path is read-only.
+    ReadOnly {
+        /// The canonical path the mutation targeted.
+        path: String,
+    },
+    /// A rooted backend refused a path that resolves outside its root
+    /// directory or passes through a dangling link.
+    OutsideRoot {
+        /// The canonical path the operation targeted.
+        path: String,
+        /// How the path left the root.
+        detail: String,
+    },
+    /// The operation would remove or rename the mounted root, or rename
+    /// a path onto it.
+    RootProtected {
+        /// The root the operation would have replaced or removed.
+        path: String,
+    },
+    /// A store view was requested from a handle that declares no store.
+    NoStore,
+    /// A two-path operation named paths that different mounts serve.
+    CrossMount {
+        /// The canonical source path.
+        path: String,
+        /// The operation and both paths.
+        detail: String,
+    },
+    /// An operating-system I/O call failed for a reason outside the
+    /// other variants.
+    Io {
+        /// The canonical path the operation targeted.
+        path: String,
+        /// The kind of the I/O failure.
+        kind: std::io::ErrorKind,
+        /// The operating system's error code, when it reported one.
+        raw_os_error: Option<i32>,
+        /// The operating system's description of the failure.
+        message: String,
     },
     /// The backend that serves the path lacks an implementation of the
     /// operation.
@@ -211,11 +167,46 @@ pub enum VfsError {
         /// both claim kinds.
         detail: String,
     },
-    /// The backend failed for a reason outside the other variants.
+    /// The backend failed for a reason outside the other variants and
+    /// outside any I/O call.
     Backend {
         /// The backend's own diagnosis.
         message: String,
     },
+}
+
+impl VfsError {
+    /// Returns the stable tag for this variant, such as `not_found` or
+    /// `read_only`.
+    ///
+    /// A store error value holds this tag in its `reason` field, so prompt
+    /// code branches on it.
+    #[must_use]
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::NotFound { .. } => "not_found",
+            Self::AlreadyExists { .. } => "already_exists",
+            Self::NotADirectory { .. } => "not_a_directory",
+            Self::IsADirectory { .. } => "is_a_directory",
+            Self::DirectoryNotEmpty { .. } => "directory_not_empty",
+            Self::NotUtf8 { .. } => "not_utf8",
+            Self::InvalidPath { .. } => "invalid_path",
+            Self::InvalidRange { .. } => "invalid_range",
+            Self::Anchor { .. } => "anchor",
+            Self::PermissionDenied { .. } => "permission_denied",
+            Self::ApprovalRequired { .. } => "approval_required",
+            Self::ScopeEnded { .. } => "scope_ended",
+            Self::ReadOnly { .. } => "read_only",
+            Self::OutsideRoot { .. } => "outside_root",
+            Self::RootProtected { .. } => "root_protected",
+            Self::NoStore => "no_store",
+            Self::CrossMount { .. } => "cross_mount",
+            Self::Io { .. } => "io",
+            Self::Unsupported { .. } => "unsupported",
+            Self::Conflict { .. } => "conflict",
+            Self::Backend { .. } => "backend",
+        }
+    }
 }
 
 impl fmt::Display for VfsError {
@@ -226,7 +217,9 @@ impl fmt::Display for VfsError {
             Self::NotADirectory { path } => write!(f, "not a directory: {path}"),
             Self::IsADirectory { path } => write!(f, "is a directory: {path}"),
             Self::DirectoryNotEmpty { path } => write!(f, "directory not empty: {path}"),
-            Self::NotUtf8 { path } => write!(f, "not UTF-8: {path}"),
+            Self::NotUtf8 { path, valid_up_to } => {
+                write!(f, "not UTF-8: {path}, valid up to byte {valid_up_to}")
+            }
             Self::InvalidPath { path, reason } => write!(f, "invalid path {path:?}: {reason}"),
             Self::InvalidRange { path, reason } => {
                 write!(f, "invalid line range for {path}: {reason}")
@@ -251,6 +244,23 @@ impl fmt::Display for VfsError {
                 }
             }
             Self::PermissionDenied { reason, .. } => write!(f, "permission denied: {reason}"),
+            Self::ApprovalRequired { reason, .. } => write!(f, "approval required: {reason}"),
+            Self::ScopeEnded { path } => write!(
+                f,
+                "access ended: the run or tool call that owned this access has ended, \
+                 so {path} can no longer be touched through it"
+            ),
+            Self::ReadOnly { path } => {
+                write!(f, "read-only: {path} is served read-only and cannot change")
+            }
+            Self::OutsideRoot { detail, .. } => write!(f, "outside the mounted root: {detail}"),
+            Self::RootProtected { path } => write!(
+                f,
+                "root protected: the mounted root {path} cannot be removed, renamed, or replaced"
+            ),
+            Self::NoStore => f.write_str("no store: the handle declares no store"),
+            Self::CrossMount { detail, .. } => write!(f, "across mounts: {detail}"),
+            Self::Io { path, message, .. } => write!(f, "I/O failure on {path}: {message}"),
             Self::Unsupported { detail, .. } => write!(f, "unsupported operation: {detail}"),
             Self::Conflict { detail, .. } => write!(f, "conflicting claim: {detail}"),
             Self::Backend { message } => write!(f, "backend failure: {message}"),
@@ -261,122 +271,5 @@ impl fmt::Display for VfsError {
 impl std::error::Error for VfsError {}
 
 #[cfg(test)]
-mod tests {
-    use super::{PathReason, VfsError};
-
-    #[test]
-    fn the_derives_hold_as_before() {
-        // Clone, PartialEq, Eq, and Debug stay available on the struct
-        // variants: backends compare and clone errors.
-        let error = VfsError::NotFound {
-            path: "/x".to_owned(),
-        };
-        let clone = error.clone();
-        assert_eq!(error, clone);
-        assert!(format!("{error:?}").contains("NotFound"));
-        assert_eq!(
-            VfsError::InvalidPath {
-                path: String::new(),
-                reason: PathReason::Empty,
-            },
-            VfsError::InvalidPath {
-                path: String::new(),
-                reason: PathReason::Empty,
-            }
-        );
-    }
-
-    #[test]
-    fn every_variant_displays_with_its_own_prefix() {
-        let cases = [
-            (
-                VfsError::NotFound {
-                    path: "/x".to_owned(),
-                },
-                "not found: /x",
-            ),
-            (
-                VfsError::AlreadyExists {
-                    path: "/x".to_owned(),
-                },
-                "already exists: /x",
-            ),
-            (
-                VfsError::NotADirectory {
-                    path: "/x".to_owned(),
-                },
-                "not a directory: /x",
-            ),
-            (
-                VfsError::IsADirectory {
-                    path: "/x".to_owned(),
-                },
-                "is a directory: /x",
-            ),
-            (
-                VfsError::DirectoryNotEmpty {
-                    path: "/x".to_owned(),
-                },
-                "directory not empty: /x",
-            ),
-            (
-                VfsError::NotUtf8 {
-                    path: "/x".to_owned(),
-                },
-                "not UTF-8: /x",
-            ),
-            (
-                VfsError::InvalidPath {
-                    path: String::new(),
-                    reason: PathReason::Empty,
-                },
-                "invalid path \"\": path is empty",
-            ),
-            (
-                VfsError::InvalidRange {
-                    path: "/x".to_owned(),
-                    reason: "start is below 1",
-                },
-                "invalid line range for /x: start is below 1",
-            ),
-            (
-                VfsError::Anchor {
-                    path: "/x".to_owned(),
-                    anchor: "TODO".to_owned(),
-                    count: 2,
-                },
-                "anchor \"TODO\" occurs 2 times in /x, expected exactly one",
-            ),
-            (
-                VfsError::PermissionDenied {
-                    path: "/x".to_owned(),
-                    reason: "denied".to_owned(),
-                },
-                "permission denied: denied",
-            ),
-            (
-                VfsError::Unsupported {
-                    path: "/x".to_owned(),
-                    detail: "no".to_owned(),
-                },
-                "unsupported operation: no",
-            ),
-            (
-                VfsError::Conflict {
-                    path: "/x".to_owned(),
-                    detail: "d".to_owned(),
-                },
-                "conflicting claim: d",
-            ),
-            (
-                VfsError::Backend {
-                    message: "m".to_owned(),
-                },
-                "backend failure: m",
-            ),
-        ];
-        for (error, text) in cases {
-            assert_eq!(error.to_string(), text);
-        }
-    }
-}
+#[path = "error-tests.rs"]
+mod tests;

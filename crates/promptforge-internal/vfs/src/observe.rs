@@ -20,7 +20,7 @@ use crate::traits::Op;
 ///
 /// An origin is for observation only. It never decides whether an
 /// operation is allowed, and it never appears in a claim.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Origin {
     /// The most specific label the caller has: a section name for a
@@ -133,5 +133,7 @@ mod tests {
         assert_eq!(origin.label, "the section");
         assert_eq!(origin.file, "the prompt");
         assert_eq!(origin.line, 42);
+        assert_eq!(origin, Origin::at("the section", "the prompt", 42));
+        assert_ne!(origin, Origin::at("the section", "the prompt", 43));
     }
 }

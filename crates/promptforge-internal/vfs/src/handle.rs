@@ -37,6 +37,7 @@
 //! the whole subtree it removes.
 
 mod access;
+mod case_fold;
 mod claims;
 mod claims_tree;
 mod forward;
@@ -57,6 +58,7 @@ use crate::path::{VfsPath, canonicalize_absolute};
 use crate::router::{Mounts, Router, StoreDecl, VfsRefBuilder};
 use crate::traits::{AcquireContext, AllowAll, ExecId, Policy, Vfs, VfsAccess};
 
+pub(crate) use case_fold::CaseFolds;
 use claims::Claims;
 pub(crate) use scope::Scope;
 
@@ -71,6 +73,8 @@ struct Volume {
     /// declared one. The store view derives from it; a mounted
     /// handle's declaration stays invisible behind its backend.
     store: Option<StoreDecl>,
+    /// The mount prefixes whose claim keys fold case.
+    folds: CaseFolds,
 }
 
 /// A cloneable handle to a virtual filesystem: one backend plus a claims
@@ -110,12 +114,14 @@ impl VfsRef {
         backend: impl Vfs + 'static,
         policy: impl Policy + Sync + 'static,
     ) -> VfsRef {
+        let folds = CaseFolds::of(&VfsPath::root(), &backend);
         VfsRef {
             volume: Arc::new(Volume {
                 backend: Arc::new(Mutex::new(Box::new(backend))),
                 claims: Arc::new(Claims::new()),
                 sink: None,
                 store: None,
+                folds,
             }),
             policy: Arc::new(policy),
         }
@@ -142,9 +148,12 @@ impl VfsRef {
     /// root: an overlay at `/` would replace the base entirely, so use
     /// [`VfsRef::new`] instead.
     #[must_use]
+    #[track_caller]
     pub fn overlay(&self, prefix: &str, backend: impl Vfs + 'static) -> VfsRef {
-        let canonical = canonicalize_absolute(prefix)
-            .unwrap_or_else(|err| panic!("invalid overlay prefix {prefix:?}: {err}"));
+        let canonical = match canonicalize_absolute(prefix) {
+            Ok(canonical) => canonical,
+            Err(err) => panic!("invalid overlay prefix {prefix:?}: {err}"),
+        };
         assert!(
             canonical.as_str() != "/",
             "an overlay at / would replace the base entirely; use VfsRef::new instead"
@@ -152,11 +161,12 @@ impl VfsRef {
         // The base handle mounts at the root of the overlay's router:
         // operations outside the overlay prefix route through the base's
         // own policy and claims under the caller's identity.
+        let folds = self.volume.folds.with(&CaseFolds::of(&canonical, &backend));
         let mut mounts = Mounts::new();
-        let root = canonicalize_absolute("/")
-            .unwrap_or_else(|err| panic!("the namespace root is always valid: {err}"))
-            .to_buf();
-        mounts.insert(root, Arc::new(Mutex::new(Box::new(self.clone()))));
+        mounts.insert(
+            VfsPath::root().to_buf(),
+            Arc::new(Mutex::new(Box::new(self.clone()))),
+        );
         mounts.insert(canonical.to_buf(), Arc::new(Mutex::new(Box::new(backend))));
         VfsRef {
             volume: Arc::new(Volume {
@@ -166,6 +176,7 @@ impl VfsRef {
                 // by the outer capability with the caller's origin.
                 sink: self.volume.sink.clone(),
                 store: self.volume.store.clone(),
+                folds,
             }),
             policy: Arc::clone(&self.policy),
         }
@@ -201,17 +212,18 @@ impl VfsRef {
     /// starts a new scope of its own.
     ///
     /// Paths are relative to the store root and follow strict rules. A
-    /// path must be 1 to 1024 bytes long and free of control characters
-    /// and backslashes. No segment may be empty, `.`, or `..`, end in a
-    /// dot or a space, or be a reserved device name such as `CON`. Error
-    /// paths come back relative to the store root, in the form the caller
-    /// supplied. So the caller can seed and extract store files by the
-    /// names the prompt uses, wherever the store is mounted.
+    /// path must be 1 to 1024 bytes long and free of control characters,
+    /// backslashes, and colons. No segment may be empty, `.`, or `..`,
+    /// end in a dot or a space, or be a reserved device name such as
+    /// `CON` or `COM0`. Error paths come back relative to the store root,
+    /// in the form the caller supplied. So the caller can seed and
+    /// extract store files by the names the prompt uses, wherever the
+    /// store is mounted.
     ///
     /// # Errors
-    /// Returns [`VfsError::Unsupported`] when the handle declares no
-    /// store. Returns the backend's error when the backend refuses to
-    /// acquire the identity.
+    /// Returns [`VfsError::NoStore`] when the handle declares no store.
+    /// Returns the backend's error when the backend refuses to acquire
+    /// the identity.
     pub fn acquire_store(&self, origin: Origin) -> Result<Access, VfsError> {
         self.acquire(origin)?.store_view()
     }
@@ -227,9 +239,9 @@ impl VfsRef {
     ///
     /// # Errors
     /// Returns an error when the backend refuses to acquire the identity;
-    /// see [`VfsRef::acquire`]. Returns [`VfsError::PermissionDenied`],
-    /// before any backend call, when the scope in `cx` belongs to a run
-    /// that has ended.
+    /// see [`VfsRef::acquire`]. Returns [`VfsError::ScopeEnded`], before
+    /// any backend call, when the scope in `cx` belongs to a run that has
+    /// ended.
     fn acquire_with(
         &self,
         cx: &AcquireContext,
@@ -248,10 +260,11 @@ impl VfsRef {
             origin,
             root: VfsPath::root(),
             store_root: None,
-            volume: self.volume.clone(),
-            policy: self.policy.clone(),
+            volume: Arc::clone(&self.volume),
+            policy: Arc::clone(&self.policy),
             scope,
             inner: Mutex::new(inner),
+            released: false,
         })
     }
 
@@ -266,13 +279,14 @@ impl VfsRef {
     }
 
     /// Builds a handle over a router with a fresh claims table and the
-    /// installed policy, op sink, and store declaration: the builder's
-    /// exit.
+    /// installed policy, op sink, store declaration, and the mounts'
+    /// case folds: the builder's exit.
     pub(crate) fn from_router(
         router: Router,
         policy: Arc<dyn Policy + Sync>,
         sink: Option<OpSink>,
         store: Option<StoreDecl>,
+        folds: CaseFolds,
     ) -> VfsRef {
         VfsRef {
             volume: Arc::new(Volume {
@@ -280,6 +294,7 @@ impl VfsRef {
                 claims: Arc::new(Claims::new()),
                 sink,
                 store,
+                folds,
             }),
             policy,
         }
@@ -305,7 +320,8 @@ impl VfsRef {
 ///
 /// Dropping an `Access` drops one reference to its identity. The
 /// identity ends when its last access drops, and the scope ends when
-/// its last identity ends.
+/// its last identity ends. [`Access::close`] does the same and reports
+/// the backend release failures that dropping swallows.
 #[must_use = "an acquire dropped immediately is a bug: the capability holds its identity's claims"]
 pub struct Access {
     id: ExecId,
@@ -326,6 +342,9 @@ pub struct Access {
     /// reference count, shared with every access of the scope.
     scope: Arc<Scope>,
     inner: Mutex<Box<dyn VfsAccess>>,
+    /// Set once the identity's reference and its backend sessions are
+    /// released, so a close followed by the drop releases once.
+    released: bool,
 }
 
 impl fmt::Debug for Access {
@@ -336,16 +355,47 @@ impl fmt::Debug for Access {
     }
 }
 
+impl Access {
+    /// Drops this access's reference to its identity, as dropping the
+    /// access does, and reports what the release failed to do.
+    ///
+    /// The identity ends when its last access goes, and the scope ends
+    /// with its last identity. Its claims are never released: an ended
+    /// scope's claims are ignored.
+    ///
+    /// # Errors
+    /// Returns the first failure among the backend sessions' releases,
+    /// which dropping the access ignores. The identity's reference is
+    /// released either way.
+    pub fn close(mut self) -> Result<(), VfsError> {
+        self.release()
+    }
+
+    /// The release behind both [`Access::close`] and the drop: the
+    /// session's own releases, then the identity's reference, then the
+    /// backend's release of the identity. Runs once.
+    fn release(&mut self) -> Result<(), VfsError> {
+        if std::mem::replace(&mut self.released, true) {
+            return Ok(());
+        }
+        let session = self
+            .inner
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .close();
+        // At zero references the identity ends - and, when it was the
+        // last, the scope ends with it.
+        self.scope.release(self.id);
+        let backend = self.backend().release(self.id);
+        session.and(backend)
+    }
+}
+
 impl Drop for Access {
     fn drop(&mut self) {
-        // Drops one reference to the identity; the identity ends - and,
-        // when it was the last, the scope ends with it - at zero. Its
-        // claims are never released: an ended scope's claims are ignored
-        // and purged lazily.
-        self.scope.release(self.id);
-        // Releasing the identity at the backend is best-effort: the
+        // Releasing at the backend is best-effort here: the
         // happens-before state is already handled, so a backend failure
-        // here cannot leave a conflict behind.
-        let _ = self.backend().release(self.id);
+        // cannot leave a conflict behind. `Access::close` reports it.
+        let _ = self.release();
     }
 }

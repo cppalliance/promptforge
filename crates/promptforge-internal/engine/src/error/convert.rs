@@ -225,16 +225,47 @@ fn raised_store_error(raised: &promptforge_lua::Raised) -> promptforge_vfs::VfsE
             path,
             reason: "the bounds are invalid",
         },
-        Some("not_utf8") => VfsError::NotUtf8 { path },
+        Some("not_utf8") => VfsError::NotUtf8 {
+            path,
+            valid_up_to: raised
+                .fields
+                .get("valid_up_to")
+                .and_then(promptforge_lua::ErrorField::as_integer)
+                .and_then(|offset| usize::try_from(offset).ok())
+                .unwrap_or(0),
+        },
         Some("is_a_directory") => VfsError::IsADirectory { path },
         Some("not_a_directory") => VfsError::NotADirectory { path },
         Some("directory_not_empty") => VfsError::DirectoryNotEmpty { path },
         Some("already_exists") => VfsError::AlreadyExists { path },
-        // `permission_denied` and `unsupported` carry only `path` beside
-        // the message, so their text fields degrade to empty here.
+        Some("scope_ended") => VfsError::ScopeEnded { path },
+        Some("read_only") => VfsError::ReadOnly { path },
+        Some("root_protected") => VfsError::RootProtected { path },
+        Some("no_store") => VfsError::NoStore,
+        // The variants below carry only `path` beside the message, so
+        // their text fields degrade to empty, and an I/O failure's kind
+        // to `Other` with no OS error code.
         Some("permission_denied") => VfsError::PermissionDenied {
             path,
             reason: String::new(),
+        },
+        Some("approval_required") => VfsError::ApprovalRequired {
+            path,
+            reason: String::new(),
+        },
+        Some("outside_root") => VfsError::OutsideRoot {
+            path,
+            detail: String::new(),
+        },
+        Some("cross_mount") => VfsError::CrossMount {
+            path,
+            detail: String::new(),
+        },
+        Some("io") => VfsError::Io {
+            path,
+            kind: std::io::ErrorKind::Other,
+            raw_os_error: None,
+            message: String::new(),
         },
         Some("unsupported") => VfsError::Unsupported {
             path,

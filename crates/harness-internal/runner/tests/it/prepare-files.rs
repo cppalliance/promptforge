@@ -141,7 +141,7 @@ async fn a_store_that_refuses_the_staging_write_refuses_the_run() {
     };
     assert_eq!(path, "paper.md");
     assert!(
-        matches!(source, VfsError::PermissionDenied { .. }),
+        matches!(source, VfsError::ApprovalRequired { .. }),
         "{source:?}"
     );
 }

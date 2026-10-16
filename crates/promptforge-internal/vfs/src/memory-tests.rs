@@ -142,10 +142,18 @@ fn remove_with_recursive_deletes_the_whole_subtree() -> Result<(), VfsError> {
 #[test]
 fn the_namespace_root_cannot_be_removed() -> Result<(), VfsError> {
     let mut access = seeded_session(&[("/f.txt", "x")])?;
-    assert!(matches!(
+    assert_eq!(
         access.remove(&path("/")?, true),
-        Err(VfsError::PermissionDenied { .. })
-    ));
+        Err(VfsError::RootProtected {
+            path: "/".to_owned(),
+        })
+    );
+    assert_eq!(
+        access.rename(&path("/")?, &path("/moved")?),
+        Err(VfsError::RootProtected {
+            path: "/".to_owned(),
+        })
+    );
     assert_eq!(access.read(&path("/f.txt")?)?, b"x");
     Ok(())
 }
@@ -326,10 +334,12 @@ fn rename_moves_a_directory_subtree() -> Result<(), VfsError> {
 #[test]
 fn renaming_a_directory_onto_the_root_is_rejected() -> Result<(), VfsError> {
     let mut access = seeded_session(&[("/d/a.txt", "a"), ("/other.txt", "o")])?;
-    assert!(matches!(
+    assert_eq!(
         access.rename(&path("/d")?, &path("/")?),
-        Err(VfsError::PermissionDenied { .. })
-    ));
+        Err(VfsError::RootProtected {
+            path: "/".to_owned(),
+        })
+    );
     // The failed rename changed nothing: the subtree is intact.
     assert_eq!(access.read(&path("/d/a.txt")?)?, b"a");
     assert_eq!(access.read(&path("/other.txt")?)?, b"o");

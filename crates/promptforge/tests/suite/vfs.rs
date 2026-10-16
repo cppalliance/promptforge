@@ -33,7 +33,8 @@ fn agent_mode_lets_the_run_write_and_ask_mode_refuses_a_later_write() -> TestRes
     };
     let refused = perform_vfs_op(&store, second);
     assert!(
-        matches!(&refused, Err(VfsError::PermissionDenied { reason, .. }) if reason.contains("Ask"))
+        matches!(&refused, Err(VfsError::ApprovalRequired { path, .. }) if path == "note.md"),
+        "{refused:?}"
     );
 
     let read = VfsOp::Read {

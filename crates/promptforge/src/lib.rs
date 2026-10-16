@@ -151,9 +151,11 @@ pub mod vfs {
     pub use promptforge_vfs::Access;
     pub use promptforge_vfs::AcquireContext;
     pub use promptforge_vfs::AllowAll;
+    pub use promptforge_vfs::Depth;
     pub use promptforge_vfs::Entry;
     pub use promptforge_vfs::ExecId;
     pub use promptforge_vfs::FileType;
+    pub use promptforge_vfs::GlobKind;
     pub use promptforge_vfs::MemoryBackend;
     pub use promptforge_vfs::Mode;
     pub use promptforge_vfs::ModeHandle;
@@ -162,6 +164,7 @@ pub mod vfs {
     pub use promptforge_vfs::OpEvent;
     pub use promptforge_vfs::OpSink;
     pub use promptforge_vfs::Origin;
+    pub use promptforge_vfs::ParsePathReasonError;
     pub use promptforge_vfs::PathReason;
     pub use promptforge_vfs::Policy;
     pub use promptforge_vfs::RealBackend;
@@ -174,6 +177,7 @@ pub mod vfs {
     pub use promptforge_vfs::VfsPathBuf;
     pub use promptforge_vfs::VfsRef;
     pub use promptforge_vfs::VfsRefBuilder;
+    pub use promptforge_vfs::Writability;
 }
 
 pub mod cancel {

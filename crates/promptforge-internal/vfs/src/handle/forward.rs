@@ -109,6 +109,10 @@ impl VfsAccess for HandleAccess {
     fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
         self.0.str_replace(path.as_str(), old, new)
     }
+
+    fn close(&mut self) -> Result<(), VfsError> {
+        self.0.release()
+    }
 }
 
 /// The store's mount as the store view's router sees it: the declared
@@ -215,6 +219,10 @@ impl VfsAccess for StoreMountSession {
     fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
         self.0.chmod(path, mode).map_err(trim_mount_error)
     }
+
+    fn close(&mut self) -> Result<(), VfsError> {
+        self.0.close().map_err(trim_mount_error)
+    }
 }
 
 /// The store view's backend session: the store's own mount behind a
@@ -318,5 +326,9 @@ impl VfsAccess for StoreScoped {
         self.inner
             .chmod(path, mode)
             .map_err(|err| self.logical(err))
+    }
+
+    fn close(&mut self) -> Result<(), VfsError> {
+        self.inner.close().map_err(|err| self.logical(err))
     }
 }

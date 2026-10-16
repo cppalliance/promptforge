@@ -4,7 +4,7 @@ use super::{Mounts, Router};
 use crate::error::VfsError;
 use crate::handle::VfsRef;
 use crate::memory::MemoryBackend;
-use crate::test_support::{Call, TestFs, access, context, handle, path};
+use crate::test_support::{Call, TestFs, access, context, handle, path, test_origin};
 use crate::traits::{Op, Vfs};
 
 #[test]
@@ -98,32 +98,140 @@ fn writes_to_a_read_only_mount_are_denied_without_partial_application() -> Resul
     let access = access(&vfs)?;
     // Reads are not gated.
     assert_eq!(access.read("/ro/a.txt")?, b"keep");
-    // A write is denied with a clear read-only error.
-    match access.write("/ro/new.txt", b"x") {
-        Err(VfsError::PermissionDenied { reason, .. }) => {
-            assert!(reason.contains("read-only"), "names the cause: {reason}");
-        }
-        other => panic!("expected a read-only denial, got {other:?}"),
-    }
+    // A write is refused as read-only, naming the path.
+    assert_eq!(
+        access.write("/ro/new.txt", b"x"),
+        Err(VfsError::ReadOnly {
+            path: "/ro/new.txt".to_owned(),
+        })
+    );
     assert!(!ro.files().contains_key("/new.txt"));
     // A rename wholly inside the mount is denied before the source
     // is touched.
-    match access.rename("/ro/a.txt", "/ro/b.txt") {
-        Err(VfsError::PermissionDenied { .. }) => {}
-        other => panic!("expected a read-only denial, got {other:?}"),
-    }
+    assert_eq!(
+        access.rename("/ro/a.txt", "/ro/b.txt"),
+        Err(VfsError::ReadOnly {
+            path: "/ro/a.txt".to_owned(),
+        })
+    );
     assert_eq!(access.read("/ro/a.txt")?, b"keep");
     assert!(!ro.files().contains_key("/b.txt"));
     // A copy whose destination is read-only is denied; the source
     // is untouched.
     access.write("/x.txt", b"data")?;
-    match access.copy("/x.txt", "/ro/x.txt") {
-        Err(VfsError::PermissionDenied { .. }) => {}
-        other => panic!("expected a read-only denial, got {other:?}"),
-    }
+    assert_eq!(
+        access.copy("/x.txt", "/ro/x.txt"),
+        Err(VfsError::ReadOnly {
+            path: "/ro/x.txt".to_owned(),
+        })
+    );
     assert!(!ro.files().contains_key("/x.txt"));
     assert_eq!(access.read("/x.txt")?, b"data");
     Ok(())
+}
+
+#[test]
+fn a_two_path_operation_across_mounts_is_refused_without_touching_either() -> Result<(), VfsError> {
+    let left = TestFs::seeded(&[("/a.txt", "left")]);
+    let right = TestFs::default();
+    let vfs = VfsRef::builder()
+        .mount("/left", left.clone())
+        .mount("/right", right.clone())
+        .build();
+    let access = access(&vfs)?;
+    for (op, result) in [
+        ("rename", access.rename("/left/a.txt", "/right/a.txt")),
+        ("copy", access.copy("/left/a.txt", "/right/a.txt")),
+    ] {
+        match result {
+            Err(VfsError::CrossMount { path, detail }) => {
+                assert_eq!(path, "/left/a.txt", "{op}");
+                assert!(detail.starts_with(op), "{op}: {detail}");
+            }
+            other => panic!("expected a cross-mount refusal from {op}, got {other:?}"),
+        }
+    }
+    assert_eq!(left.files().len(), 1);
+    assert!(right.files().is_empty());
+    Ok(())
+}
+
+#[test]
+fn closing_an_access_reports_a_mount_release_failure_that_dropping_swallows() -> Result<(), VfsError>
+{
+    let refusal = || VfsError::Backend {
+        message: "the release fails".to_owned(),
+    };
+    let mount = TestFs::default().on_release(move |_| Err(refusal()));
+    let vfs = VfsRef::builder().mount("/m", mount.clone()).build();
+    let closed = access(&vfs)?;
+    let id = crate::detail::access_id(&closed);
+    closed.write("/m/f.txt", b"x")?;
+    assert_eq!(closed.close(), Err(refusal()));
+    assert!(
+        mount.calls().contains(&Call::Release(id)),
+        "the mount was released"
+    );
+    // An access that never touched the mount has nothing to release.
+    access(&vfs)?.close()?;
+    // Dropping one that did releases once and swallows the failure.
+    let dropped = access(&vfs)?;
+    let id = crate::detail::access_id(&dropped);
+    dropped.write("/m/g.txt", b"x")?;
+    drop(dropped);
+    let releases = mount
+        .calls()
+        .iter()
+        .filter(|call| **call == Call::Release(id))
+        .count();
+    assert_eq!(releases, 1);
+    Ok(())
+}
+
+/// The failure every release of a [`failing_release`] mount reports.
+fn release_refusal() -> VfsError {
+    VfsError::Backend {
+        message: "the release fails".to_owned(),
+    }
+}
+
+/// A mount whose every release fails with [`release_refusal`].
+fn failing_release() -> TestFs {
+    TestFs::default().on_release(|_| Err(release_refusal()))
+}
+
+#[test]
+fn closing_an_access_reports_a_release_failure_inside_a_mounted_handle() -> Result<(), VfsError> {
+    // The failing mount sits inside a handle that is itself mounted, so
+    // its failure reaches the outer close only through the mounted
+    // handle's session.
+    let inner = VfsRef::builder().mount("/", failing_release()).build();
+    let vfs = VfsRef::builder().mount("/m", inner).build();
+    let closed = access(&vfs)?;
+    closed.write("/m/f.txt", b"x")?;
+    assert_eq!(closed.close(), Err(release_refusal()));
+    Ok(())
+}
+
+/// Writes one file through a store view of a handle whose store is
+/// `store`, then closes the view.
+fn write_and_close_a_store_view(store: impl Vfs + 'static) -> Result<(), VfsError> {
+    let vfs = VfsRef::builder().store("/s", store).build();
+    let view = vfs.acquire_store(test_origin())?;
+    view.write("f.txt", b"x")?;
+    view.close()
+}
+
+#[test]
+fn closing_a_store_view_reports_a_store_release_failure() {
+    // The store's own release fails, or the release of a mount inside a
+    // handle that serves as the store does.
+    assert_eq!(
+        write_and_close_a_store_view(failing_release()),
+        Err(release_refusal())
+    );
+    let store = VfsRef::builder().mount("/", failing_release()).build();
+    assert_eq!(write_and_close_a_store_view(store), Err(release_refusal()));
 }
 
 #[test]

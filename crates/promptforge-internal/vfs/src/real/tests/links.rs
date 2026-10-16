@@ -3,52 +3,46 @@
 
 use super::*;
 
-/// Creates a directory link, returning false when the OS refuses.
-/// Windows uses a junction (no privilege required, unlike
-/// `symlink_dir`); Unix uses a plain symlink.
+/// Creates a directory link. Windows uses a junction (no privilege
+/// required, unlike `symlink_dir`); Unix uses a plain symlink.
 #[cfg(windows)]
-fn make_dir_link(link: &Path, target: &Path) -> bool {
-    std::process::Command::new("cmd")
+fn make_dir_link(link: &Path, target: &Path) -> Result<(), VfsError> {
+    let status = std::process::Command::new("cmd")
         .arg("/c")
         .arg("mklink")
         .arg("/J")
         .arg(link)
         .arg(target)
         .status()
-        .is_ok_and(|status| status.success())
-}
-
-/// Creates a directory link, returning false when the OS refuses.
-#[cfg(unix)]
-fn make_dir_link(link: &Path, target: &Path) -> bool {
-    std::os::unix::fs::symlink(target, link).is_ok()
-}
-
-/// Creates a file link, returning false only when Windows refuses
-/// for want of the symlink privilege (raw OS error 1314,
-/// `ERROR_PRIVILEGE_NOT_HELD`). Every other failure is an error.
-#[cfg(windows)]
-fn make_file_link(link: &Path, target: &Path) -> Result<bool, VfsError> {
-    const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
-    match std::os::windows::fs::symlink_file(target, link) {
-        Ok(()) => Ok(true),
-        Err(err) if err.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
-            eprintln!(
-                "skipped: Windows refused a file symlink without the symlink privilege \
-                 (enable Developer Mode or run elevated)"
-            );
-            Ok(false)
-        }
-        Err(err) => Err(map_io("creating the file link", &err)),
+        .map_err(|err| map_io("creating the directory link", &err))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(VfsError::Backend {
+            message: format!("mklink /J failed with {status}"),
+        })
     }
+}
+
+/// Creates a directory link.
+#[cfg(unix)]
+fn make_dir_link(link: &Path, target: &Path) -> Result<(), VfsError> {
+    std::os::unix::fs::symlink(target, link)
+        .map_err(|err| map_io("creating the directory link", &err))
+}
+
+/// Creates a file link. On Windows that needs the symlink privilege,
+/// so the tests that call this are ignored there.
+#[cfg(windows)]
+fn make_file_link(link: &Path, target: &Path) -> Result<(), VfsError> {
+    std::os::windows::fs::symlink_file(target, link)
+        .map_err(|err| map_io("creating the file link", &err))
 }
 
 /// Creates a file link.
 #[cfg(unix)]
-fn make_file_link(link: &Path, target: &Path) -> Result<bool, VfsError> {
-    std::os::unix::fs::symlink(target, link)
-        .map_err(|err| map_io("creating the file link", &err))?;
-    Ok(true)
+fn make_file_link(link: &Path, target: &Path) -> Result<(), VfsError> {
+    std::os::unix::fs::symlink(target, link).map_err(|err| map_io("creating the file link", &err))
 }
 
 /// Whether `real` itself is a link, without following it.
@@ -60,20 +54,17 @@ fn is_link(real: &Path) -> bool {
 /// is then removed. A directory link needs no privilege on any machine.
 fn make_dangling_dir_link(link: &Path, target: &Path) -> Result<(), VfsError> {
     fs::create_dir(target).map_err(|err| map_io("creating the link target", &err))?;
-    assert!(
-        make_dir_link(link, target),
-        "the directory link must be created"
-    );
+    make_dir_link(link, target)?;
     fs::remove_dir(target).map_err(|err| map_io("removing the link target", &err))
 }
 
-/// Asserts `result` is the dangling-link refusal, not some other
-/// denial or an OS failure.
+/// Asserts `result` is the dangling-link refusal, not an escape or an
+/// OS failure. Both refusals are `OutsideRoot`, told apart by detail.
 fn assert_dangling_refusal<T: std::fmt::Debug>(result: Result<T, VfsError>, operation: &str) {
     match result {
-        Err(VfsError::PermissionDenied { reason, .. }) => assert!(
-            reason.contains("passes through a dangling symbolic link"),
-            "{operation}: {reason}"
+        Err(VfsError::OutsideRoot { detail, .. }) => assert!(
+            detail.contains("passes through a dangling symbolic link"),
+            "{operation}: {detail}"
         ),
         other => panic!("{operation} must be refused as a dangling link, got {other:?}"),
     }
@@ -86,32 +77,26 @@ fn a_rooted_backend_rejects_links_that_escape_the_mount_root() -> Result<(), Vfs
     fs::write(outside.path().join("secret.txt"), b"classified")
         .map_err(|err| map_io("seeding the outside file", &err))?;
     let root = TempRoot::new(label);
-    if !make_dir_link(&root.path().join("link"), outside.path()) {
-        eprintln!(
-            "skipped: the operating system refused to create a directory link, so there is no link \
-             to escape through"
-        );
-        return Ok(());
-    }
+    make_dir_link(&root.path().join("link"), outside.path())?;
     let mut access = rooted_access(root.path())?;
     assert!(
         matches!(
             access.read(&path("/link/secret.txt")?),
-            Err(VfsError::PermissionDenied { .. })
+            Err(VfsError::OutsideRoot { .. })
         ),
         "a read through the escaping link must be denied"
     );
     assert!(
         matches!(
             access.write(&path("/link/new.txt")?, b"x"),
-            Err(VfsError::PermissionDenied { .. })
+            Err(VfsError::OutsideRoot { .. })
         ),
         "a write through the escaping link must be denied"
     );
     assert!(
         matches!(
             access.append(&path("/link/secret.txt")?, b"x"),
-            Err(VfsError::PermissionDenied { .. })
+            Err(VfsError::OutsideRoot { .. })
         ),
         "an append through the escaping link must be denied"
     );
@@ -125,15 +110,14 @@ fn a_rooted_backend_rejects_links_that_escape_the_mount_root() -> Result<(), Vfs
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "needs the symlink privilege")]
 fn removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target() -> Result<(), VfsError>
 {
     let root =
         TempRoot::new("removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target");
     fs::write(root.path().join("target.txt"), b"kept")
         .map_err(|err| map_io("seeding the target file", &err))?;
-    if !make_file_link(&root.path().join("link"), &root.path().join("target.txt"))? {
-        return Ok(());
-    }
+    make_file_link(&root.path().join("link"), &root.path().join("target.txt"))?;
     let mut access = rooted_access(root.path())?;
     access.remove(&path("/link")?, false)?;
     assert!(!is_link(&root.path().join("link")), "the link must be gone");
@@ -142,15 +126,14 @@ fn removing_a_link_to_an_in_root_file_removes_the_link_and_keeps_the_target() ->
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "needs the symlink privilege")]
 fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), VfsError> {
     let label = "path_operations_act_on_a_link_to_an_outside_file_as_a_link";
     let outside = TempRoot::new(label);
     let secret = outside.path().join("secret.txt");
     fs::write(&secret, b"classified").map_err(|err| map_io("seeding the outside file", &err))?;
     let root = TempRoot::new(label);
-    if !make_file_link(&root.path().join("link"), &secret)? {
-        return Ok(());
-    }
+    make_file_link(&root.path().join("link"), &secret)?;
     let mut access = rooted_access(root.path())?;
     assert!(access.exists(&path("/link")?)?);
     assert_eq!(access.stat(&path("/link")?)?.file_type, FileType::Symlink);
@@ -161,14 +144,14 @@ fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), Vf
     assert!(
         matches!(
             access.read(&path("/link")?),
-            Err(VfsError::PermissionDenied { .. })
+            Err(VfsError::OutsideRoot { .. })
         ),
         "a read through the escaping link must be denied"
     );
     assert!(
         matches!(
             access.write(&path("/link")?, b"x"),
-            Err(VfsError::PermissionDenied { .. })
+            Err(VfsError::OutsideRoot { .. })
         ),
         "a write through the escaping link must be denied"
     );
@@ -192,14 +175,13 @@ fn path_operations_act_on_a_link_to_an_outside_file_as_a_link() -> Result<(), Vf
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "needs the symlink privilege")]
 fn removing_a_dangling_link_succeeds() -> Result<(), VfsError> {
     let root = TempRoot::new("removing_a_dangling_link_succeeds");
-    if !make_file_link(
+    make_file_link(
         &root.path().join("dangling"),
         &root.path().join("missing.txt"),
-    )? {
-        return Ok(());
-    }
+    )?;
     let mut access = rooted_access(root.path())?;
     access.remove(&path("/dangling")?, false)?;
     assert!(
@@ -269,10 +251,7 @@ fn removing_a_directory_link_keeps_the_target_directory_and_its_contents() -> Re
     let mut access = rooted_access(root.path())?;
     for recursive in [false, true] {
         let link = root.path().join("dirlink");
-        assert!(
-            make_dir_link(&link, &target),
-            "the directory link must be created"
-        );
+        make_dir_link(&link, &target)?;
         access.remove(&path("/dirlink")?, recursive)?;
         assert!(
             !is_link(&link),
@@ -284,6 +263,19 @@ fn removing_a_directory_link_keeps_the_target_directory_and_its_contents() -> Re
 }
 
 #[test]
+fn a_glob_through_an_in_root_directory_link_keeps_the_links_spelling() -> Result<(), VfsError> {
+    let root = TempRoot::new("a_glob_through_an_in_root_directory_link_keeps_the_links_spelling");
+    let target = root.path().join("real");
+    fs::create_dir(&target).map_err(|err| map_io("creating the target directory", &err))?;
+    fs::write(target.join("a.txt"), b"a").map_err(|err| map_io("seeding the target file", &err))?;
+    make_dir_link(&root.path().join("link"), &target)?;
+    let access = rooted_access(root.path())?;
+    assert_eq!(access.glob("/link/*")?, ["/link/a.txt".to_owned()]);
+    assert_eq!(access.glob("/real/*")?, ["/real/a.txt".to_owned()]);
+    Ok(())
+}
+
+#[test]
 fn path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link()
 -> Result<(), VfsError> {
     let label = "path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link";
@@ -291,10 +283,7 @@ fn path_operations_act_on_a_directory_link_to_an_outside_directory_as_a_link()
     let secret = outside.path().join("secret.txt");
     fs::write(&secret, b"classified").map_err(|err| map_io("seeding the outside file", &err))?;
     let root = TempRoot::new(label);
-    assert!(
-        make_dir_link(&root.path().join("link"), outside.path()),
-        "the directory link must be created"
-    );
+    make_dir_link(&root.path().join("link"), outside.path())?;
     let mut access = rooted_access(root.path())?;
     assert!(access.exists(&path("/link")?)?);
     assert_eq!(access.stat(&path("/link")?)?.file_type, FileType::Symlink);

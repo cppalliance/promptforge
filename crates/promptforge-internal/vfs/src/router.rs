@@ -1,4 +1,4 @@
-//! The mount table and its routing access.
+//! The mount table and its builder.
 //!
 //! A `Router` is itself a [`Vfs`], so routers nest; the public concept
 //! is "a `VfsRef` with these mounts," expressed through
@@ -8,17 +8,21 @@
 //! backend sees a rooted path within its own mount, and acquires each
 //! backend's access lazily on first touch.
 
+#[path = "router-access.rs"]
+mod access;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::VfsError;
-use crate::handle::VfsRef;
+use crate::handle::{CaseFolds, VfsRef};
 use crate::observe::{OpEvent, OpSink};
 use crate::path::{VfsPath, VfsPathBuf, canonicalize_absolute};
-use crate::stat::{Entry, Stat};
 use crate::traits::{AcquireContext, AllowAll, ExecId, Policy, Vfs, VfsAccess};
+
+use access::RoutingAccess;
 
 /// One mounted backend behind a shared lock.
 type Mounted = Arc<Mutex<Box<dyn Vfs>>>;
@@ -35,7 +39,7 @@ fn lock(backend: &Mounted) -> MutexGuard<'_, Box<dyn Vfs>> {
 
 /// Whether the mount at `prefix` serves `path`: the root mount serves
 /// everything; any other mount serves itself and its descendants.
-fn mount_matches(prefix: &str, path: &str) -> bool {
+pub(crate) fn mount_matches(prefix: &str, path: &str) -> bool {
     if prefix == "/" {
         return true;
     }
@@ -68,7 +72,7 @@ fn strip_mount<'a>(prefix: &str, path: &'a str) -> &'a str {
 
 /// Restores the mount prefix on a path a backend returned, so callers
 /// see full virtual paths.
-fn rejoin(prefix: &str, path: &str) -> String {
+pub(crate) fn rejoin(prefix: &str, path: &str) -> String {
     if prefix == "/" {
         return path.to_owned();
     }
@@ -105,7 +109,7 @@ impl Vfs for Router {
     }
 
     fn release(&mut self, id: ExecId) -> Result<(), VfsError> {
-        // The routing access's Drop releases the identity at every
+        // The routing access's close releases the identity at every
         // touched mount; the router itself holds no per-identity state.
         let _ = id;
         Ok(())
@@ -113,239 +117,6 @@ impl Vfs for Router {
 
     // read_only() keeps the default: a router mixes mounts, and the
     // routing access enforces each mount's own flag per operation.
-}
-
-/// One identity's session with the router. Resolves the longest-prefix
-/// mount per operation and acquires each backend's access lazily on
-/// first touch of that mount.
-struct RoutingAccess {
-    /// The caller's context, passed to each mount's lazy acquire.
-    cx: AcquireContext,
-    mounts: Arc<Mounts>,
-    /// Per-mount sessions, keyed by mount prefix. `RefCell` because
-    /// read-only trait methods take `&self`; the enclosing capability
-    /// serializes every call, so the cell is never contended.
-    acquired: RefCell<BTreeMap<VfsPathBuf, Box<dyn VfsAccess>>>,
-}
-
-impl RoutingAccess {
-    /// Runs `op` against the session of the mount serving `path`,
-    /// acquiring that session on first touch.
-    fn with_mount<R>(
-        &self,
-        path: &VfsPath,
-        op: impl FnOnce(&mut dyn VfsAccess) -> Result<R, VfsError>,
-    ) -> Result<R, VfsError> {
-        let (prefix, backend) =
-            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: path.to_string(),
-            })?;
-        let mut acquired = self.acquired.borrow_mut();
-        if !acquired.contains_key(prefix) {
-            let session = lock(backend).acquire(&self.cx)?;
-            acquired.insert(prefix.clone(), session);
-        }
-        let Some(session) = acquired.get_mut(prefix) else {
-            unreachable!("the session was just acquired")
-        };
-        op(session.as_mut())
-    }
-
-    /// The mount-relative path the serving backend sees.
-    fn strip(&self, path: &VfsPath) -> Result<VfsPath, VfsError> {
-        let (prefix, _) =
-            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: path.to_string(),
-            })?;
-        canonicalize_absolute(strip_mount(prefix.as_str(), path.as_str()))
-    }
-
-    /// Rejects mutations on read-only mounts before anything is
-    /// touched: a denied operation never partially applies.
-    fn check_writable(&self, path: &VfsPath) -> Result<(), VfsError> {
-        let (prefix, backend) =
-            resolve(&self.mounts, path.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: path.to_string(),
-            })?;
-        if lock(backend).read_only() {
-            return Err(VfsError::PermissionDenied {
-                path: path.to_string(),
-                reason: format!("the mount at {prefix} is read-only, so {path} cannot be mutated"),
-            });
-        }
-        Ok(())
-    }
-
-    /// Two-path operations require one mount: backend atomicity
-    /// guarantees stop at the mount boundary.
-    fn one_mount(&self, from: &VfsPath, to: &VfsPath, op: &str) -> Result<(), VfsError> {
-        let from_prefix = resolve(&self.mounts, from.as_str())
-            .ok_or_else(|| VfsError::NotFound {
-                path: from.to_string(),
-            })?
-            .0;
-        let to_prefix = resolve(&self.mounts, to.as_str())
-            .ok_or_else(|| VfsError::NotFound {
-                path: to.to_string(),
-            })?
-            .0;
-        if from_prefix != to_prefix {
-            return Err(VfsError::Unsupported {
-                path: from.to_string(),
-                detail: format!(
-                    "{op} across mounts is unsupported: {from} and {to} are served by different mounts"
-                ),
-            });
-        }
-        Ok(())
-    }
-}
-
-impl VfsAccess for RoutingAccess {
-    fn read(&self, path: &VfsPath) -> Result<Vec<u8>, VfsError> {
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.read(&stripped))
-    }
-
-    fn read_range(&self, path: &VfsPath, offset: u64, len: u64) -> Result<Vec<u8>, VfsError> {
-        // Delegated, not defaulted, so backends that can seek never
-        // materialize the file.
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.read_range(&stripped, offset, len))
-    }
-
-    fn write(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.write(&stripped, contents))
-    }
-
-    fn append(&mut self, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.append(&stripped, contents))
-    }
-
-    fn remove(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.remove(&stripped, recursive))
-    }
-
-    fn exists(&self, path: &VfsPath) -> Result<bool, VfsError> {
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.exists(&stripped))
-    }
-
-    fn glob(&self, pattern: &str) -> Result<Vec<String>, VfsError> {
-        // Patterns are not paths, but they route like one:
-        // canonicalizing resolves dot segments and rejects escapes past
-        // the namespace root; wildcards are ordinary segments.
-        let canonical = canonicalize_absolute(pattern)?;
-        let (prefix, _) =
-            resolve(&self.mounts, canonical.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: canonical.to_string(),
-            })?;
-        let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
-        let mut matches = self.with_mount(&canonical, |session| session.glob(&scoped))?;
-        for path in &mut matches {
-            *path = rejoin(prefix.as_str(), path);
-        }
-        Ok(matches)
-    }
-
-    fn glob_kind(&self, pattern: &str, dirs_only: bool) -> Result<Vec<String>, VfsError> {
-        // Mirrors `glob`: the dirs-only flag must survive the mount
-        // boundary. The trait default re-splits inside the serving
-        // session with the already-stripped pattern, which loses the
-        // flag and filters the files-only result down to nothing.
-        let canonical = canonicalize_absolute(pattern)?;
-        let (prefix, _) =
-            resolve(&self.mounts, canonical.as_str()).ok_or_else(|| VfsError::NotFound {
-                path: canonical.to_string(),
-            })?;
-        let scoped = strip_mount(prefix.as_str(), canonical.as_str()).to_owned();
-        let mut matches =
-            self.with_mount(&canonical, |session| session.glob_kind(&scoped, dirs_only))?;
-        for path in &mut matches {
-            *path = rejoin(prefix.as_str(), path);
-        }
-        Ok(matches)
-    }
-
-    fn list(&self, path: &VfsPath) -> Result<Vec<Entry>, VfsError> {
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.list(&stripped))
-    }
-
-    fn stat(&self, path: &VfsPath) -> Result<Stat, VfsError> {
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.stat(&stripped))
-    }
-
-    fn mkdir(&mut self, path: &VfsPath, recursive: bool) -> Result<(), VfsError> {
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.mkdir(&stripped, recursive))
-    }
-
-    fn rename(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(from)?;
-        self.check_writable(to)?;
-        self.one_mount(from, to, "rename")?;
-        let from_stripped = self.strip(from)?;
-        let to_stripped = self.strip(to)?;
-        self.with_mount(from, |session| session.rename(&from_stripped, &to_stripped))
-    }
-
-    fn copy(&mut self, from: &VfsPath, to: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(to)?;
-        self.one_mount(from, to, "copy")?;
-        let from_stripped = self.strip(from)?;
-        let to_stripped = self.strip(to)?;
-        self.with_mount(from, |session| session.copy(&from_stripped, &to_stripped))
-    }
-
-    fn str_replace(&mut self, path: &VfsPath, old: &str, new: &str) -> Result<(), VfsError> {
-        // Delegated so backends can push down; the read-only check here
-        // covers the backend's default read-plus-write as well.
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.str_replace(&stripped, old, new))
-    }
-
-    fn symlink(&mut self, target: &VfsPath, link: &VfsPath) -> Result<(), VfsError> {
-        self.check_writable(link)?;
-        let stripped = self.strip(link)?;
-        // The target is a stored name, not resolved: it passes verbatim.
-        self.with_mount(link, |session| session.symlink(target, &stripped))
-    }
-
-    fn read_link(&self, path: &VfsPath) -> Result<VfsPathBuf, VfsError> {
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.read_link(&stripped))
-    }
-
-    fn chmod(&mut self, path: &VfsPath, mode: u32) -> Result<(), VfsError> {
-        self.check_writable(path)?;
-        let stripped = self.strip(path)?;
-        self.with_mount(path, |session| session.chmod(&stripped, mode))
-    }
-}
-
-impl Drop for RoutingAccess {
-    fn drop(&mut self) {
-        // Release the identity at every touched mount. Sessions drop
-        // first: a mounted handle's session releases through its own
-        // capability's Drop, and the backend-level release below is its
-        // no-op counterpart. Plain backends get their one release here.
-        for (prefix, session) in std::mem::take(self.acquired.get_mut()) {
-            drop(session);
-            if let Some(backend) = self.mounts.get(&prefix) {
-                let _ = lock(backend).release(self.cx.id());
-            }
-        }
-    }
 }
 
 /// A builder that mounts backends at path prefixes and then builds a
@@ -358,19 +129,21 @@ pub struct VfsRefBuilder {
     policy: Option<Arc<dyn Policy + Sync>>,
     sink: Option<OpSink>,
     store: Option<StoreDecl>,
+    folds: CaseFolds,
 }
 
 /// The handle's declared store: the mount serving the run's store,
 /// when the builder declared one. `root` is the canonical store root
 /// the store view joins logical paths onto; `mount` is the store's
-/// backend, shared with the mount table. Only the declaration of the
-/// handle a builder builds counts: an overlay inherits its base's,
-/// while a handle mounted as a backend keeps its declaration to
-/// itself.
+/// backend, shared with the mount table; `folds` is whether its claim
+/// keys fold case. Only the declaration of the handle a builder builds
+/// counts: an overlay inherits its base's, while a handle mounted as a
+/// backend keeps its declaration to itself.
 #[derive(Clone)]
 pub(crate) struct StoreDecl {
     pub(crate) root: VfsPath,
     pub(crate) mount: Mounted,
+    pub(crate) folds: CaseFolds,
 }
 
 impl fmt::Debug for VfsRefBuilder {
@@ -386,8 +159,10 @@ impl VfsRefBuilder {
             policy: None,
             sink: None,
             store: None,
+            folds: CaseFolds::default(),
         }
     }
+
     /// Mounts `backend` at `prefix`, consuming and returning the
     /// builder.
     ///
@@ -399,16 +174,12 @@ impl VfsRefBuilder {
     /// Panics when `prefix` is not an absolute virtual path or a mount
     /// already sits at `prefix`: both are construction-time bugs.
     #[must_use]
+    #[track_caller]
     pub fn mount(mut self, prefix: &str, backend: impl Vfs + 'static) -> VfsRefBuilder {
-        let canonical = canonicalize_absolute(prefix)
-            .unwrap_or_else(|err| panic!("invalid mount prefix {prefix:?}: {err}"));
-        let key = canonical.to_buf();
-        assert!(
-            !self.mounts.contains_key(&key),
-            "a mount already sits at {prefix:?}"
-        );
+        let canonical = self.free_prefix(prefix, "mount prefix");
+        self.folds = self.folds.with(&CaseFolds::of(&canonical, &backend));
         self.mounts
-            .insert(key, Arc::new(Mutex::new(Box::new(backend))));
+            .insert(canonical.to_buf(), Arc::new(Mutex::new(Box::new(backend))));
         self
     }
 
@@ -427,21 +198,34 @@ impl VfsRefBuilder {
     /// Panics when `root` is not an absolute virtual path or a mount
     /// already sits at `root`: both are construction-time bugs.
     #[must_use]
+    #[track_caller]
     pub fn store(mut self, root: &str, backend: impl Vfs + 'static) -> VfsRefBuilder {
-        let canonical = canonicalize_absolute(root)
-            .unwrap_or_else(|err| panic!("invalid store root {root:?}: {err}"));
-        let key = canonical.to_buf();
-        assert!(
-            !self.mounts.contains_key(&key),
-            "a mount already sits at {root:?}"
-        );
+        let canonical = self.free_prefix(root, "store root");
+        let folds = CaseFolds::of(&canonical, &backend);
+        self.folds = self.folds.with(&folds);
         let mount: Mounted = Arc::new(Mutex::new(Box::new(backend)));
-        self.mounts.insert(key, Arc::clone(&mount));
+        self.mounts.insert(canonical.to_buf(), Arc::clone(&mount));
         self.store = Some(StoreDecl {
             root: canonical,
             mount,
+            folds,
         });
         self
+    }
+
+    /// Canonicalizes `prefix`, a mount prefix or store root (`what`),
+    /// and checks that no mount sits there yet.
+    #[track_caller]
+    fn free_prefix(&self, prefix: &str, what: &str) -> VfsPath {
+        let canonical = match canonicalize_absolute(prefix) {
+            Ok(canonical) => canonical,
+            Err(err) => panic!("invalid {what} {prefix:?}: {err}"),
+        };
+        assert!(
+            !self.mounts.contains_key(&canonical.to_buf()),
+            "a mount already sits at {prefix:?}"
+        );
+        canonical
     }
 
     /// Installs the policy consulted on every operation, consuming and
@@ -484,7 +268,13 @@ impl VfsRefBuilder {
     #[must_use]
     pub fn build(self) -> VfsRef {
         let policy = self.policy.unwrap_or_else(|| Arc::new(AllowAll));
-        VfsRef::from_router(Router::new(self.mounts), policy, self.sink, self.store)
+        VfsRef::from_router(
+            Router::new(self.mounts),
+            policy,
+            self.sink,
+            self.store,
+            self.folds,
+        )
     }
 }
 

@@ -299,9 +299,8 @@ fn an_operation_through_a_store_view_held_past_done_is_refused_and_changes_nothi
         panic!("the run's first effect is its store write: {held:?}");
     };
     match access.write("kept.txt", b"after the run") {
-        Err(VfsError::PermissionDenied { path, reason }) => {
+        Err(VfsError::ScopeEnded { path }) => {
             assert_eq!(path, "kept.txt", "the refusal names the logical path");
-            assert!(reason.contains("has ended"), "{reason}");
         }
         other => panic!("a write through a view held past Done is refused, got {other:?}"),
     }

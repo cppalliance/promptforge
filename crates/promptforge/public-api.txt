@@ -22,10 +22,16 @@
 #[non_exhaustive] pub enum promptforge::tools::ToolCatalogErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolErrorKind
 #[non_exhaustive] pub enum promptforge::tools::ToolIdErrorKind
+#[non_exhaustive] pub enum promptforge::vfs::Depth
 #[non_exhaustive] pub enum promptforge::vfs::FileType
+#[non_exhaustive] pub enum promptforge::vfs::GlobKind
+#[non_exhaustive] pub enum promptforge::vfs::Mode
+#[non_exhaustive] pub enum promptforge::vfs::Op
 #[non_exhaustive] pub enum promptforge::vfs::PathReason
+#[non_exhaustive] pub enum promptforge::vfs::Verdict
 #[non_exhaustive] pub enum promptforge::vfs::VfsError
 #[non_exhaustive] pub enum promptforge::vfs::VfsOp
+#[non_exhaustive] pub enum promptforge::vfs::Writability
 #[non_exhaustive] pub promptforge::model::ModelCatalogError::DuplicateId { .. }
 #[non_exhaustive] pub promptforge::model::TemperatureError::OutOfRange { .. }
 #[non_exhaustive] pub promptforge::tools::ToolCatalogError::DuplicateId { .. }
@@ -182,9 +188,11 @@ auto promptforge::tools::ToolOutput: Freeze, RefUnwindSafe, Send, Sync, Unpin, U
 auto promptforge::vfs::Access: !Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::AcquireContext: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::AllowAll: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::Depth: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Entry: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::ExecId: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::FileType: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::GlobKind: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::MemoryBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Mode: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::ModeHandle: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -192,6 +200,7 @@ auto promptforge::vfs::ModePolicy: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unw
 auto promptforge::vfs::Op: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::OpEvent: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Origin: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
+auto promptforge::vfs::ParsePathReasonError: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::PathReason: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::RealBackend: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::Stat: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
@@ -203,6 +212,7 @@ auto promptforge::vfs::VfsPath: Freeze, RefUnwindSafe, Send, Sync, Unpin, Unwind
 auto promptforge::vfs::VfsPathBuf: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 auto promptforge::vfs::VfsRef: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
 auto promptforge::vfs::VfsRefBuilder: Freeze, !RefUnwindSafe, Send, Sync, Unpin, !UnwindSafe
+auto promptforge::vfs::Writability: Freeze, RefUnwindSafe, Send, Sync, Unpin, UnwindSafe
 derives promptforge::MissingService: Clone, Debug, Eq, PartialEq
 derives promptforge::ParseError: Debug
 derives promptforge::ParseErrorKind: Clone, Copy, Debug, Eq, Hash, PartialEq
@@ -304,20 +314,23 @@ derives promptforge::tools::ToolIdErrorKind: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::tools::ToolOutput: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::Access: Debug
 derives promptforge::vfs::AcquireContext: Clone, Debug
-derives promptforge::vfs::AllowAll: Debug, Default
-derives promptforge::vfs::Entry: Clone, Debug
+derives promptforge::vfs::AllowAll: Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+derives promptforge::vfs::Depth: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::Entry: Clone, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::ExecId: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::FileType: Clone, Copy, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::GlobKind: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::MemoryBackend: Clone, Debug, Default
 derives promptforge::vfs::Mode: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::ModeHandle: Clone, Debug
 derives promptforge::vfs::ModePolicy: Debug
 derives promptforge::vfs::Op: Clone, Copy, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::OpEvent: Debug
-derives promptforge::vfs::Origin: Clone, Debug
+derives promptforge::vfs::Origin: Clone, Debug, Eq, Hash, PartialEq
+derives promptforge::vfs::ParsePathReasonError: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::PathReason: Clone, Copy, Debug, Eq, PartialEq
 derives promptforge::vfs::RealBackend: Clone, Debug
-derives promptforge::vfs::Stat: Clone, Debug
+derives promptforge::vfs::Stat: Clone, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::Verdict: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsError: Clone, Debug, Eq, PartialEq
 derives promptforge::vfs::VfsOp: Clone, Debug, Deserialize, Eq, PartialEq, Serialize
@@ -326,6 +339,7 @@ derives promptforge::vfs::VfsPath: Clone, Debug, Eq, Hash, PartialEq
 derives promptforge::vfs::VfsPathBuf: Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
 derives promptforge::vfs::VfsRef: Clone, Debug, Default
 derives promptforge::vfs::VfsRefBuilder: Debug
+derives promptforge::vfs::Writability: Clone, Copy, Debug, Eq, Hash, PartialEq
 impl core::convert::From<&promptforge::model::Completion> for promptforge::effect::ChatAnswerRecord
 impl core::convert::From<promptforge::ids::ChainId> for promptforge::ids::TaskId
 impl core::convert::From<promptforge::vfs::VfsPath> for promptforge::vfs::VfsPathBuf
@@ -345,6 +359,7 @@ impl core::error::Error for promptforge::plugins::PluginIdError
 impl core::error::Error for promptforge::tools::ToolCatalogError
 impl core::error::Error for promptforge::tools::ToolError
 impl core::error::Error for promptforge::tools::ToolIdError
+impl core::error::Error for promptforge::vfs::ParsePathReasonError
 impl core::error::Error for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::ParseError
 impl core::fmt::Display for promptforge::RunError
@@ -371,6 +386,7 @@ impl core::fmt::Display for promptforge::tools::ToolCatalogError
 impl core::fmt::Display for promptforge::tools::ToolError
 impl core::fmt::Display for promptforge::tools::ToolId
 impl core::fmt::Display for promptforge::tools::ToolIdError
+impl core::fmt::Display for promptforge::vfs::ParsePathReasonError
 impl core::fmt::Display for promptforge::vfs::PathReason
 impl core::fmt::Display for promptforge::vfs::VfsError
 impl core::fmt::Display for promptforge::vfs::VfsPath
@@ -395,6 +411,8 @@ impl core::str::traits::FromStr for promptforge::plugins::PluginId
 impl core::str::traits::FromStr for promptforge::plugins::PluginId { type Err = promptforge::plugins::PluginIdError }
 impl core::str::traits::FromStr for promptforge::tools::ToolId
 impl core::str::traits::FromStr for promptforge::tools::ToolId { type Err = promptforge::tools::ToolIdError }
+impl core::str::traits::FromStr for promptforge::vfs::PathReason
+impl core::str::traits::FromStr for promptforge::vfs::PathReason { type Err = promptforge::vfs::ParsePathReasonError }
 impl promptforge::vfs::Policy for promptforge::vfs::AllowAll
 impl promptforge::vfs::Policy for promptforge::vfs::ModePolicy
 impl promptforge::vfs::Vfs for promptforge::vfs::MemoryBackend
@@ -424,9 +442,6 @@ pub enum promptforge::effect::AnswerRecord
 pub enum promptforge::effect::Effect
 pub enum promptforge::effect::EffectAnswer
 pub enum promptforge::effect::EffectRecord
-pub enum promptforge::vfs::Mode
-pub enum promptforge::vfs::Op
-pub enum promptforge::vfs::Verdict
 pub enum promptforge::vfs::VfsOutcome
 pub fn promptforge::MissingService::new(plugin: promptforge::plugins::PluginId, service: impl core::convert::Into<alloc::string::String>) -> promptforge::MissingService
 pub fn promptforge::ParseError::column(&self) -> core::option::Option<u32>
@@ -689,21 +704,26 @@ pub fn promptforge::tools::ToolOutput::trust(&self) -> promptforge::tools::Outpu
 pub fn promptforge::tools::ToolOutput::trusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
 pub fn promptforge::tools::ToolOutput::untrusted(text: impl core::convert::Into<alloc::string::String>) -> promptforge::tools::ToolOutput
 pub fn promptforge::vfs::Access::append(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::close(self) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::copy(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::exists(&self, path: &str) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::list(&self, path: &str) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::mkdir(&self, path: &str, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::mkdir_with(&self, path: &str, depth: promptforge::vfs::Depth) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read_range(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read_range_numbered(&self, path: &str, start: usize, end: core::option::Option<usize>) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::read_string(&self, path: &str) -> core::result::Result<alloc::string::String, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::remove(&self, path: &str, recursive: bool) -> core::result::Result<bool, promptforge::vfs::VfsError>
+pub fn promptforge::vfs::Access::remove_with(&self, path: &str, depth: promptforge::vfs::Depth) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::rename(&self, from: &str, to: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::stat(&self, path: &str) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::str_replace(&self, path: &str, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Access::write(&self, path: &str, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::AcquireContext::id(&self) -> promptforge::vfs::ExecId
+pub fn promptforge::vfs::Entry::new(name: impl core::convert::Into<alloc::string::String>, stat: promptforge::vfs::Stat) -> promptforge::vfs::Entry
+pub fn promptforge::vfs::Entry::with_description(self, description: core::option::Option<alloc::string::String>) -> promptforge::vfs::Entry
 pub fn promptforge::vfs::MemoryBackend::new() -> promptforge::vfs::MemoryBackend
 pub fn promptforge::vfs::ModeHandle::mode(&self) -> promptforge::vfs::Mode
 pub fn promptforge::vfs::ModeHandle::set(&self, mode: promptforge::vfs::Mode)
@@ -714,32 +734,43 @@ pub fn promptforge::vfs::OpEvent::origin(&self) -> &'a promptforge::vfs::Origin
 pub fn promptforge::vfs::OpEvent::path(&self) -> &'a promptforge::vfs::VfsPath
 pub fn promptforge::vfs::Origin::at(label: impl core::convert::Into<alloc::string::String>, file: impl core::convert::Into<alloc::string::String>, line: u32) -> promptforge::vfs::Origin
 pub fn promptforge::vfs::Origin::new(label: impl core::convert::Into<alloc::string::String>) -> promptforge::vfs::Origin
+pub fn promptforge::vfs::ParsePathReasonError::input(&self) -> &str
 pub fn promptforge::vfs::PathReason::from_tag(tag: &str) -> core::option::Option<promptforge::vfs::PathReason>
 pub fn promptforge::vfs::PathReason::tag(self) -> &'static str
 pub fn promptforge::vfs::Policy::check(&self, op: promptforge::vfs::Op, path: &promptforge::vfs::VfsPath) -> promptforge::vfs::Verdict
 pub fn promptforge::vfs::RealBackend::identity() -> promptforge::vfs::RealBackend
 pub fn promptforge::vfs::RealBackend::rooted(dir: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<promptforge::vfs::RealBackend, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::RealBackend::with_read_only(self, read_only: bool) -> promptforge::vfs::RealBackend
+pub fn promptforge::vfs::RealBackend::with_writability(self, writability: promptforge::vfs::Writability) -> promptforge::vfs::RealBackend
+pub fn promptforge::vfs::Stat::new(file_type: promptforge::vfs::FileType, size: u64) -> promptforge::vfs::Stat
+pub fn promptforge::vfs::Stat::with_created(self, created: core::option::Option<std::time::SystemTime>) -> promptforge::vfs::Stat
+pub fn promptforge::vfs::Stat::with_mode(self, mode: core::option::Option<u32>) -> promptforge::vfs::Stat
+pub fn promptforge::vfs::Stat::with_modified(self, modified: core::option::Option<std::time::SystemTime>) -> promptforge::vfs::Stat
 pub fn promptforge::vfs::Vfs::acquire(&mut self, cx: &promptforge::vfs::AcquireContext) -> core::result::Result<alloc::boxed::Box<dyn promptforge::vfs::VfsAccess>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::Vfs::read_only(&self) -> bool { .. }
 pub fn promptforge::vfs::Vfs::release(&mut self, id: promptforge::vfs::ExecId) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::append(&mut self, path: &promptforge::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::chmod(&mut self, path: &promptforge::vfs::VfsPath, mode: u32) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::close(&mut self) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::copy(&mut self, from: &promptforge::vfs::VfsPath, to: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::exists(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<bool, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::glob(&self, pattern: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::glob_kind(&self, pattern: &str, dirs_only: bool) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError> { .. }
+pub fn promptforge::vfs::VfsAccess::glob_with(&self, pattern: &str, kind: promptforge::vfs::GlobKind) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::list(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<promptforge::vfs::Entry>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::mkdir(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::mkdir_with(&mut self, path: &promptforge::vfs::VfsPath, depth: promptforge::vfs::Depth) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::read(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::read_link(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<promptforge::vfs::VfsPathBuf, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::read_range(&self, path: &promptforge::vfs::VfsPath, offset: u64, len: u64) -> core::result::Result<alloc::vec::Vec<u8>, promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::remove(&mut self, path: &promptforge::vfs::VfsPath, recursive: bool) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsAccess::remove_with(&mut self, path: &promptforge::vfs::VfsPath, depth: promptforge::vfs::Depth) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::rename(&mut self, from: &promptforge::vfs::VfsPath, to: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::stat(&self, path: &promptforge::vfs::VfsPath) -> core::result::Result<promptforge::vfs::Stat, promptforge::vfs::VfsError>
 pub fn promptforge::vfs::VfsAccess::str_replace(&mut self, path: &promptforge::vfs::VfsPath, old: &str, new: &str) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::symlink(&mut self, target: &promptforge::vfs::VfsPath, link: &promptforge::vfs::VfsPath) -> core::result::Result<(), promptforge::vfs::VfsError> { .. }
 pub fn promptforge::vfs::VfsAccess::write(&mut self, path: &promptforge::vfs::VfsPath, contents: &[u8]) -> core::result::Result<(), promptforge::vfs::VfsError>
+pub fn promptforge::vfs::VfsError::tag(&self) -> &'static str
 pub fn promptforge::vfs::VfsPath::as_str(&self) -> &str
 pub fn promptforge::vfs::VfsPath::to_buf(&self) -> promptforge::vfs::VfsPathBuf
 pub fn promptforge::vfs::VfsPathBuf::as_str(&self) -> &str
@@ -1303,6 +1334,8 @@ pub promptforge::tools::ToolIdErrorKind::Charset
 pub promptforge::tools::ToolIdErrorKind::Control
 pub promptforge::tools::ToolIdErrorKind::Empty
 pub promptforge::tools::ToolIdErrorKind::SegmentCount
+pub promptforge::vfs::Depth::One
+pub promptforge::vfs::Depth::Recursive
 pub promptforge::vfs::Entry::description: core::option::Option<alloc::string::String>
 pub promptforge::vfs::Entry::name: alloc::string::String
 pub promptforge::vfs::Entry::stat: promptforge::vfs::Stat
@@ -1313,6 +1346,8 @@ pub promptforge::vfs::FileType::Fifo
 pub promptforge::vfs::FileType::File
 pub promptforge::vfs::FileType::Socket
 pub promptforge::vfs::FileType::Symlink
+pub promptforge::vfs::GlobKind::DirsOnly
+pub promptforge::vfs::GlobKind::FilesOnly
 pub promptforge::vfs::Mode::Agent
 pub promptforge::vfs::Mode::Ask
 pub promptforge::vfs::Mode::Plan
@@ -1360,11 +1395,17 @@ pub promptforge::vfs::VfsError::Anchor { .. }
 pub promptforge::vfs::VfsError::Anchor::anchor: alloc::string::String
 pub promptforge::vfs::VfsError::Anchor::count: usize
 pub promptforge::vfs::VfsError::Anchor::path: alloc::string::String
+pub promptforge::vfs::VfsError::ApprovalRequired { .. }
+pub promptforge::vfs::VfsError::ApprovalRequired::path: alloc::string::String
+pub promptforge::vfs::VfsError::ApprovalRequired::reason: alloc::string::String
 pub promptforge::vfs::VfsError::Backend { .. }
 pub promptforge::vfs::VfsError::Backend::message: alloc::string::String
 pub promptforge::vfs::VfsError::Conflict { .. }
 pub promptforge::vfs::VfsError::Conflict::detail: alloc::string::String
 pub promptforge::vfs::VfsError::Conflict::path: alloc::string::String
+pub promptforge::vfs::VfsError::CrossMount { .. }
+pub promptforge::vfs::VfsError::CrossMount::detail: alloc::string::String
+pub promptforge::vfs::VfsError::CrossMount::path: alloc::string::String
 pub promptforge::vfs::VfsError::DirectoryNotEmpty { .. }
 pub promptforge::vfs::VfsError::DirectoryNotEmpty::path: alloc::string::String
 pub promptforge::vfs::VfsError::InvalidPath { .. }
@@ -1373,17 +1414,33 @@ pub promptforge::vfs::VfsError::InvalidPath::reason: promptforge::vfs::PathReaso
 pub promptforge::vfs::VfsError::InvalidRange { .. }
 pub promptforge::vfs::VfsError::InvalidRange::path: alloc::string::String
 pub promptforge::vfs::VfsError::InvalidRange::reason: &'static str
+pub promptforge::vfs::VfsError::Io { .. }
+pub promptforge::vfs::VfsError::Io::kind: core::io::error::ErrorKind
+pub promptforge::vfs::VfsError::Io::message: alloc::string::String
+pub promptforge::vfs::VfsError::Io::path: alloc::string::String
+pub promptforge::vfs::VfsError::Io::raw_os_error: core::option::Option<i32>
 pub promptforge::vfs::VfsError::IsADirectory { .. }
 pub promptforge::vfs::VfsError::IsADirectory::path: alloc::string::String
+pub promptforge::vfs::VfsError::NoStore
 pub promptforge::vfs::VfsError::NotADirectory { .. }
 pub promptforge::vfs::VfsError::NotADirectory::path: alloc::string::String
 pub promptforge::vfs::VfsError::NotFound { .. }
 pub promptforge::vfs::VfsError::NotFound::path: alloc::string::String
 pub promptforge::vfs::VfsError::NotUtf8 { .. }
 pub promptforge::vfs::VfsError::NotUtf8::path: alloc::string::String
+pub promptforge::vfs::VfsError::NotUtf8::valid_up_to: usize
+pub promptforge::vfs::VfsError::OutsideRoot { .. }
+pub promptforge::vfs::VfsError::OutsideRoot::detail: alloc::string::String
+pub promptforge::vfs::VfsError::OutsideRoot::path: alloc::string::String
 pub promptforge::vfs::VfsError::PermissionDenied { .. }
 pub promptforge::vfs::VfsError::PermissionDenied::path: alloc::string::String
 pub promptforge::vfs::VfsError::PermissionDenied::reason: alloc::string::String
+pub promptforge::vfs::VfsError::ReadOnly { .. }
+pub promptforge::vfs::VfsError::ReadOnly::path: alloc::string::String
+pub promptforge::vfs::VfsError::RootProtected { .. }
+pub promptforge::vfs::VfsError::RootProtected::path: alloc::string::String
+pub promptforge::vfs::VfsError::ScopeEnded { .. }
+pub promptforge::vfs::VfsError::ScopeEnded::path: alloc::string::String
 pub promptforge::vfs::VfsError::Unsupported { .. }
 pub promptforge::vfs::VfsError::Unsupported::detail: alloc::string::String
 pub promptforge::vfs::VfsError::Unsupported::path: alloc::string::String
@@ -1418,6 +1475,8 @@ pub promptforge::vfs::VfsOutcome::Paths::0: alloc::vec::Vec<alloc::string::Strin
 pub promptforge::vfs::VfsOutcome::Text(..)
 pub promptforge::vfs::VfsOutcome::Text::0: alloc::string::String
 pub promptforge::vfs::VfsOutcome::Unit
+pub promptforge::vfs::Writability::ReadOnly
+pub promptforge::vfs::Writability::ReadWrite
 pub struct promptforge::Run { /* private fields */ }
 pub struct promptforge::RunSeed(/* private fields */)
 pub struct promptforge::RunUid(/* private fields */)
@@ -1448,6 +1507,7 @@ pub struct promptforge::vfs::ExecId(/* private fields */)
 pub struct promptforge::vfs::ModeHandle { /* private fields */ }
 pub struct promptforge::vfs::ModePolicy { /* private fields */ }
 pub struct promptforge::vfs::OpEvent<'a> { /* private fields */ }
+pub struct promptforge::vfs::ParsePathReasonError { /* private fields */ }
 pub struct promptforge::vfs::VfsPath { /* private fields */ }
 pub struct promptforge::vfs::VfsPathBuf(/* private fields */)
 pub struct promptforge::vfs::VfsRef { /* private fields */ }

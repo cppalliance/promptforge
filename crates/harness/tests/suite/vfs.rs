@@ -35,11 +35,30 @@ type Seen = Arc<Mutex<Vec<(String, String)>>>;
 struct DeskFiles;
 
 impl Policy for DeskFiles {
-    fn check(&self, _op: Op, path: &VfsPath) -> Verdict {
-        if ["/notes.md", "/summary.md"].contains(&path.as_str()) {
-            Verdict::Allow
-        } else {
-            Verdict::Deny(format!("{path} is not a desk file"))
+    fn check(&self, op: Op, path: &VfsPath) -> Verdict {
+        let desk_file = ["/notes.md", "/summary.md"].contains(&path.as_str());
+        match op {
+            Op::Read
+            | Op::Write
+            | Op::Append
+            | Op::Delete
+            | Op::Rename
+            | Op::Mkdir
+            | Op::Copy
+            | Op::Exists
+            | Op::Glob
+            | Op::List
+            | Op::Stat
+            | Op::Symlink
+            | Op::ReadLink
+            | Op::Chmod
+                if desk_file =>
+            {
+                Verdict::Allow
+            }
+            // `Op` is `#[non_exhaustive]`: an operation added later is
+            // refused until the desk names it.
+            _ => Verdict::Deny(format!("{op:?} on {path} is not a desk file operation")),
         }
     }
 }

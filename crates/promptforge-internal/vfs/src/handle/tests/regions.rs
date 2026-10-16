@@ -110,7 +110,7 @@ fn run_pair(
 }
 
 /// The claims-gap pairs that race when unordered, by name.
-fn racing_pairs() -> [(&'static str, ClaimStep, ClaimStep); 5] {
+fn racing_pairs() -> [(&'static str, ClaimStep, ClaimStep); 6] {
     [
         (
             "remove /a against remove /a/b",
@@ -136,6 +136,11 @@ fn racing_pairs() -> [(&'static str, ClaimStep, ClaimStep); 5] {
             "write /a/b/c against glob /a/*",
             |access| access.write("/a/b/c", b"c"),
             |access| access.glob("/a/*").map(|_| ()),
+        ),
+        (
+            "write /a/..x/f against glob /a/..*",
+            |access| access.write("/a/..x/f", b"f"),
+            |access| access.glob("/a/..*").map(|_| ()),
         ),
     ]
 }
@@ -171,5 +176,22 @@ fn a_listing_does_not_conflict_with_a_recursive_remove_of_a_grandchild() -> Resu
     for (lead, trail) in [(list, remove), (remove, list)] {
         run_pair(lead, trail, false)??;
     }
+    Ok(())
+}
+
+#[test]
+fn a_pattern_whose_wildcard_segment_begins_with_dots_claims_without_panicking()
+-> Result<(), VfsError> {
+    // The literal cut before the wildcard ends in `.` or `..`, which is
+    // not itself canonical; `/..*` cuts to a climb past the root.
+    let vfs = handle(TestFs::seeded(&[("/d/.hidden", "h"), ("/..x", "x")]));
+    let reader = access(&vfs)?;
+    assert_eq!(reader.glob("/d/.*")?, vec!["/d/.hidden".to_owned()]);
+    assert_eq!(reader.glob("/..*")?, vec!["/..x".to_owned()]);
+    // The claims stand: another scope's write under either pattern
+    // conflicts.
+    let writer = access(&vfs)?;
+    conflict_message(writer.write("/d/.new", b"n"));
+    conflict_message(writer.write("/..y", b"y"));
     Ok(())
 }

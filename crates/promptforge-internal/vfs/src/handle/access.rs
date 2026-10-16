@@ -29,9 +29,8 @@ impl Access {
     /// identity; see [`VfsRef::acquire`]. A failed spawn still advances
     /// this capability's own clock entry, which orders nothing new: its
     /// later accesses are merely no longer ordered before a child that
-    /// never ran. Returns [`VfsError::PermissionDenied`], before the
-    /// fork, when the run or the tool call that owned this capability
-    /// has ended.
+    /// never ran. Returns [`VfsError::ScopeEnded`], before the fork, when
+    /// the run or the tool call that owned this capability has ended.
     ///
     /// Crate-internal: backs [`crate::detail::access_spawn`].
     pub(crate) fn spawn(&self, origin: Origin) -> Result<Access, VfsError> {
@@ -70,10 +69,11 @@ impl Access {
             // see the same store.
             root: self.root.clone(),
             store_root: self.store_root.clone(),
-            volume: self.volume.clone(),
-            policy: self.policy.clone(),
+            volume: Arc::clone(&self.volume),
+            policy: Arc::clone(&self.policy),
             scope: Arc::clone(&self.scope),
             inner: Mutex::new(inner),
+            released: false,
         })
     }
 
@@ -97,9 +97,9 @@ impl Access {
 
     /// The claims-table half of one operation: refuses once the run that
     /// owned this access has ended, runs `claim` against this access's
-    /// identity and scope - whose view refuses once the tool call that
-    /// owned the identity has ended - and re-spells a store view's error
-    /// paths into the caller's logical form.
+    /// identity and scope on `path`'s claim key - whose view refuses once
+    /// the tool call that owned the identity has ended - and re-spells a
+    /// store view's error paths into the caller's logical form.
     pub(super) fn admit(
         &self,
         claim: impl FnOnce(&Claims, &Arc<Scope>, ExecId, &VfsPath) -> Result<(), VfsError>,
@@ -107,8 +107,21 @@ impl Access {
     ) -> Result<(), VfsError> {
         self.scope
             .refuse_if_closed(path)
-            .and_then(|()| claim(&self.volume.claims, &self.scope, self.id, path))
+            .and_then(|()| {
+                claim(
+                    &self.volume.claims,
+                    &self.scope,
+                    self.id,
+                    &self.claim_key(path),
+                )
+            })
             .map_err(|err| self.relativize(err))
+    }
+
+    /// The key `path` is claimed under: the path, case-folded below a
+    /// mount whose file system folds case.
+    pub(super) fn claim_key(&self, path: &VfsPath) -> VfsPath {
+        self.volume.folds.key(path)
     }
 
     /// Re-spells an error's paths for the store view's caller; a plain
@@ -141,13 +154,17 @@ impl Access {
         Ok(path)
     }
 
-    /// Consults the handle's policy. `Ask` maps to `PermissionDenied`:
+    /// Consults the handle's policy. `Ask` maps to `ApprovalRequired`:
     /// this layer never asks for approval, and the reason string still
     /// names what was asked and which rule fired.
     fn check_policy(&self, op: Op, path: &VfsPath) -> Result<(), VfsError> {
         match self.policy.check(op, path) {
             Verdict::Allow => Ok(()),
-            Verdict::Deny(reason) | Verdict::Ask(reason) => Err(VfsError::PermissionDenied {
+            Verdict::Deny(reason) => Err(VfsError::PermissionDenied {
+                path: path.to_string(),
+                reason,
+            }),
+            Verdict::Ask(reason) => Err(VfsError::ApprovalRequired {
                 path: path.to_string(),
                 reason,
             }),

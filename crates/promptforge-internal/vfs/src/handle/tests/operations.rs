@@ -2,6 +2,7 @@
 //! the handle, the empty-anchor refusal, line ranges, and UTF-8 reads.
 
 use super::*;
+use crate::traits::Depth;
 
 #[test]
 fn an_access_reads_and_writes_through_the_handle() -> Result<(), VfsError> {
@@ -120,13 +121,31 @@ fn read_range_numbered_pads_to_the_widest_emitted_number() -> Result<(), VfsErro
 #[test]
 fn read_string_rejects_non_utf8() -> Result<(), VfsError> {
     let access = access(&handle(TestFs::default()))?;
-    access.write("/bin.dat", &[0xff, 0xfe])?;
+    access.write("/bin.dat", &[b'a', 0xff, 0xfe])?;
     match access.read_string("/bin.dat") {
-        Err(VfsError::NotUtf8 { path }) => {
+        Err(VfsError::NotUtf8 { path, valid_up_to }) => {
             assert_eq!(path, "/bin.dat");
+            assert_eq!(valid_up_to, 1, "the offset of the first invalid byte");
         }
         other => panic!("expected a UTF-8 failure, got {other:?}"),
     }
+    Ok(())
+}
+
+#[test]
+fn the_depth_siblings_remove_and_create_as_far_as_their_depth() -> Result<(), VfsError> {
+    let access = access(&handle(TestFs::seeded(&[("/d/a.txt", "a")])))?;
+    assert_eq!(
+        access.remove_with("/d", Depth::One),
+        Err(VfsError::DirectoryNotEmpty {
+            path: "/d".to_owned(),
+        })
+    );
+    assert!(access.remove_with("/d", Depth::Recursive)?);
+    assert!(!access.remove_with("/d", Depth::Recursive)?, "already gone");
+    assert!(access.mkdir_with("/p/q", Depth::One).is_err());
+    access.mkdir_with("/p/q", Depth::Recursive)?;
+    assert!(access.exists("/p")?);
     Ok(())
 }
 

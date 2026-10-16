@@ -90,13 +90,7 @@ fn an_ended_identity_refuses_operations_spawns_and_views_while_the_scope_stays_o
 -> Result<(), VfsError> {
     fn refused<T: std::fmt::Debug>(result: Result<T, VfsError>, expected: &str) {
         match result {
-            Err(VfsError::PermissionDenied { path, reason }) => {
-                assert_eq!(path, expected);
-                assert!(
-                    reason.contains("the tool call that owned this access has ended"),
-                    "{reason}"
-                );
-            }
+            Err(VfsError::ScopeEnded { path }) => assert_eq!(path, expected),
             other => panic!("expected an ended-call refusal on {expected}, got {other:?}"),
         }
     }

@@ -1,24 +1,25 @@
 //! Real-file helpers: the failure-atomic write, ancestor creation,
-//! the glob walk, and the metadata mapping.
+//! the glob walk, the UTF-8 check of real names, and the metadata
+//! mapping.
 
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::map_io;
+use super::{map_io, platform};
 use crate::error::VfsError;
 use crate::path::VfsPath;
-use crate::stat::{FileType, Stat};
+use crate::stat::Stat;
 
 /// Uniquifies failure-atomic temp file names within the process.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Writes `contents` to `dest` failure-atomically: a sibling temp file
-/// plus rename, so a failed write leaves the destination unchanged and
-/// no temp file behind.
-pub(super) fn atomic_write(dest: &Path, contents: &[u8]) -> Result<(), VfsError> {
-    let display = dest.to_string_lossy().into_owned();
+/// Writes `contents` to `dest`, the real path of `path`,
+/// failure-atomically: a sibling temp file plus rename, so a failed
+/// write leaves the destination unchanged and no temp file behind.
+pub(super) fn atomic_write(dest: &Path, path: &VfsPath, contents: &[u8]) -> Result<(), VfsError> {
     let Some(parent) = dest.parent() else {
         // A destination without a parent names only the filesystem root:
         // the write addresses nothing below the root. No canonical
@@ -26,27 +27,29 @@ pub(super) fn atomic_write(dest: &Path, contents: &[u8]) -> Result<(), VfsError>
         // not a path rule a caller broke; reporting a path reason here
         // would blame the path for the backend's own shape.
         return Err(VfsError::Backend {
-            message: format!("write destination has no parent directory: {display:?}"),
+            message: format!("write destination of {path} has no parent directory"),
         });
     };
     let Some(name) = dest.file_name() else {
         return Err(VfsError::Backend {
-            message: format!("write destination has no file name: {display:?}"),
+            message: format!("write destination of {path} has no file name"),
         });
     };
-    let temp = parent.join(format!(
-        ".{}.vfs-tmp-{}-{}",
-        name.to_string_lossy(),
+    let mut temp_name = OsString::from(".");
+    temp_name.push(name);
+    temp_name.push(format!(
+        ".vfs-tmp-{}-{}",
         std::process::id(),
         TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
+    let temp = parent.join(temp_name);
+    let failed = |err: std::io::Error| map_io(path.as_str(), &err);
     let outcome = (|| {
-        let mut file = File::create(&temp).map_err(|err| map_io(&display, &err))?;
-        file.write_all(contents)
-            .map_err(|err| map_io(&display, &err))?;
-        file.sync_all().map_err(|err| map_io(&display, &err))?;
+        let mut file = File::create(&temp).map_err(failed)?;
+        file.write_all(contents).map_err(failed)?;
+        file.sync_all().map_err(failed)?;
         drop(file);
-        fs::rename(&temp, dest).map_err(|err| map_io(&display, &err))
+        fs::rename(&temp, dest).map_err(failed)
     })();
     if outcome.is_err() {
         let _ = fs::remove_file(&temp);
@@ -79,100 +82,44 @@ pub(super) fn walk_root(pattern: &str) -> &str {
     }
 }
 
-/// Collects every path under `dir`, files and directories, without
+/// `name`, a real file or directory name that `holder`, a virtual
+/// directory, holds, as UTF-8 text. A name that is not UTF-8 has no
+/// virtual spelling, so it is refused with the byte offset where it
+/// stops being UTF-8.
+pub(super) fn utf8_name<'a>(name: &'a OsStr, holder: &str) -> Result<&'a str, VfsError> {
+    std::str::from_utf8(name.as_encoded_bytes()).map_err(|err| VfsError::NotUtf8 {
+        path: holder.to_owned(),
+        valid_up_to: err.valid_up_to(),
+    })
+}
+
+/// Collects the virtual path of every entry under `dir`, the real
+/// directory `virtual_dir` names, files and directories alike, without
 /// descending into links: a linked directory is collected, not
 /// followed, so the walk can neither leave the mounted root nor loop.
-pub(super) fn walk(dir: &Path, found: &mut Vec<PathBuf>) -> Result<(), VfsError> {
-    let entries = fs::read_dir(dir).map_err(|err| map_io(&dir.to_string_lossy(), &err))?;
-    for entry in entries {
-        let entry = entry.map_err(|err| map_io(&dir.to_string_lossy(), &err))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| map_io(&dir.to_string_lossy(), &err))?;
-        found.push(path.clone());
-        if file_type.is_dir() {
-            walk(&path, found)?;
+pub(super) fn walk(dir: &Path, virtual_dir: &str, found: &mut Vec<String>) -> Result<(), VfsError> {
+    let failed = |err: std::io::Error| map_io(virtual_dir, &err);
+    for entry in fs::read_dir(dir).map_err(failed)? {
+        let entry = entry.map_err(failed)?;
+        let file_name = entry.file_name();
+        let name = utf8_name(&file_name, virtual_dir)?;
+        let child = if virtual_dir == "/" {
+            format!("/{name}")
+        } else {
+            format!("{virtual_dir}/{name}")
+        };
+        if entry.file_type().map_err(failed)?.is_dir() {
+            walk(&entry.path(), &child, found)?;
         }
+        found.push(child);
     }
     Ok(())
 }
 
-/// Maps a real file's type to the named POSIX kinds.
-#[cfg(unix)]
-fn file_type_of(file_type: fs::FileType) -> FileType {
-    use std::os::unix::fs::FileTypeExt;
-    if file_type.is_dir() {
-        FileType::Directory
-    } else if file_type.is_symlink() {
-        FileType::Symlink
-    } else if file_type.is_file() {
-        FileType::File
-    } else if file_type.is_fifo() {
-        FileType::Fifo
-    } else if file_type.is_socket() {
-        FileType::Socket
-    } else if file_type.is_char_device() {
-        FileType::CharDevice
-    } else if file_type.is_block_device() {
-        FileType::BlockDevice
-    } else {
-        FileType::File
-    }
-}
-
-/// Maps a real file's type to the named POSIX kinds. Windows distinguishes
-/// only files, directories, and symlinks through `std`.
-#[cfg(not(unix))]
-fn file_type_of(file_type: fs::FileType) -> FileType {
-    if file_type.is_dir() {
-        FileType::Directory
-    } else if file_type.is_symlink() {
-        FileType::Symlink
-    } else {
-        FileType::File
-    }
-}
-
-/// Whether the entry is a directory link, a junction included, which
-/// Windows removes with `remove_dir`: `remove_file` fails on one.
-#[cfg(windows)]
-pub(super) fn is_dir_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::FileTypeExt;
-    metadata.file_type().is_symlink_dir()
-}
-
-/// Whether the entry is a directory link needing `remove_dir`: never
-/// off Windows, where `remove_file` removes any link.
-#[cfg(not(windows))]
-pub(super) fn is_dir_link(_: &fs::Metadata) -> bool {
-    false
-}
-
-/// POSIX mode bits where the operating system tracks them.
-#[cfg(unix)]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the not(unix) variant returns None; the Option unifies the platform signatures"
-)]
-fn mode_of(metadata: &fs::Metadata) -> Option<u32> {
-    use std::os::unix::fs::PermissionsExt;
-    Some(metadata.permissions().mode())
-}
-
-/// POSIX mode bits where the operating system tracks them: not on Windows.
-#[cfg(not(unix))]
-fn mode_of(_: &fs::Metadata) -> Option<u32> {
-    None
-}
-
 /// Builds metadata from only the fields the operating system tracks.
 pub(super) fn stat_of(metadata: &fs::Metadata) -> Stat {
-    Stat {
-        file_type: file_type_of(metadata.file_type()),
-        size: metadata.len(),
-        mode: mode_of(metadata),
-        modified: metadata.modified().ok(),
-        created: metadata.created().ok(),
-    }
+    Stat::new(platform::file_type_of(metadata.file_type()), metadata.len())
+        .with_mode(platform::mode_of(metadata))
+        .with_modified(metadata.modified().ok())
+        .with_created(metadata.created().ok())
 }

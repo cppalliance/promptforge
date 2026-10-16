@@ -7,7 +7,7 @@ use super::store_view::{strip_root, validate_store_path};
 use crate::error::{PathReason, VfsError};
 use crate::glob::validate_glob_pattern;
 use crate::stat::{Entry, Stat};
-use crate::traits::Op;
+use crate::traits::{Depth, Op};
 
 impl Access {
     /// Reads the bytes of the file at `path`, exactly as stored.
@@ -30,8 +30,9 @@ impl Access {
     /// when the file's contents are not UTF-8.
     pub fn read_string(&self, path: &str) -> Result<String, VfsError> {
         let bytes = self.read(path)?;
-        String::from_utf8(bytes).map_err(|_| VfsError::NotUtf8 {
+        String::from_utf8(bytes).map_err(|err| VfsError::NotUtf8 {
             path: path.to_owned(),
+            valid_up_to: err.utf8_error().valid_up_to(),
         })
     }
 
@@ -170,6 +171,19 @@ impl Access {
         }
     }
 
+    /// Removes the file, link, or directory at `path`, reaching as far as
+    /// `depth`: [`Depth::Recursive`] also removes a directory that holds
+    /// entries, along with everything under it.
+    ///
+    /// It is [`Access::remove`] with `recursive` set for
+    /// [`Depth::Recursive`], and returns what that returns.
+    ///
+    /// # Errors
+    /// Returns an error under the same conditions as [`Access::remove`].
+    pub fn remove_with(&self, path: &str, depth: Depth) -> Result<bool, VfsError> {
+        self.remove(path, depth.recursive())
+    }
+
     /// Reports whether anything exists at `path`.
     ///
     /// Returns `Ok(false)` only when the path is confirmed absent.
@@ -296,6 +310,15 @@ impl Access {
         self.inner().mkdir(&path, recursive)
     }
 
+    /// Creates the directory at `path`, also creating any missing parent
+    /// directories when `depth` is [`Depth::Recursive`].
+    ///
+    /// # Errors
+    /// Returns an error under the same conditions as [`Access::mkdir`].
+    pub fn mkdir_with(&self, path: &str, depth: Depth) -> Result<(), VfsError> {
+        self.mkdir(path, depth.recursive())
+    }
+
     /// Renames or moves `from` to `to`.
     ///
     /// The move is atomic where the backend allows it. It claims the
@@ -312,8 +335,9 @@ impl Access {
         // Both paths gated, so the operation is admitted: the source
         // subtree and the destination are claimed, then one event per
         // canonical path.
+        let to_key = self.claim_key(&to);
         self.admit(
-            |claims, scope, id, from| claims.claim_rename(scope, id, from, &to),
+            |claims, scope, id, from| claims.claim_rename(scope, id, from, &to_key),
             &from,
         )?;
         self.fire(Op::Rename, &from);
@@ -332,8 +356,9 @@ impl Access {
     pub fn copy(&self, from: &str, to: &str) -> Result<(), VfsError> {
         let from = self.gate(Op::Copy, from)?;
         let to = self.gate(Op::Copy, to)?;
+        let to_key = self.claim_key(&to);
         self.admit(
-            |claims, scope, id, from| claims.claim_copy(scope, id, from, &to),
+            |claims, scope, id, from| claims.claim_copy(scope, id, from, &to_key),
             &from,
         )?;
         self.fire(Op::Copy, &from);

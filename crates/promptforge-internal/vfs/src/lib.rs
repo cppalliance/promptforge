@@ -1,9 +1,8 @@
-//! The PromptForge virtual filesystem: generic machinery (canonical
-//! interned paths, the claims model, the mount router, the
-//! operation-observation seam, and backends) and the promptforge policy
-//! over it.
+//! The PromptForge virtual filesystem and the editor mode policy over it.
 //!
-//! The crate root holds promptforge policy: [`ModePolicy`], the editor mode
+//! The machinery modules hold canonical paths, the claims model, the
+//! mount router, the operation-observation seam, and the backends. The
+//! crate root holds promptforge policy: [`ModePolicy`], the editor mode
 //! gate. The machinery modules hold no promptforge policy (no run
 //! concepts). The declared store is generic machinery:
 //! [`VfsRefBuilder::store`] names any mount as the store, and the store
@@ -36,15 +35,17 @@ mod traits;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-pub use error::{PathReason, VfsError};
+pub use error::{ParsePathReasonError, PathReason, VfsError};
 pub use handle::{Access, VfsRef};
 pub use memory::MemoryBackend;
 pub use observe::{OpEvent, OpSink, Origin};
 pub use path::{VfsPath, VfsPathBuf};
-pub use real::RealBackend;
+pub use real::{RealBackend, Writability};
 pub use router::VfsRefBuilder;
 pub use stat::{Entry, FileType, Stat};
-pub use traits::{AcquireContext, AllowAll, ExecId, Op, Policy, Verdict, Vfs, VfsAccess};
+pub use traits::{
+    AcquireContext, AllowAll, Depth, ExecId, GlobKind, Op, Policy, Verdict, Vfs, VfsAccess,
+};
 
 /// The default handle has one mount: an in-memory store at `/`.
 ///
@@ -61,7 +62,11 @@ impl Default for VfsRef {
 /// storage.
 ///
 /// Reads are allowed in every mode.
+///
+/// The enum is `#[non_exhaustive]`, so a `match` on it outside this crate
+/// needs a wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Mode {
     /// Every change is refused pending user approval. Reads are allowed.
     Ask,
@@ -141,17 +146,17 @@ fn lock(mode: &Arc<Mutex<Mode>>) -> MutexGuard<'_, Mode> {
 /// Whether the operation mutates storage. Modes gate mutations, never
 /// reads.
 fn is_mutation(op: Op) -> bool {
-    matches!(
-        op,
+    match op {
         Op::Write
-            | Op::Append
-            | Op::Delete
-            | Op::Rename
-            | Op::Mkdir
-            | Op::Copy
-            | Op::Symlink
-            | Op::Chmod
-    )
+        | Op::Append
+        | Op::Delete
+        | Op::Rename
+        | Op::Mkdir
+        | Op::Copy
+        | Op::Symlink
+        | Op::Chmod => true,
+        Op::Read | Op::Exists | Op::Glob | Op::List | Op::Stat | Op::ReadLink => false,
+    }
 }
 
 /// Plan mode's markdown rule: a `.md` suffix, case-sensitively - the
@@ -309,13 +314,8 @@ mod tests {
         let access = vfs.acquire(Origin::new("mode flip test"))?;
         let path = "notes.md";
         match access.write(path, b"x") {
-            Err(VfsError::PermissionDenied { reason, .. }) => {
-                assert!(
-                    reason.contains("Ask"),
-                    "names the rule that fired: {reason}"
-                );
-            }
-            other => panic!("expected an approval denial, got {other:?}"),
+            Err(VfsError::ApprovalRequired { path, .. }) => assert_eq!(path, "/notes.md"),
+            other => panic!("expected an approval refusal, got {other:?}"),
         }
         // The UI flips the mode mid-run through the shared handle; the
         // very next operation sees it.
@@ -334,17 +334,38 @@ mod tests {
         let binary = "data.bin";
         access.write(markdown, b"# ok")?;
         match access.write(binary, b"x") {
-            Err(VfsError::PermissionDenied { reason, .. }) => {
-                assert!(
-                    reason.contains("Plan"),
-                    "names the rule that fired: {reason}"
-                );
-            }
+            Err(VfsError::PermissionDenied { path, .. }) => assert_eq!(path, "/data.bin"),
             other => panic!("expected a denial, got {other:?}"),
         }
         // The denied write never partially applied.
         assert!(!access.exists(binary)?);
         Ok(())
+    }
+
+    #[test]
+    fn exactly_the_operations_that_change_storage_are_mutations() {
+        use super::is_mutation;
+        use crate::Op;
+        let mutations = [
+            Op::Write,
+            Op::Append,
+            Op::Delete,
+            Op::Rename,
+            Op::Mkdir,
+            Op::Copy,
+            Op::Symlink,
+            Op::Chmod,
+        ];
+        let reads = [
+            Op::Read,
+            Op::Exists,
+            Op::Glob,
+            Op::List,
+            Op::Stat,
+            Op::ReadLink,
+        ];
+        assert!(mutations.into_iter().all(is_mutation));
+        assert!(!reads.into_iter().any(is_mutation));
     }
 
     #[test]

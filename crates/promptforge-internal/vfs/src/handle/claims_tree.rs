@@ -9,7 +9,7 @@ use super::prune::prune;
 use super::region::{
     parent_of, pattern_base, pattern_matches_path, pattern_overlaps_subtree, subtree_covers,
 };
-use super::scope::{Scope, View};
+use super::scope::{Clock, Scope, View};
 use crate::error::VfsError;
 use crate::path::VfsPath;
 use crate::traits::ExecId;
@@ -304,7 +304,7 @@ impl Claims {
         scope: &Arc<Scope>,
         id: ExecId,
         tables: &mut ClaimsTables,
-        tick: u64,
+        tick: Clock,
         recorded: usize,
     ) {
         scope.advance(id, tick);

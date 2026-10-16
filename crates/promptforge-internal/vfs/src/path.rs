@@ -41,6 +41,19 @@ impl VfsPath {
             text: Arc::from("/"),
         }
     }
+
+    /// Wraps `text` that is already canonical and absolute, such as a
+    /// canonical path cut at a `/`, without canonicalizing it again. The
+    /// caller's construction is the guarantee; a debug build checks it.
+    pub(crate) fn from_canonical(text: &str) -> VfsPath {
+        debug_assert!(
+            canonicalize_absolute(text).is_ok_and(|canonical| canonical.as_str() == text),
+            "{text:?} is not a canonical absolute path"
+        );
+        VfsPath {
+            text: Arc::from(text),
+        }
+    }
 }
 
 impl fmt::Debug for VfsPath {
@@ -90,8 +103,12 @@ impl fmt::Display for VfsPathBuf {
 /// pops exactly one segment and stops at the access root, never climbing
 /// above it; a trailing slash is dropped; the root canonicalizes to
 /// itself. Case is preserved and significant (POSIX semantics): paths
-/// differing only in case are distinct. A path without a leading `/`
-/// joins onto `root`, and the empty path is rejected.
+/// differing only in case are distinct. The one exception is the claims
+/// check: on Windows and macOS, where the file system treats such paths
+/// as one file, a path a rooted real mount serves is claimed under its
+/// lowercase spelling below the mount, so two spellings of one file
+/// conflict. A path without a leading `/` joins onto `root`, and the
+/// empty path is rejected.
 pub(crate) fn canonicalize(root: &VfsPath, path: &str) -> Result<VfsPath, VfsError> {
     if path.is_empty() {
         return Err(VfsError::InvalidPath {

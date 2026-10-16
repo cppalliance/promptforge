@@ -158,7 +158,7 @@ A few workspace-wide conventions and shared types keep the 11 commits consistent
     - The engine's `raised_store_error` (`crates/promptforge-internal/engine/src/error/convert.rs` ~L201) rebuilds every tag. It degrades the fields a table doesn't carry the way its existing arms do, so `Io` comes back with `kind: std::io::ErrorKind::Other` and no `raw_os_error`.
     - Enum-taking siblings, all additive. Each enum is `#[non_exhaustive]` like every facade type:
       - `Depth { One, Recursive }` for `VfsAccess::remove_with` and `VfsAccess::mkdir_with`, which are provided methods delegating to the `bool` forms so implementors keep compiling, and for `Access::remove_with` and `Access::mkdir_with`.
-      - `GlobKind { Any, DirsOnly }` for `VfsAccess::glob_with`, delegating to `glob_kind`.
+      - `GlobKind { FilesOnly, DirsOnly }` for `VfsAccess::glob_with`, both delegating to `glob_kind`, which keeps files when `dirs_only` is false.
       - `Writability { ReadWrite, ReadOnly }` for `RealBackend::with_writability`, beside `with_read_only`.
   - Lua protocol enums (lua):
     - `TaskPhase { Running, Done, Cancelled, Abandoned }`, with tags `running`, `done`, `cancelled`, `abandoned`. The engine's `TaskState::Delivered` reports `Done`.
@@ -309,6 +309,7 @@ The user chose one commit per audited slice of code, the full-message error conv
       - `ModelSet` keeps `from_parts` as its constructor and gains `push` and `set_default_alias` for its two in-place writers.
       - Names of new items that stay off the facade are the coder's choice.
       - The vibe name words are `rulebook-fixes`.
+    - Settled during Step 2 on 2026-10-15: `GlobKind` is `{ FilesOnly, DirsOnly }`, not `{ Any, DirsOnly }`. `glob_kind(pattern, false)` keeps files only, so an `Any` variant couldn't delegate to it, and `glob` already returns every match. The user chose the exact two-case replacement for the `bool`.
 - Rejected alternatives:
   - Commits grouped by theme: the user chose one commit per slice.
   - The `#[source]`-chain convention: it doesn't fit self-contained model-facing messages.
@@ -489,7 +490,7 @@ Paths starting `T/` are under `crates/promptforge-internal/types/src/`, and path
 </step-1>
 <step-2>
 
-### Step 2: vfs
+### Step 2: vfs [completed]
 
 - Component: `vfs`
 - Tests: Verify runs these from the repository root in PowerShell, in this order. A search passes only when it prints nothing.

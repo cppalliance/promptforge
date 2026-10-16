@@ -1,4 +1,4 @@
-use super::{AllowAll, Op, Policy, Verdict, Vfs, VfsAccess};
+use super::{AllowAll, Depth, GlobKind, Op, Policy, Verdict, Vfs, VfsAccess};
 use crate::error::VfsError;
 use crate::test_support::{TestFs, context, path};
 
@@ -108,14 +108,67 @@ fn the_default_str_replace_refuses_an_empty_anchor_on_a_non_empty_file() -> Resu
 #[test]
 fn the_default_str_replace_reports_non_utf8_text() -> Result<(), VfsError> {
     let mut backend = stub(&[])?;
-    backend.write(&path("/bin.dat")?, &[0xff, 0xfe])?;
+    backend.write(&path("/bin.dat")?, &[b'o', b'k', 0xff, 0xfe])?;
     assert_eq!(
         backend.str_replace(&path("/bin.dat")?, "x", "y"),
         Err(VfsError::NotUtf8 {
             path: "/bin.dat".to_owned(),
+            valid_up_to: 2,
         })
     );
     Ok(())
+}
+
+#[test]
+fn the_depth_siblings_delegate_to_the_bool_forms() -> Result<(), VfsError> {
+    let mut backend = stub(&[("/d/a.txt", "x")])?;
+    assert_eq!(
+        backend.remove_with(&path("/d")?, Depth::One),
+        Err(VfsError::DirectoryNotEmpty {
+            path: "/d".to_owned(),
+        })
+    );
+    backend.remove_with(&path("/d")?, Depth::Recursive)?;
+    assert!(!backend.exists(&path("/d")?)?);
+    assert_eq!(
+        backend.mkdir_with(&path("/p/q")?, Depth::One),
+        Err(VfsError::NotFound {
+            path: "/p/q".to_owned(),
+        })
+    );
+    backend.mkdir_with(&path("/p/q")?, Depth::Recursive)?;
+    assert!(backend.exists(&path("/p")?)?);
+    Ok(())
+}
+
+#[test]
+fn the_glob_kind_sibling_keeps_only_files_or_only_directories() -> Result<(), VfsError> {
+    let backend = stub(&[("/d/a.txt", "x")])?;
+    assert_eq!(
+        backend.glob_with("/d*", GlobKind::FilesOnly)?,
+        Vec::<String>::new(),
+        "a directory is dropped under FilesOnly"
+    );
+    assert_eq!(
+        backend.glob_with("/d/*", GlobKind::FilesOnly)?,
+        ["/d/a.txt".to_owned()],
+        "a file matches under FilesOnly"
+    );
+    assert_eq!(
+        backend.glob_with("/d/*", GlobKind::DirsOnly)?,
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        backend.glob_with("/d*", GlobKind::DirsOnly)?,
+        ["/d".to_owned()]
+    );
+    Ok(())
+}
+
+#[test]
+fn the_default_close_holds_nothing_to_release() -> Result<(), VfsError> {
+    let mut backend = stub(&[])?;
+    backend.close()
 }
 
 #[test]
@@ -140,5 +193,8 @@ fn unsupported_posix_defaults_return_the_right_error_kind() -> Result<(), VfsErr
 fn allow_all_permits_every_operation() -> Result<(), VfsError> {
     let policy = AllowAll;
     assert_eq!(policy.check(Op::Write, &path("/a.txt")?), Verdict::Allow);
+    // The unit policy copies and compares like a value.
+    let copy = policy;
+    assert_eq!(copy, AllowAll);
     Ok(())
 }

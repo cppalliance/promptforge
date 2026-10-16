@@ -9,7 +9,11 @@ fn assert_no_temp_files_left(dir: &Path) -> Result<(), VfsError> {
     for entry in fs::read_dir(dir).map_err(|err| map_io("listing the temp dir", &err))? {
         let entry = entry.map_err(|err| map_io("listing the temp dir", &err))?;
         assert!(
-            !entry.file_name().to_string_lossy().contains(".vfs-tmp-"),
+            !entry
+                .file_name()
+                .as_encoded_bytes()
+                .windows(".vfs-tmp-".len())
+                .any(|window| window == b".vfs-tmp-"),
             "a temp file survived: {}",
             entry.path().display()
         );

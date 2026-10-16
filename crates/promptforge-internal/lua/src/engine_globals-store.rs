@@ -67,7 +67,9 @@ pub fn store_error_message(
         VfsError::NotADirectory { path } => format!("not a directory in store: {path}"),
         VfsError::IsADirectory { path } => format!("is a directory in store: {path}"),
         VfsError::DirectoryNotEmpty { path } => format!("directory not empty in store: {path}"),
-        VfsError::NotUtf8 { path } => format!("file in store is not UTF-8: {path}"),
+        VfsError::NotUtf8 { path, valid_up_to } => {
+            format!("file in store is not UTF-8 after byte {valid_up_to}: {path}")
+        }
         VfsError::InvalidPath { path, reason } => {
             if matches!(op, crate::protocol::VfsOp::Glob { .. }) {
                 format!("invalid glob pattern {path:?}: {reason}")
@@ -97,6 +99,25 @@ pub fn store_error_message(
         VfsError::PermissionDenied { path, reason } => {
             format!("permission denied for store path {path}: {reason}")
         }
+        VfsError::ApprovalRequired { path, reason } => {
+            format!("store path {path} needs approval, which this run cannot give: {reason}")
+        }
+        VfsError::ScopeEnded { path } => format!(
+            "store access ended: the run or tool call that owned it has ended, so {path} \
+             can no longer be touched through it"
+        ),
+        VfsError::ReadOnly { path } => format!("store path is read-only: {path}"),
+        VfsError::OutsideRoot { path, detail } => {
+            format!("store path {path} is outside the mounted root: {detail}")
+        }
+        VfsError::RootProtected { path } => {
+            format!("the store's mounted root cannot be removed, renamed, or replaced: {path}")
+        }
+        VfsError::NoStore => "no store is declared, so no store operation can run".to_owned(),
+        VfsError::CrossMount { path, detail } => {
+            format!("store operation on {path} spans two mounts: {detail}")
+        }
+        VfsError::Io { path, message, .. } => format!("store I/O failure on {path}: {message}"),
         VfsError::Unsupported { path, detail } => {
             format!("unsupported store operation on {path}: {detail}")
         }

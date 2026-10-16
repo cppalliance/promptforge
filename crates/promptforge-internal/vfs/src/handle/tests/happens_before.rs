@@ -2,6 +2,7 @@
 //! order lets through, and the prune that keeps the tables bounded.
 
 use super::*;
+use crate::handle::scope::Clock;
 
 #[test]
 fn dropping_an_access_releases_its_identity_and_claims() -> Result<(), VfsError> {
@@ -300,7 +301,11 @@ fn a_prune_collapses_an_epoch_that_only_a_held_ended_identity_never_saw() -> Res
         .find(|(path, _)| path.as_str() == "/after.txt")
         .and_then(|(_, region)| region.write)
         .expect("the owner's write is recorded");
-    assert_eq!(write.1.clock, 0, "the prune collapses the owner's write");
+    assert_eq!(
+        write.1.clock,
+        Clock::ZERO,
+        "the prune collapses the owner's write"
+    );
     drop(tables);
     drop(call);
     Ok(())

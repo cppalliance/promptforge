@@ -3,7 +3,7 @@
 //! regions by.
 
 use crate::glob::{compile_glob, matches_tokens, validate_glob_grammar};
-use crate::path::{VfsPath, canonicalize_absolute};
+use crate::path::VfsPath;
 
 /// The parent directory of `path`, or `None` at the namespace root.
 pub(super) fn parent_of(path: &VfsPath) -> Option<VfsPath> {
@@ -11,10 +11,7 @@ pub(super) fn parent_of(path: &VfsPath) -> Option<VfsPath> {
     if parent.is_empty() {
         None
     } else {
-        Some(
-            canonicalize_absolute(parent)
-                .unwrap_or_else(|err| panic!("a canonical path's parent canonicalizes: {err}")),
-        )
+        Some(VfsPath::from_canonical(parent))
     }
 }
 
@@ -29,10 +26,7 @@ pub(super) fn may_create(path: &VfsPath) -> Vec<VfsPath> {
             break;
         }
         rest = parent;
-        ancestors.push(
-            canonicalize_absolute(parent)
-                .unwrap_or_else(|err| panic!("a canonical path's parent canonicalizes: {err}")),
-        );
+        ancestors.push(VfsPath::from_canonical(parent));
     }
     ancestors
 }
@@ -57,22 +51,19 @@ pub(super) fn pattern_base(pattern: &VfsPath) -> Vec<VfsPath> {
         return may_create(pattern);
     };
     let base = prefix.trim_end_matches('/');
+    // The cut can end in a `.` or `..` that began a wildcard segment, as
+    // in `/a/..*`. That is a name prefix, not a directory: the matches
+    // are entries of the directory before it.
+    let base = match base.rsplit_once('/') {
+        Some((parent, "." | "..")) => parent,
+        _ => base,
+    };
     if base.is_empty() {
         return Vec::new();
     }
-    let base = canonicalize_absolute(base)
-        .unwrap_or_else(|err| panic!("a canonical pattern's literal prefix canonicalizes: {err}"));
-    let mut bases = vec![base.clone()];
-    let mut rest = base;
-    while let Some((parent, _)) = rest.as_str().rsplit_once('/') {
-        if parent.is_empty() {
-            break;
-        }
-        rest = canonicalize_absolute(parent).unwrap_or_else(|err| {
-            panic!("a canonical pattern's literal prefix canonicalizes: {err}")
-        });
-        bases.push(rest.clone());
-    }
+    let base = VfsPath::from_canonical(base);
+    let mut bases = may_create(&base);
+    bases.insert(0, base);
     bases
 }
 
