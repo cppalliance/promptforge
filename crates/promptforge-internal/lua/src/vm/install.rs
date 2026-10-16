@@ -178,7 +178,7 @@ impl SectionVm {
             + Sync
             + 'static,
         E: std::error::Error + Send + Sync + 'static,
-        P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+        P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
     {
         crate::require::install(
             &self.lua,
@@ -291,7 +291,7 @@ impl SectionVm {
     /// cannot record it.
     pub fn install_lazy_prose<F>(&self, render: F) -> Result<()>
     where
-        F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+        F: Fn(ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
     {
         crate::prose::install(&self.lua, &self.sys_live, render)
     }

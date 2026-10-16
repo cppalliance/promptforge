@@ -21,6 +21,9 @@ default-members = ["crates/gateway/app"]
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
+# The Engine crates' floor, which CI's msrv job builds them at:
+# `promptforge-lua` calls the atomics' `try_update`, stable since 1.95.
+rust-version = "1.95"
 license = "BSL-1.0"
 repository = "https://github.com/cppalliance/promptforge"
 
@@ -72,7 +75,10 @@ workshop-run-log = { path = "crates/workshop/run-log" }
 workshop-agents = { path = "crates/workshop/agents" }
 workshop-user-state = { path = "crates/workshop/user-state" }
 gateway-whisper-ffi = { path = "crates/gateway/stt/whisper-ffi" }
-pulldown-cmark = "0.12"
+# default-features off: both users (the parser and build-xtask's doctest
+# scan) read only the core event stream, never the `html` renderer or the
+# `getopts` binary.
+pulldown-cmark = { version = "0.12", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
 # `float_roundtrip` makes `from_str` reproduce the exact `f64` that
@@ -270,10 +276,12 @@ missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "deny"
 future_incompatible = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
+unescaped_backticks = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -281,6 +289,7 @@ pedantic = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 dbg_macro = "warn"
+todo = "deny"
 undocumented_unsafe_blocks = "deny"
 missing_safety_doc = "deny"
 allow_attributes = "deny"

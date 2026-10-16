@@ -222,7 +222,7 @@ pub fn clear_profile_state(config_path: &Path) -> Result<(), crate::ConfigError>
 pub fn save_config_shadow(
     config_path: &Path,
     mut document: Value,
-    lookup: VarLookupFn,
+    lookup: VarLookupFn<'_>,
 ) -> Result<PendingShadows, crate::ConfigError> {
     let table = document.as_table().ok_or_else(|| {
         crate::ConfigError::validation("pending config must be a TOML table".to_owned())
@@ -264,7 +264,7 @@ pub fn save_config_shadow(
 pub fn load_pending_config(
     config_path: &Path,
     inputs: &ProfileSelection,
-    lookup: VarLookupFn,
+    lookup: VarLookupFn<'_>,
 ) -> Result<Config, crate::ConfigError> {
     let (source_path, raw) = read_pending_or_real(config_path)
         .map_err(crate::ConfigError::from)?

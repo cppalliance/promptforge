@@ -17,7 +17,7 @@ pub type VarLookupFn<'a> = &'a dyn Fn(&str) -> Result<String, std::env::VarError
 /// # Errors
 /// Returns [`ConfigError::Interpolation`] on an unclosed `${...}` and
 /// [`ConfigError::UnresolvedVar`] when a referenced variable is unset.
-pub(super) fn interpolate(input: &str, lookup: VarLookupFn) -> Result<String, ConfigError> {
+pub(super) fn interpolate(input: &str, lookup: VarLookupFn<'_>) -> Result<String, ConfigError> {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {

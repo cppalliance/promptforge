@@ -26,7 +26,7 @@ fn var_x(var: &Json) -> String {
     clippy::unnecessary_wraps,
     reason = "a library prose renderer returns a Result"
 )]
-fn fill_var_x(template: &str, state: ProseState) -> mlua::Result<String> {
+fn fill_var_x(template: &str, state: ProseState<'_>) -> mlua::Result<String> {
     let ProseState { var, .. } = state;
     Ok(template.replace("{{ var.x }}", &var_x(&var)))
 }

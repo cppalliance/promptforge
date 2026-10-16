@@ -71,7 +71,7 @@ impl std::fmt::Debug for ProseState<'_> {
 /// record it.
 pub(crate) fn install<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<()>
 where
-    F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    F: Fn(ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let read = lazy_read(lua, sys_live, render)?;
     crate::globals::install_prose(lua, read)
@@ -88,7 +88,7 @@ where
 /// record it.
 pub(crate) fn swap<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<Value>
 where
-    F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    F: Fn(ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let read = lazy_read(lua, sys_live, render)?;
     crate::globals::replace_prose(lua, Value::Function(read))
@@ -109,7 +109,7 @@ pub(crate) fn restore(lua: &Lua, saved: Value) -> Result<()> {
 /// Returns [`Error::Lua`] if the closure cannot be created.
 fn lazy_read<F>(lua: &Lua, sys_live: &Arc<Mutex<Option<Json>>>, render: F) -> Result<mlua::Function>
 where
-    F: Fn(ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    F: Fn(ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     // The memo slot is per install, so the next fence's install starts
     // unresolved.

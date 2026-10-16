@@ -162,7 +162,7 @@ fn cancelled(cancel: &OnceLock<CancelHandle>) -> bool {
 fn budget_hook(
     fired: Arc<AtomicU64>,
     cancel: Arc<OnceLock<CancelHandle>>,
-) -> impl Fn(&Lua, &mlua::debug::Debug) -> mlua::Result<VmState> {
+) -> impl Fn(&Lua, &mlua::debug::Debug<'_>) -> mlua::Result<VmState> {
     move |_lua, _debug| {
         // Cooperative cancellation: abort a long-running Lua block promptly
         // when the run's CancelHandle is signaled (mapped to

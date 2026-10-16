@@ -391,13 +391,43 @@ jobs:
       - name: Nightly-only fixtures
         run: cargo nextest run --locked -p build-xtask --run-ignored only
 
+  # The Engine crates inherit `rust-version` from the root Cargo.toml's
+  # [workspace.package]; this job builds them at that toolchain. The version
+  # is read from the manifest, never repeated here, so the two cannot drift.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the declared floor
+        id: floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          floor="$(sed -n 's/^rust-version = "\([0-9.]*\)"$/\1/p' Cargo.toml)"
+          if [[ ! "$floor" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "expected one rust-version in the root Cargo.toml, found: '$floor'"
+            exit 1
+          fi
+          echo "floor=$floor" >> "$GITHUB_OUTPUT"
+          echo "RUSTUP_TOOLCHAIN=$floor" >> "$GITHUB_ENV"
+
+      - name: Install the floor toolchain
+        run: rustup toolchain install "${{ steps.floor.outputs.floor }}" --profile minimal
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Build the Engine crates at the floor
+        run: cargo build --locked -p promptforge -p promptforge-engine -p promptforge-lua -p promptforge-parser -p promptforge-types -p promptforge-vfs -p promptforge-model-client
+
   # Single required status check for branch protection: it fails when any
   # job fails or is cancelled, so a cancelled job cannot read as green.
   # needs: is a static list, so every newly added job must be added to it
   # or that job bypasses this gate.
   ci-green:
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface]
+    needs: [fmt, clippy, test, docs, check-workshop, check-workshop-linux, ui, supply-chain, api-surface, msrv]
     if: always()
     steps:
       - name: Verify every job succeeded

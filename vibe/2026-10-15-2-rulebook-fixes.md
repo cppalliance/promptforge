@@ -960,7 +960,7 @@ Paths starting `L/` are under `crates/promptforge-internal/lua/src/`.
 </step-10>
 <step-11>
 
-### Step 11: workspace manifests and lints
+### Step 11: workspace manifests and lints [completed]
 
 - Component: `workspace`
 - Tests: Verify runs these from the repository root in PowerShell, in this order, beside the FULL-scope commands in the Project Survey. A search passes only when it prints nothing.

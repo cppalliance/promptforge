@@ -76,7 +76,7 @@ pub(crate) fn install<R, E, P>(
 where
     R: Fn(String, Option<LibraryKey>) -> std::result::Result<Library, E> + Send + Sync + 'static,
     E: std::error::Error + Send + Sync + 'static,
-    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let loading = Loading::default();
     let resolve = resolve_capture(lua, resolver, &loading)?;
@@ -196,7 +196,7 @@ fn prose_captures<P>(
     sys_live: &Arc<Mutex<Option<Json>>>,
 ) -> Result<(Function, Function)>
 where
-    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let render = Arc::new(render);
     let sys_live = Arc::clone(sys_live);

@@ -66,7 +66,7 @@ pub struct LuaProgram {
     /// maps through and stay under the 45 bytes Lua keeps whole.
     chunk_name: String,
     /// Parser location string that mapped runtime errors name (for example
-    /// `section \`Web Search\` epilog`).
+    /// ``section `Web Search` epilog``).
     location: String,
     /// 1-based line number in the prompt source where this Lua region begins.
     ///

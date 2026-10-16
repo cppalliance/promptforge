@@ -82,7 +82,7 @@ fn require_vm(entries: Vec<Entry>, emitter: &Emitter) -> (BuiltVm, Calls) {
 #[track_caller]
 fn require_vm_rendering<P>(entries: Vec<Entry>, render: P, emitter: &Emitter) -> (BuiltVm, Calls)
 where
-    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     let calls = Calls::default();
     let vm = TestVm::new().shims().build();

@@ -181,7 +181,7 @@ impl Config {
     pub(crate) fn parse_toml_with_lookup(
         raw: &str,
         path: Option<&Path>,
-        lookup: VarLookupFn,
+        lookup: VarLookupFn<'_>,
     ) -> Result<Config, ConfigError> {
         // Parse first, then interpolate only string *values*. Interpolating the
         // raw text would expand `${VAR}` inside comments and keys, and an
@@ -196,7 +196,10 @@ impl Config {
 
     /// Interpolates string leaves, deserializes, and validates an already
     /// parsed TOML document.
-    fn from_value(mut document: toml::Value, lookup: VarLookupFn) -> Result<Config, ConfigError> {
+    fn from_value(
+        mut document: toml::Value,
+        lookup: VarLookupFn<'_>,
+    ) -> Result<Config, ConfigError> {
         interpolate_value(&mut document, lookup)?;
         let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
             path: None,

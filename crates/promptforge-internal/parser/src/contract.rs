@@ -82,7 +82,7 @@ where
 {
     type Value = BTreeMap<String, T>;
 
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "a map of {} keys to declarations",

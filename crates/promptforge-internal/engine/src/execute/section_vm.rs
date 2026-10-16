@@ -124,7 +124,7 @@ where
         + Send
         + Sync
         + 'static,
-    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     // The raw-model-id fallback reads its flag during Engine injection, so
     // the snapshot's opt-in lands first.
@@ -162,7 +162,7 @@ where
         + Send
         + Sync
         + 'static,
-    P: Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static,
+    P: Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static,
 {
     vm.install_engine_globals(setup.emitter, setup.section_name)?;
     if let Some(snapshot) = setup.ui {

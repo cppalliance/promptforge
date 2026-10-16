@@ -165,7 +165,7 @@ impl SectionContext {
         let template = template.to_owned();
         let render = prose_renderer(ctx, self.item.clone());
         self.vm()?
-            .install_lazy_prose(move |state: ProseState| render(&template, state))?;
+            .install_lazy_prose(move |state: ProseState<'_>| render(&template, state))?;
         Ok(())
     }
 
@@ -232,10 +232,10 @@ impl SectionContext {
 fn prose_renderer(
     ctx: &RunState,
     item: Option<serde_json::Value>,
-) -> impl Fn(&str, ProseState) -> mlua::Result<String> + Send + Sync + 'static {
+) -> impl Fn(&str, ProseState<'_>) -> mlua::Result<String> + Send + Sync + 'static {
     let raw_args = ctx.args_shared();
     let argv = ctx.argv_shared();
-    move |template: &str, state: ProseState| -> mlua::Result<String> {
+    move |template: &str, state: ProseState<'_>| -> mlua::Result<String> {
         let globals = |name: &str| (state.globals)(name).map_err(Error::from);
         let sources = subst::Sources {
             args: &raw_args,

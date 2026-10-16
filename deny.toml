@@ -2,7 +2,7 @@
 # Run locally with `cargo deny check`; CI runs the same. See PF-ROOT-008.
 
 [graph]
-# Check the dependency graph for all targets, not just the host.
+# Check the dependency graph with all features enabled, not just the defaults.
 all-features = true
 
 [advisories]

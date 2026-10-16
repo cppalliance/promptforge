@@ -2,6 +2,7 @@
 name = "promptforge-parser"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
@@ -19,6 +20,9 @@ mlua.workspace = true
 promptforge-lua = { workspace = true, features = ["test-support"] }
 
 [features]
+# `test_support`, the synthetic section constructors, the prompt source
+# builder, and the parse assertions, for companion crates' tests;
+# `promptforge-engine` enables it from `[dev-dependencies]` only.
 test-support = []
 
 [build-dependencies]
