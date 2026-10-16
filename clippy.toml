@@ -8,7 +8,9 @@ allow-expect-in-tests = true
 disallowed-methods = [
     { path = "std::panic::set_hook", reason = "use a returned error instead, because the panic hook is process-global state that only a binary entry point may install" },
     { path = "log::set_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
-    { path = "log::set_boxed_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install" },
+    # `allow-invalid`: `set_boxed_logger` exists only under an optional `log`
+    # feature, so some builds cannot resolve the path.
+    { path = "log::set_boxed_logger", reason = "use the `log` macros and let the binary entry point install the logger instead, because the logger is process-global state that only a binary entry point may install", allow-invalid = true },
     { path = "tracing::subscriber::set_global_default", reason = "use `tracing::subscriber::with_default` instead, because the global default subscriber is process-global state that only a binary entry point may install" },
     { path = "tracing_subscriber::util::SubscriberInitExt::init", reason = "use `tracing::subscriber::with_default` instead, because `init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
     { path = "tracing_subscriber::util::SubscriberInitExt::try_init", reason = "use `tracing::subscriber::with_default` instead, because `try_init` installs the global default subscriber and logger, process-global state that only a binary entry point may install" },
