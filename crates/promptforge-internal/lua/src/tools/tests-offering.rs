@@ -5,10 +5,10 @@
 use mlua::{Lua, Value, Variadic};
 use promptforge_types::plugins::PluginId;
 
-use super::super::decode::collect_offer_entries;
 use crate::ToolBinding;
 use crate::handles::ToolSet;
 use crate::test_vm::{lua_over, scoped, tool_at};
+use crate::tools::decode::collect_offer_entries;
 
 /// A set declaring the Plugin `web` and offering its two tools beside the
 /// two of the undeclared Plugin `gh`, in id order, under their wire names.

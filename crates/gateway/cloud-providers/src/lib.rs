@@ -3,8 +3,10 @@
 //!
 //! One Rust file per provider; each file defines a public descriptor while
 //! auth header shape, pagination, and response mapping stay private to the
-//! file. The crate does double duty: a library linked into the Gateway, and
-//! a binary the aggregation workflow compiles and runs.
+//! file. No other crate links the library. Its `shared-cloud-providers`
+//! binary builds the cloud model sheet (`cloud-provider-models.json`), a
+//! weekly workflow in the separate `cppalliance/promptforge-cloud-providers`
+//! repository publishes it, and the Gateway downloads the published sheet.
 
 use gateway_api_types::{EnvRole, ModelEntry, Tier};
 

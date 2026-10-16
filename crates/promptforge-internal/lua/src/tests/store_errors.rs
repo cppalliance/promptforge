@@ -245,7 +245,7 @@ fn store_error_values_carry_reason_fields_and_message_for_each_reason() {
             error: VfsError::NoStore,
             reason: "no_store",
             fields: Vec::new(),
-            message: "no store is declared, so no store operation can run",
+            message: "this run declares no store, so no store operation can run",
         },
         Case {
             error: VfsError::CrossMount {

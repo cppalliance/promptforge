@@ -89,12 +89,12 @@ impl TaskBuiltin {
 /// until `tools.allow_tasks` has run in the section.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] when the runtime's mutex is poisoned.
+/// Returns [`Error::Internal`] when the runtime's mutex is poisoned.
 pub(super) fn task_allowlist(vm: &SectionVm) -> Result<Option<TaskAllowlist>> {
     let runtime = vm
         .tool_runtime()
         .lock()
-        .map_err(|error| Error::Lua(format!("tool declaration runtime was poisoned: {error}")))?;
+        .map_err(|_| Error::internal("tool declaration runtime was poisoned"))?;
     Ok(runtime.allowed_tasks.clone())
 }
 

@@ -101,6 +101,11 @@ impl StoreShared {
     }
 }
 
+/// The model-facing message for [`VfsError::NoStore`], with or without an
+/// operation to render: [`store_error_message`] and [`store_probe_message`]
+/// both answer with it.
+const NO_STORE_MESSAGE: &str = "this run declares no store, so no store operation can run";
+
 /// The model-facing message for a failed store operation: what failed and,
 /// when there is a fix, how to make it, so the text a model reads names
 /// both. The operation supplies the wording its call surface promises (a
@@ -160,7 +165,7 @@ pub fn store_error_message(op: &VfsOp, error: &VfsError) -> String {
         VfsError::RootProtected { path } => {
             format!("the store's mounted root cannot be removed, renamed, or replaced: {path}")
         }
-        VfsError::NoStore => "no store is declared, so no store operation can run".to_owned(),
+        VfsError::NoStore => NO_STORE_MESSAGE.to_owned(),
         VfsError::CrossMount { path, detail } => {
             format!("store operation on {path} spans two mounts: {detail}")
         }
@@ -181,7 +186,7 @@ pub fn store_error_message(op: &VfsOp, error: &VfsError) -> String {
 #[must_use]
 pub fn store_probe_message(error: &VfsError) -> String {
     match error {
-        VfsError::NoStore => "this run declares no store, so no store operation can run".to_owned(),
+        VfsError::NoStore => NO_STORE_MESSAGE.to_owned(),
         _ => format!("store operation failed: {error}"),
     }
 }
